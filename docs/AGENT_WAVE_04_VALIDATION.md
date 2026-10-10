@@ -247,24 +247,40 @@ besitzen sealed Zustand im bisherigen Ownerslot und native Capture-/Restore-
 APIs; Drops/Pickup/Physics/Tracking/Apppersistenz werden dadurch noch nicht
 ausgeführt. Die frühere Gesamt-CI9025 enthält diese Runtime noch nicht.
 
-STORAGE-ENTITY001.2 ist implementiert und eingefroren: Autoren-Debug und
-unabhängiges Rootrelease jeweils243 Tests grün. Rootrelease aufd9feaa82 plus
-13 eingefrorenen Files, Log `.codex-tmp/storage-entity001_2-root-release.log`.
-Der separate Codereview läuft noch; daher noch keine CLEAN-/Integrationmeldung.
+STORAGE-ENTITY001.2 ist nach unabhängigem
+[Review](agent-tasks/STORAGE-ENTITY001_2_UUID_MIGRATION_REVIEW.md) CLEAN als
+`34acc8e9` integriert. Eigene Reviewer-Debugprüfung und unabhängiges Rootrelease
+jeweils243 Tests grün, zusätzlich fünf Runtimeprobes und drei negative
+Authority-Compilerprobes. Strict Clippy/Fmt und aktueller13-Dateien-Freeze
+bestätigt. Rootrelease aufd9feaa82 plus13 eingefrorenen Files, Log
+`.codex-tmp/storage-entity001_2-root-release.log`. Der offline4→5-Producer
+aktiviert keinen App-/Gameplayconsumer.
+
+Gesamt-CI für `83ea2c6d2a1c251da956a94c06fe8a7891530260` ist erfolgreich:
+[Lauf38081893560](https://github.com/jstrausd/ferrumc/actions/runs/38081893560).
+Sie umfasst SIM-03.3, alle bisherigen Workspace-/Java-/Generator- und sieben
+Client-/Neustartgates; STORAGE-ENTITY001.2 und GEN-05.2 gehören nicht zu diesem
+Head. Ein neuer Gesamtlauf für `34acc8e9` ist angefordert.
 
 ## Laufende Folgearbeit
 
-- `feature_catalog`: SIM-03.3/SRV-02.1 nach Rootreview CLEAN integriert84967c54;
-  jetzt unabhängiger STORAGE-ENTITY001.2-Codereview an eingefrorener Produktion.
-- `item_transfer_primitives`: GEN-04.3 originale kubische Splines integriert;
-  GEN-05.1-Compiler unabhängig CLEAN geprüft und als `c4e3dc76` integriert.
-  Der separate echte JAR-Codec- und Strukturoracle-Auftrag ist beendet.
-  Jetzt freigegebene GEN-05.2-Seed-/Scalar-/Climateumsetzung; danach
-  NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
-- `gen05_2_router_oracle`: ersetzt den abgeschlossenen .2-Storageautor im dritten
-  Childslot; erweitert das echte Original-JAR-Orakel unter getrenntem
-  fünf-Dateien-Besitz. `select_world_ticket` hält seine .2-Produktion bis zum
-  Review unverändert. Atomare Inventory↔Entity-CAS-/Receipttransfers folgen.
+- `feature_catalog`: STORAGE-ENTITY001.2 unabhängig CLEAN abgeschlossen;
+  jetzt read-only GEN-05.2-Codereview. Isolierter Snapshot folgt dem finalen
+  Autorenfreeze. Root führt frische normal/-O Original-JAR-Reexports aus.
+- `item_transfer_primitives`: GEN-05.2-Seed-/Scalar-/Climateumsetzung deckt
+  sämtliche17.213 Oracle-Records lokal ab. Finale Debug-/Release-/strictchecks
+  und Freeze laufen; nach CLEAN NoiseChunk/Interpolation, Aquifers,
+  Material/Ore und Surface/Biome bis zu echter Chunkgeneration.
+- `select_world_ticket`: konkreter DUR-03.1-API-/Schemaentwurf für atomare
+  Player↔Entity-Ownership. Eigener versionierter Modus mit scoped Player,
+  Revisionen/Tombstones und bounded idempotenten Receipts; Rootdesignreview
+  vor Runtimecode. Danach DUR-04 Reservation/Pending/Ack und DUR-05 Appdriver.
+
+Der Oracleagent `gen05_2_router_oracle` ist beendet und besitzt keine aktive
+Runtimeaufgabe. Seine fünf Referenzdateien sind eingefroren:17.213 tatsächliche
+Original-JAR-Records, normal/-O Fixture und Manifest bytegleich,27 originale
+Class-CodeSources plus frischer Helper sowie acht Negativguards in beiden
+Pythonmodi geprüft. Dies ist kein Terrain-/Paper-End-/Spielbarkeitclaim.
 
 Drop/Pickup, Mining/Loot/Crafting, Physik/Tracking/Kampf/Mobs und sämtliche
 Dimension-/Bossconsumer bleiben anhand des [Katalogs](MINECRAFT_FEATURE_CATALOG.md)

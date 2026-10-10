@@ -125,28 +125,34 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | SIM-03.2 | `feature_catalog`, Review `select_world_ticket` und Root | `server/crates/ferrumc-sim/**`, eigenes Taskdoc | Geprüft und integriert `916251da`: begrenzter UUID-/Wire-/Handle-/Chunkindex und Tickadmission. Fremdreview CLEAN nach F1-RED→GREEN; unabhängige Debug-/Releaseprüfung jeweils227 und12.000 Modellinterleavings grün. Keine aktivierten Mobs oder Itemconsumer. |
 | GEN-04.3 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigenes Taskdoc | CLEAN geprüft und integriert245134eb:163 Worlddebugtests, Rootrelease20 und bytegleicher Originalreexport. Zusätzlich32 Graphen/4294 Originalrecords einschließlich3462Samples/160Sourceexceptions; strictchecks nach dokumentarischem F1 grün. CI des Gesamtstands3a5b4d62 erfolgreich; Terrainaktivierung bleibt offen. |
 | STORAGE-ENTITY001.1 | `select_world_ticket`, Review `feature_catalog` und Root | `server/crates/ferrumc-storage/**`, eigenes Taskdoc | CLEAN geprüft und integriert `a5d11819`: unabhängige Debug-/Releaseprüfung je212 Tests plus9 eigene Probes,39 echte Writeabortcutpoints und Lostreply/Reopen; strictchecks grün. Fresh/strict Format5-UUIDproducer mit bounded Pages und Indizes; vorhandenes Format4 unverändert verweigert. Migration/Gameplaytransfers bleiben getrennt. |
-| STORAGE-ENTITY001.2 | Autor `select_world_ticket`, Fremdreview `feature_catalog` | `server/crates/ferrumc-storage/**`, eigener .2-Brief | Implementiert und eingefroren; Autoren-Debug und unabhängiges Rootrelease je243 Tests grün. Voller Validator, geschlossenes Backup, immutable344-Byte-Checkpoint, bounded Prüfkopien und exakte Delta/Resume. Unabhängiger Codereview noch offen; keine automatische Appmigration. |
+| STORAGE-ENTITY001.2 | Autor `select_world_ticket`, Fremdreview `feature_catalog` und Root | `server/crates/ferrumc-storage/**`, eigener .2-Brief | Unabhängig CLEAN und integriert `34acc8e9`: Debug/Release je243 Tests, fünf zusätzliche Runtimeprobes und drei Authority-Compilerprobes grün. Voller Validator, geschlossenes Backup, immutable344-Byte-Checkpoint, bounded Prüfkopien und exakte Delta/Resume. [Review](agent-tasks/STORAGE-ENTITY001_2_UUID_MIGRATION_REVIEW.md); keine automatische Appmigration. |
 | REG-WORLDGEN001 | `feature_catalog`, Review Root | `server/crates/ferrumc-registry/**`, eigenes Taskdoc | CLEAN geprüft und auf main integriert555ee2aa:60 Noiseparameter,35 Densityresources und7 Noisesettings. Root Debug/Release jeweils69,4 eigene negative/Bitproben, strictchecks und102 Originalressourcen normal/-O grün. Statische Daten; Worldcompiler/Terrainaktivierung bleiben offen. |
 | GEN-05.1 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Unabhängig CLEAN und integriert `c4e3dc76`: alle35 Definitionen/7 Router,128 tatsächliche Original-JAR-Records, Debug/Release je177 und3 eigene Probes grün. Frischer Originalreexport normal/-O bytegleich, Freeze17/17 und strictchecks grün. [Review](agent-tasks/GEN-05_1_DENSITY_COMPILER_REVIEW.md); Seed-/Sample-/Chunkconsumer folgen. |
-| GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | [Konkreter Seed-/Scalar-/Climatevertrag](agent-tasks/GEN-05_2_SEEDED_ROUTER_APPROVAL.md) vollständig geprüft und freigegeben; Runtimeumsetzung begonnen. Zwei originale Visitorviews, shared Workmeter, alle7 Settings/35 Definitionen gegen echtes JAR. Chunkwrapper/Terrainaktivierung bleiben .3 und weiteren Consumern zugeordnet. |
+| GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | [Konkreter Seed-/Scalar-/Climatevertrag](agent-tasks/GEN-05_2_SEEDED_ROUTER_APPROVAL.md) vollständig geprüft und freigegeben; vollständiger Originalcorpus lokal grün, Autor finalisiert Gesamtchecks und Freeze. Unabhängiger Codereview begonnen. Zwei originale Visitorviews, shared Workmeter, alle7 Settings/35 Definitionen gegen echtes JAR. Chunkwrapper/Terrainaktivierung bleiben .3 und weiteren Consumern zugeordnet. |
+| DUR-03.1 | `select_world_ticket`, Designreview Root | zunächst nur eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | API-/Schemaentwurf läuft: eigener Ownershipmodus mit explizitem Playerscope, dauerhaften Revisionen/Tombstones und bounded Retryreceipts; kein Produktionswriter oder Onlineconsumer aktiviert. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
 Aktuell arbeiten neben Root der Weltagent `item_transfer_primitives`,
-der unabhängige Storagereviewer `feature_catalog` und der Original-JAR-
-Oracleagent `gen05_2_router_oracle`. Die beiden früheren Implementierungen
-sind eingefroren; SIM-03.3 ist integriert, STORAGE-ENTITY001.2 wird unabhängig
-geprüft. Der Oracleagent besitzt genau fünf Referenz-/Fixturedateien getrennt
-vom Runtimebesitz des Weltagenten. Der Weltagent korrigiert die belegte
-registered-/decoded-Herkunft mit162 sparse Nativevarianten unter unveränderten
-Graphcaps; alle sieben vollständigen Originalprojections passen lokal.
-Die Vergabe überschreitet drei Childslots nicht.
+der unabhängige Weltreviewer `feature_catalog` und der Storageagent
+`select_world_ticket`. STORAGE-ENTITY001.2 ist CLEAN integriert; der
+Storageagent konkretisiert jetzt [DUR-03.1](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md)
+für einen scoped Player↔Entity-CAS-/Receiptwriter. Produktion startet nach
+vollständigem Rootdesignreview. Der Original-JAR-Oracleagent ist fertig:
+17.213 Records, fünf eingefrorene Referenzdateien, normal/-O bytegleich.
+GEN-05.2 deckt den ganzen Corpus lokal ab und wird unabhängig geprüft; Root
+führt frische Original-JAR-Reexports aus. Nach CLEAN folgen unmittelbar
+NoiseChunk/Interpolation und die Terrainconsumer. Die Vergabe überschreitet
+drei Childslots nicht.
 
 Root hat die integrierte Runtime `62a5b74d` in einem detached Checkout
 geprüft: 2.304 Tests, 38 Doctests, strict Clippy/fmt und Generatorcheck grün,
 getrennt von aktiven Agentänderungen. Gesamt-CI für `9025c687`, einschließlich
 UUID-Storageproducer und Densitycompiler, ist erfolgreich:
 [Lauf38080572897](https://github.com/jstrausd/ferrumc/actions/runs/38080572897).
-Die drei laufenden Folgeconsumer sind darin noch nicht enthalten.
+Der neuere Gesamtstand `83ea2c6d` mit SIM-03.3 ist ebenfalls vollständig grün:
+[Lauf38081893560](https://github.com/jstrausd/ferrumc/actions/runs/38081893560).
+STORAGE-ENTITY001.2 ist darin noch nicht enthalten; neue Gesamt-CI für
+`34acc8e9` ist angefordert. GEN-05.2 bleibt noch unintegriert.
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.
