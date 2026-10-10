@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(c.content(), "hello");
         assert_eq!(c.to_plain_string(), "hello");
         assert!(c.color().is_none());
-        assert!(c.children().is_empty());
+        assert_eq!(c.children().len(), 0);
     }
 
     #[test]
