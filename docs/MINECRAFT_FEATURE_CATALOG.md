@@ -455,9 +455,10 @@ Artefakte und verbleibende Grenzen stehen im
 | SIM-03.2a (REG-ENTITY001) | F | [Entitytypenproducer](agent-tasks/REG-ENTITY001_ENTITY_TYPES.md), `cd32fbd2`: alle 151 Entitytypen generiert, opaquer geprüfter Typ und allocfreie Lookup-/Iterationsverträge; Rootcontracts8 und Originalreexport grün, Review CLEAN. Keine aktive Entitysimulation. |
 | GEN-04.2 | F | [Normal-/Simplex-/Blendednoise](agent-tasks/GEN-04_2_NORMAL_SIMPLEX_BLENDED.md), `09fd6657`: 153 Worldtests, 16.974 bitgenaue Original-JAR-Records, unabhängiger Rootreexport und zusätzliche Fremdreviewfälle grün. Review CLEAN; Densityrouter und Terrainconsumer bleiben offen. |
 | GEN-12.1 (WG-004) | F | [Generation-Appanbindung](agent-tasks/WG-004_APP_GENERATION.md), `62a5b74d`: gespeicherter Seed/Format4 vor Import/Spawn/Netzwerk, verifizierte Capture-/Writer-/Stopverträge und explizite Offline-CLI. Fremdreview CLEAN, sieben Rootclientharnesses und Migration/Read-only-Restartprobe grün. Nur Flat-v1 aktiv; natürliche Welt und vollständige GEN-12-Abnahme bleiben offen. |
-| SIM-03.2 | V | [Entityownership](agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md): shardbesessener begrenzter UUID-/Wire-/Chunkindex und generationaler Storehandle; im Fremdreview. F1-Scopeentry-Fix und unabhängige RED→GREEN-Probe vor Integration. Persistenz, Physik, Tracking und Mobs folgen separat. |
-| GEN-04.3 | A | [Kubische Splines](agent-tasks/GEN-04_3_CUBIC_SPLINES.md): `item_transfer_primitives` implementiert originales begrenztes f32-Splineprimitive; Rootdesignprüfung erfolgt. Density-/Terrainconsumer bleiben getrennt. |
-| STORAGE-ENTITY001 | O | `select_world_ticket` erstellt [Schema-/APIentwurf](agent-tasks/STORAGE-ENTITY001_UUID_PERSISTENCE_DESIGN.md). UUIDbasierte Entitypersistenz mit Chunkindex und expliziter Formatmigration; noch keine Produktionsvergabe. DUR-03 atomare Transfer-/Versionsauthority folgt separat. |
+| SIM-03.2 | F | [Entityownership](agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md), `916251da`: shardbesessener begrenzter UUID-/Wire-/Chunkindex und generationaler Handle; Review CLEAN nach F1-RED→GREEN. Unabhängig Debug/Release jeweils227 und12.000 Modellinterleavings grün. Keine aktive App-/Mobsimulation; persistente Komponenten/Physik/Tracking folgen separat. |
+| GEN-04.3 | V | [Kubische Splines](agent-tasks/GEN-04_3_CUBIC_SPLINES.md): originales begrenztes f32-Splineprimitive implementiert und eingefroren; unabhängiger Review durch Root läuft. Density-/Terrainconsumer bleiben getrennt. |
+| STORAGE-ENTITY001.1 | A | [UUID-Storageproducer](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE.md): `select_world_ticket` übernimmt fresh/strict Format5 nach unabhängiger Designprüfung/R1–R4. Vorhandene Format4-Welten bleiben unverändert; explizite Migration .2 und DUR-03-CAS-/Receiptauthority folgen getrennt. |
+| REG-WORLDGEN001 | A | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md): `feature_catalog` übernimmt Buildzeitproducer für60/35/7 Originalresources; konkretes API vor Production. Keine aktive Terrainpipeline. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
@@ -472,9 +473,9 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Entityagent `feature_catalog` | SIM-03.2, STORAGE-ENTITY001-Designreview | F1-Fix vor Integration, read-only Designreview | Sim-Crate und eigenes Taskdoc; getrennt eigener Storage-Designreviewreport. REG-ENTITY001 integriert; Persistenz und Mobs noch offen. |
-| Storageagent `select_world_ticket` | SIM-03.2-Fremdreview | read-only Review | Nur eigener Reviewreport und Scratchprobes; UUIDschemaentwurf geliefert, Productionvergabe folgt nach Designreview. |
-| Weltagent `item_transfer_primitives` | GEN-04.3 | in Umsetzung, Design freigegeben | Nur World-Crate und eigenes Taskdoc; WG-004-Review abgeschlossen. Terrainconsumer noch offen. |
+| Registryagent `feature_catalog` | REG-WORLDGEN001 | in Umsetzung, Design freigegeben | Registry-Crate und eigenes Taskdoc; SIM-03.2 und Storage-Designreview abgeschlossen. |
+| Storageagent `select_world_ticket` | STORAGE-ENTITY001.1 | in Umsetzung, Design freigegeben | Storage-Crate und eigener .1-Brief; SIM-03.2-Fremdreview abgeschlossen. Migration .2 und Gameplaytransfers noch offen. |
+| Weltagent `item_transfer_primitives` | GEN-04.3 / GEN-05 | Splinefreeze im Rootreview; nächster Compiler-/Routerentwurf read-only | World-Crate bleibt eingefroren; nur neues GEN-05-Taskdoc. Terrainconsumer noch offen. |
 
 Diese Rollenliste erfasst die drei tatsächlich beauftragten Agents der
 laufenden Welle. Reviews nutzen frei gewordene Slots. Root aktualisiert Agentname,

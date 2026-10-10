@@ -1,7 +1,8 @@
 # Vierte Agentenwelle: Generation-Apppfad und Entitygrundlagen
 
 Stand: 10.10.2026. Minecraft Java1.21.8 / Protokoll772 / DataVersion4440.
-Ausgangspunkt `fb0e96e0`; neue integrierte Runtimebasis **`62a5b74d`**.
+Ausgangspunkt `fb0e96e0`; kombiniert geprüfte Runtimebasis **`62a5b74d`**.
+Danach separat geprüfte Entitygrundlage als **`916251da`** integriert.
 Root orchestriert Review, Tests und Git; Produktionscode schreiben die Agents.
 Branch bleibt ausschließlich `main`.
 
@@ -18,6 +19,7 @@ keinen Nether-/Endfortschritt und keine vollständige Java-/Paper-API.
 | REG-ENTITY001, `cd32fbd2` | Opaquer EntityTypeId und alle 151 Entitytypen aus dem gepinnten Originalreport generiert; allocfreie Name-/Wirelookups und vollständige Iteration. Strikte Generatorvalidation. Agent37 Unit/3 Build/5 Public/8 Doc; Rootreview CLEAN, acht zusätzliche öffentliche Contracts und unabhängiger Originalreexport grün. Freeze13/13 identisch. | Producer für SIM-03.2; keine Entitykomponenten, Physik, Tracking oder Mobs. |
 | GEN-04.2, `09fd6657` | Normal-, Simplex- und BlendedNoise mit originaler Auswertungsreihenfolge und RNG. 153 Worldtests; Releasebestand134 und strictchecks grün. 16.974 tatsächliche Original-JAR-Records. Root Python-`-O`-Reexport von Fixture/Manifest bytegleich und Publiccontracts7 grün. Fremdreview CLEAN, Freeze12/12 identisch. | Zusätzliche explizite FerrumC-Ressourcengrenzen. Noch keine Densityrouter, Aquifers, Surface/Biome oder natürliche Chunkgenerierung. |
 | WG-004, `62a5b74d` | Produktiver Format4-Start, gespeicherte Seedautorität, überprüfte Generatorbindung vor Import/Spawn/Connections. Verifizierte Tickcapture und Storezuordnung, Retry-/Unload-/Stopbarrieren sowie explizite Offline-Migration. Fremdreview CLEAN; sieben Rootclientharnesses und zusätzliche echte Migration/Read-only-Restartprobe grün. Freeze26/26 identisch. | Nur Flat-v1 aktiviert. Keine automatische Migration oder Reparatur; keine gemeinsame Player-/Worldcrashtransaction und kein Prozesskillnachweis. |
+| SIM-03.2, `916251da` | Begrenzte shardbesessene Non-playerregistrierungen, UUID-/Wire-/Chunkindizes, generationaler Incarnationhandle und residenter Tickentry. 164 Unit + 56 Integration + 3 Doc beim Implementer; unabhängige Debug-/Releaseprüfung jeweils227 einschließlich vier eigener Probes. Review CLEAN nach unveränderter F1-RED→GREEN-Probe; Freeze7/7 identisch. | Noch keine Appaktivierung, Living-/Itemkomponenten, Speicherung, Tracking, Physik, KI oder Entityevents. |
 
 Originalreferenz: Minecraft1.21.8, Paper Build60/Commit
 `29c8822d90899c89d2689338e81a98f690bcba12`. Vollständige Methoden,
@@ -131,19 +133,53 @@ erneut. Java und Clientnachweise oben betreffen den separat eingefrorenen
 neuen Apppfad. CI für den veröffentlichten Commit wird nach Abschluss ergänzt.
 Die erfolgreiche CI aus Welle3 für `fb0e96e0` ist kein Nachweis für diese Basis.
 
+GitHub-CI für **`ba50369e`**, dieselbe Runtime wie `62a5b74d`, ist erfolgreich:
+[CI-Lauf38073935031](https://github.com/jstrausd/ferrumc/actions/runs/38073935031).
+Alle Rust-/Java-/Tool-/Generator-/Claims- und sieben Clientgates bestanden.
+Dieser Lauf enthält den späteren SIM-03.2-Commit noch nicht. Eine CI für den
+neuen veröffentlichten Gesamtstand folgt getrennt.
+
+## Unabhängige Entityprüfung nach F1-Fix
+
+Der [Entityreviewbericht](agent-tasks/SIM-03_2_ENTITY_OWNERSHIP_REVIEW.md)
+hält Source-/Patch-/Hashmatrix und alle unabhängigen Logs fest. Reviewer
+`select_world_ticket` verwendete eine isolierte Basis `62a5b74d` plus exakt
+sieben SIM-03.2-Freeze-Dateien. Aktive World-/Registryänderungen blieben draußen.
+Debug und Release: jeweils **227 bestanden**, keine fehlgeschlagenen oder
+ignorierten Tests. Davon164 Unit,56 Producerintegration,4 eigene Integration
+und3 Doctests. Strict Alltargetclippy/fmt ebenfalls grün.
+
+F1 wurde unabhängig RED reproduziert: Ein kompletter Austausch der öffentlichen
+Chunkmap auf fremde Welt/Dimension legitimierte die Entityaufnahme und drained
+die Playerinbox. Der Implementer ergänzt die Owner-/Mapscopeprüfung vor der
+Closure und vor Inboxdrain; keine automatische Reparatur. Dieselbe unveränderte
+Probe ist GREEN. Zusätzliche Livehandle-/Neverclosure-/Ticket-/Inboxverträge
+prüfen Welt-, Dimensions- und kombinierte Abweichung sowie erfolgreiche Arbeit
+nach Wiederherstellung der ursprünglichen Map.
+
+Ein eigenes BTreeMap-Modell vergleicht **12.000 deterministische Interleavings**
+über alle64 Buckets und positive/negative Owner mit dem echten Producer.
+Spawn/Move/Remove/Duplicate/Scope/Stale/Clone/Recreate erhalten die erwarteten
+Indizes und Zustände. Eine weitere unabhängige Probe prüft alle151 Typen:
+150 Non-playertypen angenommen, Player verweigert; signed Wireextrema und ±0.
+Das belegt Typ-/Owneridentität und keine Verhaltensimplementation dieser Mobs.
+
 ## Laufende Folgearbeit
 
-- `feature_catalog`: SIM-03.2 Entityownership mit dauerhaftem UUIDtyp,
-  generationalen Handles, Chunkindex und tatsächlicher residenter Tickadmission.
-  Im unabhängigen Review reproduzierte F1 einen kompletten Scopewechsel über
-  `loaded_chunks_mut`: fremde World-/Dimensionchunks legitimierten bisher die
-  Entityaufnahme. Guard vor Closure/Inboxdrain und unveränderte unabhängige
-  RED→GREEN-Probe sind vor Integration erforderlich. Der oben geprüfte
-  Workspace enthält diese noch nicht integrierte Entityimplementation nicht.
+- `feature_catalog`: REG-WORLDGEN001, Originaldatenproducer für60 Noiseparameter,
+  35 Densityresources und7 Noisesettings; API-/Generatorvertrag freigegeben,
+  in Umsetzung. Immutable Originaldefinitionen benötigen noch einen Worldcompiler.
 - `item_transfer_primitives`: GEN-04.3 originale kubische Splines; anschließend
   Densityregistry/-router, NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
-- `select_world_ticket`: read-only UUID-Speicherschema-/Migrationsentwurf;
-  anschließend separat atomare Inventory↔Entity-Transfers, Recovery und Gameplay.
+  Splineimplementation eingefroren, unabhängiger Review durch Root; parallel
+  read-only Design des konkreten Densitycompiler-/Routerconsumers.
+- `select_world_ticket`: STORAGE-ENTITY001.1 fresh/strict UUID-Storageproducer.
+  API-/Mode-/Validatorvertrag freigegeben, in Umsetzung.
+  Root reserviert die vier Präzisierungen des unabhängigen Designreviews;
+  Online prüft angetroffene Beziehungen, Pages sind nach tatsächlichen Bytes
+  begrenzt, Änderungen haben definierte Epoch-/No-opregeln. Explizite4→5-
+  Migration folgt als separates .2-Ticket; keine bestehende Welt wird automatisch
+  umgestellt. Atomare Inventory↔Entity-CAS-/Receipttransfers bleiben danach offen.
 
 Drop/Pickup, Mining/Loot/Crafting, Physik/Tracking/Kampf/Mobs und sämtliche
 Dimension-/Bossconsumer bleiben anhand des [Katalogs](MINECRAFT_FEATURE_CATALOG.md)
