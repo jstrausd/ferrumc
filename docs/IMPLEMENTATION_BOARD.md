@@ -34,7 +34,7 @@ damit zusätzliche Block-, Item- und Entityvarianten nicht vergessen werden.
 | Plugins | Native APIs sowie Bukkit-/Paper-Lifecycle, Loader/Dependencies, Permissions, Services, Rust-tickbasierter Scheduler, World/Entity/Inventory/ItemMeta-APIs, Events/Cancellation/Reentrancy und versionsgebundene CraftBukkit-/NMS-/Packet-Verträge. |
 | Betrieb und Performance | Release-/Upgradeverfahren, Pterodactyl/Wings-Abnahme, Save/Stop/RCON, Diagnostik, Sicherheit, Langläufe und gemessene RAM-/CPU-/Tickzeitvergleiche mit Paper bei gleichem Gameplay-/Pluginumfang einschließlich JVM. |
 
-## Erste Umsetzungstickets
+## Umsetzungstickets
 
 | Ticket | Besitzer | Bereich | Status | Konkrete Abnahme |
 | --- | --- | --- | --- | --- |
@@ -44,7 +44,9 @@ damit zusätzliche Block-, Item- und Entityvarianten nicht vergessen werden.
 | N03 / NET-06.1 | `teleport_confirmation`, Review `feature_catalog` | `ferrumc-app` | Lokal geprüft und integriert, `dff6c824` | Verbindungs-IDs/ACK-Gate, endlicher FIFO-Präfix und Persistenz; Review fand einen fehlenden Antwortflush, echte RED-Regression und Fix, anschließendes Review CLEAN. 357 App-Tests, davon sechs Teleport-Sockettests; Java-Test im App-Gesamtlauf ignoriert, anschließend separat erfolgreich ausgeführt (Wellenbericht). [Ticket](agent-tasks/N03_TELEPORT_CONFIRMATION.md). |
 | PLACE-DOOR-HINGE-CLIENT / BLK-01.2 | `door_client_acceptance`, Review `select_world_ticket` | `tools` | Live geprüft und integriert, `090165bd` | 14 echte Itemplatzierungen, 28 Half-States bei Actor/Observer vor und nach SIGINT-Prozessneustart; zwei saubere Prozessläufe mit identischem Binary-SHA. Review CLEAN, CI-Gate ergänzt. [Bericht](agent-tasks/PLACE-DOOR-HINGE_CLIENT.md). |
 | SIM-DOOR-GOLDEN | `select_world_ticket`, Review Root | `ferrumc-sim` (nur Test) | Lokal geprüft und integriert, `d9cac2c7` | Bestehender Consumertest erwartete die frühere Mittelpunkt-Scharnierseite; vier State-Goldens und Kommentar originalgetreu korrigiert. Keine Produktionslogik geändert. [Ticket](agent-tasks/SIM-DOOR-GOLDEN.md). |
-| WG-002 / GEN-11.1 | Vorbereitung `select_world_ticket`; Umsetzung noch nicht vergeben | `ferrumc-storage` | Spezifiziert, offen | Eigene Generatoridentitätstabelle in explizitem Format 4, atomarer Freshness-/Savevertrag; Format 3 unverändert. Migration ist ein eigenes Ticket. [Spezifikation](agent-tasks/WG-002_GENERATION_METADATA.md). |
+| WG-002 / GEN-11.1 | `select_world_ticket`, Review `item_transfer_primitives` | `ferrumc-storage` | Lokal geprüft und integriert, `dd910fd4` | 146 Crate-Tests, striktes Clippy und Format; unabhängiges Review CLEAN und sieben öffentliche Contracttests separat grün. Eigene Generatoridentitätstabelle in explizitem Format 4, atomarer Freshness-/Savevertrag; produktives Format 3 unverändert. Migration ist ein eigenes Ticket. [Ticket](agent-tasks/WG-002_GENERATION_METADATA.md). |
+| ITEMS-TRANSFER-001 / SRV-01.1 | `item_transfer_primitives`, Review `feature_catalog` | `ferrumc-items` | Lokal geprüft und integriert, `a7f7aa33` | 72 Unit-Tests und drei Doctests; Review CLEAN, unabhängige Probe mit 1.377.792 Mengen-/Capacityfällen und 3.364 Repräsentationsvergleichen. Reine Split-/Transferpläne, keine Gameplayanbindung oder dauerhafte Transfertransaktion. [Ticket](agent-tasks/ITEMS-TRANSFER-001.md). |
+| CAT-02.1 | `feature_catalog`, Review `select_world_ticket` | `scripts`, Originaldaten-Fixtures | Lokal geprüft und integriert, `37c037b9` | 17 Helper- und sieben Inventorytests, Reexport aus frischem Tempdir/kaltem Cache und unabhängiger Reexport/Vollmengenvergleich; Review CLEAN nach ZIP64-/UTF-8-Grenzfix. Vanilla-1.21.8-Referenzdaten und Offline-CI-Gate; weitere Kategorien und Gameplayconsumer offen. [Ticket](agent-tasks/CAT-02_1_ORIGINAL_CONTENT.md). |
 | NET-06.2 | Noch nicht vergeben | Producer/Consumer getrennt vor Vergabe | Offen | Gemeinsame Epoch-/Move-Admission-Autorität für externe Teleports nach dem endlichen Queue-Snapshot. NET-06 bleibt insgesamt T; bestehendes App-ACK-Gate ist keine globale atomare Tickreihenfolge. |
 
 WG-001 wird anschließend durch getrennte Storage-, Sim- und App-Tickets
@@ -58,6 +60,21 @@ lokale Ergebnisse, unabhängige Clientartefakte und die verbleibenden Grenzen
 fest. GitHub-CI prüft den veröffentlichten Commit auf `main`; ein älterer
 Workflowlauf ist kein Nachweis für diesen neuen Stand.
 
+## Abgenommene zweite Welle
+
+Ausgangspunkt ist `d96228b8`; die CI der ersten Welle ist erfolgreich.
+Die drei obigen Agents waren tatsächlich beauftragt. WG-002 besaß nur die
+Storage-Crate und sein Taskdokument; ITEMS-TRANSFER-001 besitzt nur die
+Items-Crate und sein Taskdokument. CAT-02.1 besaß Export-/Inventory-Tooling,
+zugehörige Originaldaten und sein Taskdokument. Root besitzt dieses Board,
+den Featurekatalog und den gemeinsamen Prüfbericht. Nur Root verändert Git.
+
+Die Agents prüften jeweils fremde Implementierungen; alle drei Reviews sind
+CLEAN. Der [Prüfbericht der zweiten Welle](AGENT_WAVE_02_VALIDATION.md)
+hält gemeinsame Rust-/Java-/Toolprüfungen und vier unabhängige Client- und
+Neustartharnesses fest. Formatmigration, produktive Descriptor-Anbindung, natürliche
+Generierung und dauerhafte Inventory↔Entity-Transfers bleiben eigene Tickets.
+
 ## Nächste abhängigkeitstreue Vergaben
 
 Nach Integration und CI dieser Welle werden freie Slots anhand dieser Reihenfolge
@@ -65,8 +82,8 @@ vergeben. Diese Tabelle ist Planung, keine Behauptung laufender Agents.
 
 | Spur | Nächster begrenzter Schritt | Danach |
 | --- | --- | --- |
-| Welt | WG-002 / GEN-11.1: Metadaten in einer Storage-Crate; vor produktivem Wechsel separate explizite Format-3→4-Migration mit deklarierter Legacybasis | WG-003: Sim verlangt Descriptor vor Regeneration/Overlay; WG-004: App aktiviert Seed/Preset erst nach Migration. Danach GEN-02 Terrain und GEN-04 Original-RNG/Noise. |
-| Originalinhalte und Shapes | CAT-02-Unterticket: gepinnte Entity-/Recipe-/Loot-/Worldgen-Exporte samt reproduzierbaren Pins; anschließend SIM-04-Unterticket für konkrete Shape-/Supportfamilien | SIM-06 Placement, SIM-02 persistente Block-/Fluidticks und SIM-08 Neighborconsumer; darauf Wasser, Wachstum und Redstone. |
+| Welt | WG-002-MIG: explizite Format-3→4-Migration mit deklarierter Legacybasis; WG-002-Metadatenspeicher ist integriert | WG-003: Sim verlangt Descriptor vor Regeneration/Overlay; WG-004: App aktiviert Seed/Preset erst nach Migration. Danach GEN-02 Terrain und GEN-04 Original-RNG/Noise. |
+| Originalinhalte und Shapes | CAT-02.1-Referenzdaten sind integriert; nächste getrennte Vergabe SIM-04 für konkrete Shape-/Supportfamilien, weitere Tags/Registries über CAT-02-Folgetickets | SIM-06 Placement, SIM-02 persistente Block-/Fluidticks und SIM-08 Neighborconsumer; darauf Wasser, Wachstum und Redstone. |
 | Survival | DUR-03-Unterticket: atomarer Inventory↔Entity-Transfer mit Transfer-ID und Recovery; allgemeine Entitygrundlage separat als SIM-03-Unterticket | DUR-04 Simconsumer, DUR-05 App-Wiring, SRV-02 Drop/Pickup; danach Mining/Loot. Recipe-Matcher SRV-05 kann mit vorhandenem Rezeptbestand separat folgen. |
 | Teleportautorität | NET-06.2 zuerst in konkrete Producer-/Consumer-/Wiringtickets zerlegen; deterministische Race-Reproduktion für einen nach Snapshot angenommenen Fremdteleport | Gemeinsame Epochprüfung bei tatsächlicher Sim-Move-Admission; Command-, Plugin-, Korrektur- und Disconnectpfade prüfen. |
 

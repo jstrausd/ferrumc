@@ -89,14 +89,20 @@ lokalen Paper-Checkout.
 
 Der erste Bestandslauf erfasst **1.105 Blocktypen / 27.946 Blockstates,
 1.416 Items, 65 Biome und 245 gerichtete Pakete**. Die IDs sind Datenbestand;
-für Entities, Worldgen-Ressourcen, Rezepte, Loot, Commands, übrige dynamische
-Registries, API/Events und NMS fehlen noch vollständige vendorte Exporte.
+CAT-02.1 ergänzt **151 Entitytypen, 22 Recipe-Serializer, 1.407 Rezepte,
+1.246 Loot Tables, 952 Worldgen-JSONs in 14 Registries, vier Dimensiontypen
+und sechs World Presets** aus dem gepinnten offiziellen Vanilla-Server.
+Die [Exportnotiz](agent-tasks/CAT-02_1_ORIGINAL_CONTENT.md) beschreibt
+Rohbyte-/Vollmengenvergleich, Pins und bewusst unerfasste Inhalte. Tags,
+NBT-Strukturtemplates, weitere Registries, Commands, API/Events und NMS bleiben
+offen; Worldgen/Structures und Loot/Predicates sind deshalb nur teilweise erfasst.
 Die Herkunft des Item-Extraktionsschritts ist nicht im Protokollmanifest
 festgehalten; sein vorhandener Snapshot wird mit eigenem SHA-Pin erfasst,
 die weitergehende Provenienz bleibt CAT-02.
 
 ```sh
 python3 scripts/minecraft-feature-inventory.py --self-test --check
+python3 scripts/minecraft-original-export.py --self-test --check
 # Nach einem bewussten Daten-/Versionupdate neu erzeugen:
 python3 scripts/minecraft-feature-inventory.py
 ```
@@ -124,7 +130,7 @@ enthält keine Uhrzeit, Rechnerpfade oder aus dem Arbeitsstand erfundene Status.
 | Ticket | Status | Owner | Voraussetzung | Umfang und konkrete Abnahme |
 | --- | --- | --- | --- | --- |
 | CAT-01 | T | tools | – | Repo-Bestände für Blocks/States, Items, Biome und Pakete deterministisch erfassen; Pins/Hashes prüfen, `--check` und Selftests. Fehlende Kategorien sichtbar lassen. |
-| CAT-02 | O | tools | CAT-01 | Gepinnte Vanilla-/Paper-Registry- und Datapack-Exporte ergänzen: Entities, Worldgen/Structures, Recipes, Loot, Commands, Gamerules, Effects/Enchants/Attributes, Advances/Stats und Serializer; IDs/Hashes reproduzierbar, keine lokale Referenz still voraussetzen. |
+| CAT-02 | T | tools | CAT-01 | Gepinnte Vanilla-/Paper-Registry- und Datapack-Exporte ergänzen: Entities, Worldgen/Structures, Recipes, Loot, Commands, Gamerules, Effects/Enchants/Attributes, Advances/Stats und Serializer; IDs/Hashes reproduzierbar, keine lokale Referenz still voraussetzen. |
 | CAT-03 | O | tools | CAT-02 | Inhalt-ID→Verhaltensticket/Consumer/Save/Fixture-Matrix mit Status führen; absichtliche familienweite Verträge nur mit allen Randfällen; unbekannte/unzugewiesene IDs lassen Gesamtgate scheitern. |
 | CAT-04 | O | tools | CAT-01, CAT-02 | Protokoll-/Command-Route-Matrix mit Parser, Routing, Wirkung und unabhängigen Wirefällen; bloß vorhandene Spec-/Handlernamen gelten nicht als Umsetzung. |
 | CAT-05 | O | tools | CAT-02 | API-Methoden/Event-Surface samt Overloads/Thread-Vertrag exportieren und Bridge-Test zuordnen; Reflection und Defaultmethoden berücksichtigen. |
@@ -201,7 +207,7 @@ enthält keine Uhrzeit, Rechnerpfade oder aus dem Arbeitsstand erfundene Status.
 | GEN-08 | O | world | GEN-04, GEN-06, GEN-07 | Nether Terrain/Biome/Surface/Caves/Features/Strukturen inkl. Fortress/Bastion; eigener Dimensionkey/-höhe, Seed-/Ressourcenabnahme. |
 | GEN-09 | O | world | GEN-04, GEN-06, GEN-07 | End-Inseln/Biome/Features/End-Cities/Ship/Gateways und Spawnplattform; referenzgeprüfte Chunks und Bossarena. |
 | GEN-10 | O | sim | GEN-08, GEN-09, SIM-11 | Dimensionwechsel, Portalbau/Erkennung/Scaling/Search, Netherportal/Endportal/Gateway/Respawnanker/Betten; Fahrzeug-/Entitytransfer und Persistenz. |
-| GEN-11 | O | storage | GEN-01, DUR-01 | Generatorpin, Chunkstatus/-Version und Worldgen-Savedata dauerhaft speichern; Overlay nie unter neuer Basis still umdeuten. |
+| GEN-11 | T | storage | GEN-01, DUR-01 | Generatorpin, Chunkstatus/-Version und Worldgen-Savedata dauerhaft speichern; Overlay nie unter neuer Basis still umdeuten. |
 | GEN-12 | O | app | GEN-01, GEN-11 | Seed/Preset/Dimensionkonfiguration und bounded/off-thread Generation aktivieren; neue vs alte Welt, interrupted Generate/Save/Load und Configabweichung. |
 | GEN-13 | O | world | GEN-03–09 | Flat/Large Biomes/Amplified/Single Biome/Custom-Presets und Datapackdimensionen; Konfigurationsserialize/Seed/Featureflags versionieren. |
 | GEN-14 | O | world | GEN-04–09 | Exakte Vanilla-Seed-Parität in sämtlichen Generationstufen; Goldens inkl. Höhe, Biome, Blocks/States, Structures, Loot/Feature-RNG und Grenzkoordinaten. |
@@ -422,10 +428,11 @@ unsupported Methoden müssen konkrete Fehler liefern.
 
 ## Abgenommene Teilverträge und nächste Untertickets
 
-Die 214 Haupttickets bleiben der Gesamtumfang. Die erste Welle schließt nur
+Die 214 Haupttickets bleiben der Gesamtumfang. Die ersten beiden Wellen schließen nur
 die folgenden ausdrücklich begrenzten Teilverträge; lokale kombinierte Prüfungen,
 Artefakte und verbleibende Grenzen stehen im
-[Wellenbericht](AGENT_WAVE_01_VALIDATION.md). CI bewertet den veröffentlichten
+[ersten Wellenbericht](AGENT_WAVE_01_VALIDATION.md) und
+[zweiten Wellenbericht](AGENT_WAVE_02_VALIDATION.md). CI bewertet den veröffentlichten
 `main`-Commit zusätzlich. Kein lokaler Teilnachweis ersetzt QA-02–10.
 
 | Untervertrag | Status | Konkreter Umfang / Rest |
@@ -435,7 +442,9 @@ Artefakte und verbleibende Grenzen stehen im
 | BLK-01.2 (PLACE-DOOR-HINGE-CLIENT) | F | Unabhängiger Client: 14 echte Itemplatzierungen, 28 Half-States bei zwei Clients und erneut nach Prozessneustart; keine Live-Paperparität. |
 | NET-06.1 (N03) | F | App-eigene IDs/ACK-Gate und endlicher FIFO-Fence für captured Syncs, Replay/KeepAlive/Stop/Persistenz und sofortiger Antwortflush; 357 App-Tests, davon sechs Teleport-Sockettests. |
 | NET-06.2 (Folgeticket) | O | Gemeinsamer Epoch-/Move-Admission-Vertrag für parallel später eingereihte externe Teleports. Vor Vergabe in Producer-, Consumer- und Wiringtickets mit je einer Crate aufteilen; echter Race-/Ticktest nötig. |
-| GEN-11.1 (WG-002) | O | [Vorbereitete Storage-Spezifikation](agent-tasks/WG-002_GENERATION_METADATA.md): eigene Tabelle, explizites Format 4, atomare Freshness/Saves; Migration und Wiring getrennt. Keine Produktionsimplementierung. |
+| GEN-11.1 (WG-002) | F | [Storage-Ticket](agent-tasks/WG-002_GENERATION_METADATA.md), `dd910fd4`: eigene Tabelle, explizites Format 4, atomare Freshness/Saves; 146 Crate-Tests und Review CLEAN. Formatmigration und App-/Sim-Wiring bleiben getrennt; GEN-11 bleibt T. |
+| SRV-01.1 (ITEMS-TRANSFER-001) | F | [Reine Split-/Transferpläne](agent-tasks/ITEMS-TRANSFER-001.md), `a7f7aa33`: Mengen-/Komponentenerhaltung, 72 Unit-/drei Doctests und Review CLEAN mit unabhängiger Probe. Gameplayconsumer, effektive Paper-Komponentenpolicy und dauerhafte Storage-Ownershiptransaktion bleiben offen; SRV-01 bleibt T. |
+| CAT-02.1 | F | [Originaldatenexport](agent-tasks/CAT-02_1_ORIGINAL_CONTENT.md), `37c037b9`: ausgewählte 3.609 Originalressourcen vollständig/bytegenau geprüft, 17 Helper- und sieben Inventorytests, drei frische Reexporte und Review CLEAN. Weitere CAT-02-Kategorien und Laufzeitconsumer bleiben offen. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
@@ -447,18 +456,16 @@ Er implementiert keine Runtimefeatures. Ein Reviewer verwendet einen frei
 gewordenen Umsetzungsslot; vor neuer Vergabe wird bestehende Arbeit beendet
 oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 
-| Rolle / Agent | Ticket | Status am Katalogstart | Exklusiver Dateibesitz / nächste Entscheidung |
+| Rolle / Agent | Ticket | Aktueller Status, Welle 2 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Katalogagent `feature_catalog` | CAT-01 / Gesamtbacklog | in Dokumentierung/Prüfung | Dieser Katalog, minimale Links in beiden bisherigen Plänen, Inventoryscript/-artefakt. |
-| Weltagent `select_world_ticket` | WG-001 = GEN-01.1, alter W07 | zugewiesen laut Implementierungsboard | `ferrumc-world`: numerischer Seed-/versionierter Generatoridentitäts-/reiner ChunkGenerator-Vertrag, nur Flat-v1 ausführbar. Keine natürliche Welt oder persistierte Weltidentität. |
-| Placementagent `select_survival_ticket` | PLACE-DOOR-HINGE = BLK-01.1 | nächster freier Umsetzungsslot | `ferrumc-placement`: `src/lib.rs`, neue `src/door_hinge_tests.rs`, `INVARIANTS.md`; Cursor-Tiebreak und jede untere Nachbartür. Vollständige Collision-Shapes bleiben offen. |
-| Appagent `teleport_confirmation` | NET-06, alter N03 | zugewiesen laut Implementierungsboard | `ferrumc-app`: Teleportbestätigungen und ihre Tests/Invarianten; exakte Reservierung im Implementierungsboard. |
+| Originaldatenagent `feature_catalog` | CAT-02.1, Review SRV-01.1 | abgeschlossen und integriert | Export-/Inventoryscripts, Originaldaten und eigenes Taskdokument; fremdes Items-Review CLEAN. Katalog und Board liegen bei Root. |
+| Welt-/Storageagent `select_world_ticket` | WG-002 = GEN-11.1, Review CAT-02.1 | abgeschlossen und integriert | Nur Storage-Crate und Taskdokument; fremdes Export-Review CLEAN. Keine App-/Sim-Anbindung oder Migration. |
+| Itemsagent `item_transfer_primitives` | ITEMS-TRANSFER-001 = SRV-01.1, Review GEN-11.1 | abgeschlossen und integriert | Nur Items-Crate und Taskdokument; fremdes Storage-Review CLEAN. Kein Gameplayconsumer oder dauerhafter Transfer. |
 
-Diese Rollenliste ist eine geplante Vergabe, keine Behauptung, dass alle fünf
-Rollen gleichzeitig laufen. Nach Abschluss des Katalogagents stehen die drei
-Umsetzungsslots für Welt, Placement und App zur Verfügung. Root aktualisiert
-Agentname, genaue Ticketuntermenge, Dateien und Status nach tatsächlicher Vergabe.
+Diese Rollenliste erfasst die drei tatsächlich beauftragten Agents dieser
+abgeschlossenen Welle. Reviews nutzten frei gewordene Slots. Root aktualisiert Agentname,
+genaue Ticketuntermenge, Dateien und Status nach tatsächlicher Vergabe.
 Wenn ein Feature an fehlenden Verbrauchern hängt, erhält der nächste freie
 Agent das abhängige Producer-/Consumer-/Wiringticket, statt beliebig andere
 Runtimepfade mit unvollständigem Zustand zu aktivieren.

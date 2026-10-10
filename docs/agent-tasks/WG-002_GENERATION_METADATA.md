@@ -1,6 +1,6 @@
 # WG-002 / GEN-11.1 — Dauerhafte Generatoridentität
 
-Stand: 10.10.2026. **Status: lokal implementiert, geprüft; unabhängiges Review/Integration ausstehend.**
+Stand: 10.10.2026. **Status: lokal implementiert/geprüft, unabhängiges Review CLEAN; integriert mit `dd910fd4`.**
 Produktions-Crate: `ferrumc-storage`. WG-001 liefert den numerischen Seed, die
 geschlossene `GenerationIdentity` und deren festen 27-Byte-Codec. WG-002 speichert
 diesen Vertrag dauerhaft und atomar im ausdrücklich gewählten Metadatamodus.
