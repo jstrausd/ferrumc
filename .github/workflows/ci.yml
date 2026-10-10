@@ -83,6 +83,11 @@ jobs:
       - name: Forbidden public claims
         run: python3 ../scripts/check-forbidden-claims.py --self-test --check-index
 
+      - name: Pinned original Minecraft data and content inventory
+        run: |
+          python3 ../scripts/minecraft-original-export.py --self-test --check
+          python3 ../scripts/minecraft-feature-inventory.py --self-test --check
+
       - name: Performance harness ownership and cleanup
         run: python3 -m unittest discover -s ../tests/performance -p 'test_*.py'
 

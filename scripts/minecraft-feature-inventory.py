@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -127,6 +128,68 @@ def packet_rows(value: object) -> list[str]:
     return sorted(rows)
 
 
+def original_inventory(root: Path) -> tuple[dict, dict]:
+    """Consume only independently pinned original fixtures, entirely offline."""
+    script = ROOT / "scripts/minecraft-original-export.py"
+    spec = importlib.util.spec_from_file_location("minecraft_original_export", script)
+    require(spec is not None and spec.loader is not None, "original exporter cannot be loaded")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    exports = helper.load_exports(root)
+    original = helper.OUTPUT
+    manifest_path = original / "manifest.json"
+    manifest_data = source_bytes(root / manifest_path)
+    provenance = {"kind": "official Mojang Vanilla server datagen",
+                  "minecraft_version": "1.21.8", "exporter": "scripts/minecraft-original-export.py",
+                  "manifest": {"path": manifest_path.as_posix(), "sha256": digest(manifest_data),
+                               "bytes": len(manifest_data)},
+                  "licensing": "Mojang/Microsoft game data; not relicensed as MIT"}
+
+    def captured(filename: str, ids: list[str], coverage: str, partial: bool = False) -> dict:
+        path = original / filename
+        data = source_bytes(root / path)
+        return {"capture_status": "partially_captured_data_only" if partial else "captured_data_only",
+                "implementation_status": "not inferred; behavior/consumers and acceptance remain separate",
+                "count": len(ids), "coverage": coverage, "resource_ids": ids,
+                "resource_id_order": "lexicographic resource id unless specified",
+                "source": {"path": path.as_posix(), "sha256": digest(data), "bytes": len(data),
+                           "provenance": provenance}}
+
+    entities = exports["entity-types.json"]["entries"]
+    entity_ids = sorted(entities, key=lambda name: entities[name]["protocol_id"])
+    categories = {"entities": captured("entity-types.json", entity_ids,
+                                       "complete vanilla entity_type registry names/protocol IDs; no entity behavior or attributes")}
+    categories["entities"]["resource_id_order"] = "original entity_type protocol id, starting at zero"
+    recipes = exports["recipes.json"]["entries"]
+    categories["recipes_and_serializers"] = captured(
+        "recipes.json", sorted(recipes), "all 1407 default vanilla recipe JSONs and 22 serializer IDs; custom/experimental packs and serializer behavior remain open")
+    serializers = exports["recipe-serializers.json"]["entries"]
+    categories["recipes_and_serializers"]["serializer_count"] = len(serializers)
+    categories["recipes_and_serializers"]["serializer_resource_ids"] = sorted(
+        serializers, key=lambda name: serializers[name]["protocol_id"])
+    serializer_path = original / "recipe-serializers.json"
+    serializer_data = source_bytes(root / serializer_path)
+    categories["recipes_and_serializers"]["serializer_source"] = {
+        "path": serializer_path.as_posix(), "sha256": digest(serializer_data), "bytes": len(serializer_data)}
+    loot = exports["loot-tables.json"]["entries"]
+    categories["loot_and_predicates"] = captured(
+        "loot-tables.json", sorted(loot), "all 1246 default vanilla loot-table JSONs including inline conditions; predicate/function registries, tags and behavior remain unrecorded", True)
+    worldgen = exports["worldgen.json"]["registries"]
+    worldgen_ids = [f"{key}/{name}" for key in sorted(worldgen) for name in sorted(worldgen[key]["entries"])]
+    categories["worldgen_and_structures"] = captured(
+        "worldgen.json", worldgen_ids, "952 default vanilla JSON records in 14 worldgen registries, including structure definitions; NBT templates/tags, algorithms and seed parity remain unrecorded", True)
+    categories["worldgen_and_structures"]["resource_id_order"] = "lexicographic registry/resource-id; registry and entry are separate namespaces"
+    categories["worldgen_and_structures"]["registry_counts"] = {
+        key: len(value["entries"]) for key, value in sorted(worldgen.items())}
+    dimensions = exports["dimensions.json"]
+    categories["dimensions_and_types"] = captured(
+        "dimensions.json", sorted(dimensions["dimension_types"]), "4 default vanilla dimension-type JSONs and dimension stems in 6 world presets; no standalone dimension resources are emitted")
+    categories["dimensions_and_types"]["world_preset_count"] = len(dimensions["dimension_stems_by_world_preset"])
+    categories["dimensions_and_types"]["dimension_stem_count"] = sum(
+        len(value) for value in dimensions["dimension_stems_by_world_preset"].values())
+    return categories, provenance["manifest"]
+
+
 def inventory(root: Path) -> dict:
     fixture = Path("fixtures/protocol/1_21_8")
     manifest_data = source_bytes(root / fixture / "manifest.toml")
@@ -173,20 +236,21 @@ def inventory(root: Path) -> dict:
         if kind == "biomes":
             category["numeric_id_note"] = "source indices; runtime dynamic registries assign their own IDs"
         categories[kind] = category
-    for kind, ticket in (("entities", "CAT-02"), ("worldgen_and_structures", "CAT-02"),
-                         ("recipes_and_serializers", "CAT-02"), ("loot_and_predicates", "CAT-02"),
-                         ("commands_and_arguments", "CAT-02/CAT-04"),
+    original_categories, original_manifest = original_inventory(root)
+    categories.update(original_categories)
+    for kind, ticket in (("commands_and_arguments", "CAT-02/CAT-04"),
                          ("gamerules_effects_enchantments_attributes_damage_types", "CAT-02"),
                          ("advancements_statistics_tags_datapacks", "CAT-02"),
                          ("bukkit_paper_api_events", "CAT-05"), ("craftbukkit_nms_plugins", "CAT-06")):
         categories[kind] = {"capture_status": "not_captured", "count": None,
                             "resource_ids": None, "required_ticket": ticket,
                             "reason": "no complete pinned vendored export in this inventory"}
-    return {"schema_version": 1, "minecraft": manifest["minecraft"],
+    return {"schema_version": 2, "minecraft": manifest["minecraft"],
             "generator": "scripts/minecraft-feature-inventory.py",
             "meaning": "version-pinned source inventory; gameplay and Java plugin behavior require separate acceptance tests",
             "manifest": {"path": (fixture / "manifest.toml").as_posix(),
-                         "sha256": digest(manifest_data)}, "categories": categories}
+                         "sha256": digest(manifest_data)}, "original_export_manifest": original_manifest,
+            "categories": categories}
 
 
 def rendered(value: object) -> bytes:
@@ -226,7 +290,7 @@ class SelfTests(unittest.TestCase):
     def test_generation_deterministic_and_source_hash_enforced(self):
         first = inventory(ROOT)
         self.assertEqual(rendered(first), rendered(inventory(ROOT)))
-        self.assertEqual(first["categories"]["entities"]["capture_status"], "not_captured")
+        self.assertEqual(first["categories"]["entities"]["capture_status"], "captured_data_only")
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "fixtures/protocol/1_21_8"
@@ -235,6 +299,23 @@ class SelfTests(unittest.TestCase):
             (path / "blocks.json").write_bytes(b"[]")
             with self.assertRaisesRegex(InventoryError, "SHA-256 mismatch"):
                 inventory(root)
+
+    def test_original_scope_does_not_infer_mechanics_or_full_coverage(self):
+        categories, _ = original_inventory(ROOT)
+        self.assertEqual(categories["entities"]["count"], 151)
+        self.assertEqual(categories["recipes_and_serializers"]["count"], 1407)
+        self.assertEqual(categories["recipes_and_serializers"]["serializer_count"], 22)
+        self.assertEqual(categories["worldgen_and_structures"]["count"], 952)
+        self.assertEqual(categories["loot_and_predicates"]["count"], 1246)
+        self.assertEqual(categories["worldgen_and_structures"]["capture_status"], "partially_captured_data_only")
+        self.assertEqual(categories["loot_and_predicates"]["capture_status"], "partially_captured_data_only")
+        self.assertEqual(categories["dimensions_and_types"]["dimension_stem_count"], 18)
+        self.assertIn("not inferred", categories["recipes_and_serializers"]["implementation_status"])
+
+    def test_original_export_required_without_network_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "fixture directory missing"):
+                original_inventory(Path(directory))
 
 
 def main() -> int:

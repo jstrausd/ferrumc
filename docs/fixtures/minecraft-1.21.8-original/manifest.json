@@ -1,0 +1,187 @@
+{
+  "exporter": {
+    "arguments": [
+      "--reports",
+      "--server",
+      "--output",
+      "generated"
+    ],
+    "bundler_property": "bundlerMainClass",
+    "java_major": 21,
+    "main_class": "net.minecraft.data.Main",
+    "normalization": "sorted keys/resource IDs and whitespace; arrays and exact decimal number values retained; version manifest retained byte-for-byte",
+    "path": "scripts/minecraft-original-export.py"
+  },
+  "fixtures": {
+    "dimensions.json": {
+      "bytes": 8752,
+      "sha256": "37fde55f5e010babea5dcdab9a0c773c211f8d4d43a4f5d826e53035dad188d1"
+    },
+    "entity-types.json": {
+      "bytes": 9319,
+      "sha256": "b65a61ac9f4346ad74ff159cb3f8be78ec96229ccfc3abe29a14a7e0063d4d6b"
+    },
+    "loot-tables.json": {
+      "bytes": 1366578,
+      "sha256": "ea338e10f1ad9618171085cb77be4ddc686e47b8515c24b757d5d47ea8f538ec"
+    },
+    "recipe-serializers.json": {
+      "bytes": 1681,
+      "sha256": "f8d4bd892ddd3cf238ce92a164d2272f87637596f3455ff8c360eae3fc392bd9"
+    },
+    "recipes.json": {
+      "bytes": 501688,
+      "sha256": "023cc012b9e01b138831c302bdfb956e4179203b447a9e1826fc0939f285a232"
+    },
+    "version-manifest.json": {
+      "bytes": 43719,
+      "sha256": "3bf5cdd444dfa89199fe4f8a92b6c79f4e4fa8977ff52029c3acd99378506fad"
+    },
+    "worldgen.json": {
+      "bytes": 2530249,
+      "sha256": "bc0dbfa46f495865fc98af835c70dee13ddfdcebb263cf40b3a075324f261b30"
+    }
+  },
+  "licensing": {
+    "distribution": "reference JSON data only; no server JAR, classes, textures, sounds or NBT structure templates vendored",
+    "eula": "https://www.minecraft.net/en-us/eula",
+    "original_data": "Mojang/Microsoft Minecraft game data; not relicensed under the repository MIT license",
+    "tooling": "MIT (FerrumC)",
+    "usage_guidelines": "https://www.minecraft.net/en-us/usage-guidelines"
+  },
+  "minecraft": {
+    "data_version": 4440,
+    "protocol_version": 772,
+    "version": "1.21.8"
+  },
+  "not_captured": [
+    "experimental builtin datapacks",
+    "tags and their resolution",
+    "NBT structure templates",
+    "commands/arguments",
+    "advancements/statistics",
+    "other static/dynamic registries",
+    "loot predicate/function behavior and registries",
+    "worldgen algorithms and seed parity",
+    "Bukkit/Paper APIs/events/NMS",
+    "behavior and consumer acceptance matrix"
+  ],
+  "schema_version": 1,
+  "scope": "default vanilla only; data capture, no gameplay or API implementation status",
+  "source": {
+    "datapack_categories": {
+      "dimension_type": {
+        "bytes": 2172,
+        "count": 4,
+        "path_bytes_sha256_index": "5f7ca331334fbc2fd5e9ea72f5942f29dcf17b9c38446e2c25f7da5e5d15a6e3"
+      },
+      "loot_table": {
+        "bytes": 1123700,
+        "count": 1246,
+        "path_bytes_sha256_index": "83249c304a82078d556d11b1ae95917786ae5ba8d1ad5e3d9d83058c78e4c3ba"
+      },
+      "recipe": {
+        "bytes": 364106,
+        "count": 1407,
+        "path_bytes_sha256_index": "85f1491bbd577872b0ea60fcbc52eff03982d1d4d0413e9acff066dad4f313aa"
+      },
+      "worldgen/biome": {
+        "bytes": 248743,
+        "count": 65,
+        "path_bytes_sha256_index": "f0184350ddabcda7f49af499b1e9177dd8629641c0bd1360334edf65a5dc5b21"
+      },
+      "worldgen/configured_carver": {
+        "bytes": 4910,
+        "count": 4,
+        "path_bytes_sha256_index": "f2ae6ff7bd8c05f96ce41cf901718d4d5c2c41865a4815ff4783fd6bff0fa0fb"
+      },
+      "worldgen/configured_feature": {
+        "bytes": 256134,
+        "count": 224,
+        "path_bytes_sha256_index": "2df867c517a3eb0a55529c8ed3e5ffda87c05f2121d239696254e17929c527ed"
+      },
+      "worldgen/density_function": {
+        "bytes": 335487,
+        "count": 35,
+        "path_bytes_sha256_index": "5ad0c9966a00e304b6f09b336c06b4797279f140822e0949bdab091412dafab7"
+      },
+      "worldgen/flat_level_generator_preset": {
+        "bytes": 4709,
+        "count": 9,
+        "path_bytes_sha256_index": "05e141b3f77546fc93547aa1f07d2ed2bcd64aa557c7a2023e0a2852f957b0f1"
+      },
+      "worldgen/multi_noise_biome_source_parameter_list": {
+        "bytes": 71,
+        "count": 2,
+        "path_bytes_sha256_index": "5d34ab0c3ee9f42616182eaac5d1483a53d36b56c5d4ccff1976b3507851f68e"
+      },
+      "worldgen/noise": {
+        "bytes": 4516,
+        "count": 60,
+        "path_bytes_sha256_index": "8cac804ec775f881419d42f1534c93f25551ac9af56e61a6090817a920101cf7"
+      },
+      "worldgen/noise_settings": {
+        "bytes": 546768,
+        "count": 7,
+        "path_bytes_sha256_index": "19fc82360b409a12ead0736d28712910664d9ba4447b394c7054481f154e9ca8"
+      },
+      "worldgen/placed_feature": {
+        "bytes": 111451,
+        "count": 258,
+        "path_bytes_sha256_index": "f1dec3c832bde472439226d210fef31254800087027d221d8ce03e8236720596"
+      },
+      "worldgen/processor_list": {
+        "bytes": 76515,
+        "count": 40,
+        "path_bytes_sha256_index": "c236e762bc0c024e1f3ace6a192442eda4addfbe1f5fc337209728211f6d6383"
+      },
+      "worldgen/structure": {
+        "bytes": 16382,
+        "count": 34,
+        "path_bytes_sha256_index": "824900f35a885ef8dba24995e47aad8763b057c5f6b8c20dd0aa8c334533a935"
+      },
+      "worldgen/structure_set": {
+        "bytes": 6088,
+        "count": 20,
+        "path_bytes_sha256_index": "52e233648b7bf352e4c50f4df32f19cec60155c107ff828fbbbf97e35b016db2"
+      },
+      "worldgen/template_pool": {
+        "bytes": 341311,
+        "count": 188,
+        "path_bytes_sha256_index": "b6df009bae23f16688f9d8b8bcd41de3a60787cb49bb26ff60e664a90553f9d9"
+      },
+      "worldgen/world_preset": {
+        "bytes": 5434,
+        "count": 6,
+        "path_bytes_sha256_index": "a7bfdd160346cb6027ab244214590c9c09b4996168bf4515b7bf5cb3c4390835"
+      }
+    },
+    "inner_server": {
+      "bytes": 18900451,
+      "path": "META-INF/versions/1.21.8/server-1.21.8.jar",
+      "sha256": "2bee159e4ce87ae857b4323f9f32c7a3d7d448f7f8c3f62fa6f295a72e228250"
+    },
+    "publisher": "Mojang / Microsoft",
+    "registry_report": {
+      "bytes": 466543,
+      "path": "reports/registries.json",
+      "sha256": "177a6ad99d7b6d28f27e49231d15a5ccdb262bed9ac07f7e66dab5d32cc20c27"
+    },
+    "selected_datapack_bytes": 3448497,
+    "selected_datapack_files": 3609,
+    "server_bundle": {
+      "bytes": 57555044,
+      "sha1": "6bce4ef400e4efaa63a13d5e6f6b500be969ef81",
+      "sha256": "2349d9a8f0d4be2c40e7692890ef46a4b07015e7955b075460d02793be7fbbe7",
+      "url": "https://piston-data.mojang.com/v1/objects/6bce4ef400e4efaa63a13d5e6f6b500be969ef81/server.jar"
+    },
+    "verification": "every selected generated path and raw byte equals its embedded official inner-JAR resource",
+    "version_index_url": "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+    "version_manifest": {
+      "bytes": 43719,
+      "sha1": "b1bb44ad769609925328838694503a8dcac7f529",
+      "sha256": "3bf5cdd444dfa89199fe4f8a92b6c79f4e4fa8977ff52029c3acd99378506fad",
+      "url": "https://piston-meta.mojang.com/v1/packages/b1bb44ad769609925328838694503a8dcac7f529/1.21.8.json"
+    }
+  }
+}
