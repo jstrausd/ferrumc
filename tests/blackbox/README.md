@@ -77,9 +77,9 @@ replies to keep-alives and confirms server teleports.
   by hand): runs steps 1–9 against a server **you** started, on port `25565` by
   default. Step 10 is **skipped** — we can't restart a process we don't own.
 
-> **Stop signal:** FerrumC handles `ctrl_c` / **SIGINT** only for graceful
-> shutdown (it flushes pending edits on the way out). `SIGTERM`/`SIGKILL` skip
-> that flush, so the managed restart uses SIGINT. A hard-kill (SIGKILL) crash-
+> **Stop signal:** FerrumC handles **SIGINT**, **SIGTERM**, and **SIGHUP** for
+> graceful shutdown, including flush of pending edits. The managed restart uses
+> SIGINT. SIGKILL cannot run shutdown handlers. A hard-kill (SIGKILL) crash-
 > durability check is **not automated** — it depends on redb commit timing and
 > would be flaky; verify it by hand if you need that guarantee.
 
@@ -136,3 +136,35 @@ logs land in `$MC_RUN_DIR/server-*.log` (default under the OS temp dir).
 - `run-smoke.sh` — runner; managed by default (builds the server, runs the full
   scenario incl. restart); `MC_MANAGE_SERVER=0` for an external server.
 - `README.md` — this file.
+
+## Java plugin client contract
+
+`java-plugin.mjs` combines the independent Minecraft protocol decoder with the
+ordinary Bukkit JAR built in `server/java-bridge/fixture`. Build the server and
+run Maven `verify` in `server/java-bridge/`, then run:
+
+```sh
+FERRUMC_JAVA_EXECUTABLE=/path/to/java21/bin/java \
+FERRUMC_JAVA_BRIDGE_JAR=/path/to/ferrumc-java-bridge-0.1.0.jar \
+FERRUMC_JAVA_FIXTURE_JAR=/path/to/standard-bukkit-fixture-0.1.0.jar \
+MC_SERVER_BIN=/path/to/ferrumc node java-plugin.mjs
+```
+
+The test creates a fresh temporary data directory and manages its Rust server.
+Missing artifacts fail the test. Two clients verify ordered join listeners,
+command graph visibility, aliases, canonical UUIDs, UTF-8 messages, permissions,
+literal completion, explicit unsupported API errors and message routing. Graceful
+stop must invoke `onDisable` once and persist the fixture's config. This proves
+the implemented subset; the fixture is not an external plugin compatibility
+matrix or a full Paper acceptance test.
+
+Minecraft 1.21.8 NBT strings use Java `DataOutput.writeUTF` / `DataInput.readUTF`
+(Modified UTF-8). The bundled PrismarineJS NBT decoder uses ordinary UTF-8 for
+non-BMP characters and displays six replacement characters for an emoji's
+surrogate pair. The client text assertion therefore uses `Grüße Ω`; subprocess
+contracts separately verify emoji text over the bridge's ordinary UTF-8 JSON.
+This decoder limitation must not prompt a change to Minecraft's NBT encoding.
+
+For a separately managed fixture server, set `MC_JAVA_EXTERNAL=1`, `MC_HOST`,
+and `MC_PORT`. That mode runs the two-client checks; the operator or container
+harness must separately check shutdown and persisted lifecycle counters.

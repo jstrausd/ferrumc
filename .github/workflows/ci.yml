@@ -3,9 +3,12 @@ name: ferrumc-ci
 on:
   push:
     branches:
-      - rework/v2-skeleton
       - main
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ferrumc-ci-${{ github.ref }}
@@ -32,6 +35,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.99.0
           components: rustfmt, clippy
 
       - name: Cache Rust
@@ -43,23 +47,69 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+          cache-dependency-path: server/java-bridge/**/pom.xml
+
+      - name: Java compatibility contracts and ordinary plugin JAR
+        working-directory: server/java-bridge
+        run: mvn --batch-mode --no-transfer-progress verify
+
       - name: Cargo metadata
-        run: cargo metadata --no-deps > /dev/null
+        run: cargo metadata --no-deps --locked --format-version 1 > /dev/null
 
       - name: Format
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo nextest run --workspace --all-targets
+        run: cargo nextest run --workspace --all-targets --locked
 
       - name: Doc tests
-        run: cargo test --workspace --doc
+        run: cargo test --workspace --doc --locked
+
+      - name: Rust to Java plugin contracts
+        env:
+          FERRUMC_JAVA_BRIDGE_JAR: ${{ github.workspace }}/server/java-bridge/runtime/target/ferrumc-java-bridge-0.1.0.jar
+          FERRUMC_JAVA_FIXTURE_JAR: ${{ github.workspace }}/server/java-bridge/fixture/target/standard-bukkit-fixture-0.1.0.jar
+        run: FERRUMC_JAVA_EXECUTABLE="$JAVA_HOME/bin/java" cargo test -p ferrumc-app --locked --test java_compat -- --ignored
 
       - name: Forbidden public claims
         run: python3 ../scripts/check-forbidden-claims.py --self-test --check-index
 
       - name: Generated files are current
         run: cargo xtask generate --check
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install independent client dependencies
+        working-directory: tests/blackbox
+        run: npm exec --yes --package=pnpm@9.15.9 -- pnpm install --frozen-lockfile
+
+      - name: Build server for independent client
+        run: cargo build --locked -p ferrumc-app
+
+      - name: Independent client and restart persistence
+        working-directory: tests/blackbox
+        env:
+          MC_MANAGE_SERVER: "1"
+          MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
+          MC_RUN_DIR: ${{ runner.temp }}/ferrumc-blackbox
+        run: node smoke.mjs
+
+      - name: Independent Java plugin client
+        working-directory: tests/blackbox
+        env:
+          MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
+          FERRUMC_JAVA_BRIDGE_JAR: ${{ github.workspace }}/server/java-bridge/runtime/target/ferrumc-java-bridge-0.1.0.jar
+          FERRUMC_JAVA_FIXTURE_JAR: ${{ github.workspace }}/server/java-bridge/fixture/target/standard-bukkit-fixture-0.1.0.jar
+        run: FERRUMC_JAVA_EXECUTABLE="$JAVA_HOME/bin/java" node java-plugin.mjs
