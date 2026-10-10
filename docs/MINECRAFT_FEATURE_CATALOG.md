@@ -458,11 +458,11 @@ Artefakte und verbleibende Grenzen stehen im
 | SIM-03.2 | F | [Entityownership](agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md), `916251da`: shardbesessener begrenzter UUID-/Wire-/Chunkindex und generationaler Handle; Review CLEAN nach F1-RED→GREEN. Unabhängig Debug/Release jeweils227 und12.000 Modellinterleavings grün. Keine aktive App-/Mobsimulation; persistente Komponenten/Physik/Tracking folgen separat. |
 | GEN-04.3 | F | [Kubische Splines](agent-tasks/GEN-04_3_CUBIC_SPLINES.md),245134eb: unabhängiger Review CLEAN nach Dokumentations-F1; Root163Worlddebug/20Release, bytegleicher Originalreexport und4294 zusätzliche Originalrecords grün. Density-/Terrainconsumer bleiben getrennt. |
 | STORAGE-ENTITY001.1 | F | [UUID-Storageproducer](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE.md), `a5d11819`: unabhängiges Review CLEAN, Debug/Release je212 Tests plus9 eigene Probes,39 Writecutpoints und Lostreply/Reopen grün. Fresh/strict Format5; Migration/Gameplay-/CASconsumer bleiben getrennt. |
-| STORAGE-ENTITY001.2 | A | [Explizite4→5-Migration](agent-tasks/STORAGE-ENTITY001_2_UUID_MIGRATION.md): konkreter Vertrag durch Root geprüft, `select_world_ticket` implementiert checked Backup/Checkpoint/Delta/Resume mit expliziten Diskbudgets. Keine Appaktivierung. |
+| STORAGE-ENTITY001.2 | A | [Explizite4→5-Migration](agent-tasks/STORAGE-ENTITY001_2_UUID_MIGRATION.md): implementiert/eingefroren; Autoren-Debug und Rootrelease je243 Tests grün. Unabhängiger Codereview durch `feature_catalog` läuft. Keine Appaktivierung. |
 | REG-WORLDGEN001 | F | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md),555ee2aa: unabhängiges Rootreview CLEAN, Debug/Release jeweils69 und4 Reviewerproben grün;102 tatsächliche Originalressourcen und195 Amplitudenbits vollständig geprüft. Keine aktive Terrainpipeline. |
 | GEN-05.1 | F | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md), `c4e3dc76`: unabhängiger Rootreview CLEAN, Debug/Release je177 plus3 eigene Probes und strictchecks grün.128 tatsächliche Original-JAR-Records, frischer normal/-O-Reexport bytegleich;35 Definitionen/7 Router. Seed-/Terrainconsumer bleiben offen. |
 | GEN-05.2 | A | [Seed-/Scalar-/Climateconsumer](agent-tasks/GEN-05_2_SEEDED_ROUTER_APPROVAL.md): konkreter vollständiger Vertrag durch Root freigegeben, `item_transfer_primitives` implementiert echte Seedbindung, Factory-/Boundviews und gemeinsame Budgetauswertung gegen actual JAR. Noch keine Chunks. |
-| SIM-03.3 / SRV-02.1 | A | [Besessene ItemEntities](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md): vollständiger Rootdesignreview und Runtimefreigabe, `feature_catalog` implementiert sealed Slotstate, lossless FCIE/FCIScodec, owned Refusals/Removal, checked Restore und originale Counter. Drop/Pickup/Appaktivierung folgen. |
+| SIM-03.3 / SRV-02.1 | F | [Besessene ItemEntities](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md), `84967c54`: Rootreview CLEAN, Debug/Release je252 Tests samt3 zusätzlichen Probes und strictchecks grün; sealed Slotstate, lossless FCIE/FCIS, owned Refusals/Removal, checked Restore und originale Counter. Drop/Pickup/Appaktivierung folgen; SIM-03/SRV-02 bleiben offen. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
@@ -477,8 +477,8 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Simagent `feature_catalog` | SIM-03.3 / SRV-02.1 | Runtimeumsetzung nach vollständiger Vertragsfreigabe | Sim-Crate und eigener Brief; Storage-.1-Review CLEAN abgeschlossen. Slotpayload-/Codec-/Restoreconsumer jetzt in Umsetzung. |
-| Storageagent `select_world_ticket` | STORAGE-ENTITY001.2 | Migration in Umsetzung | Storage-Crate und .2-Brief; .1 integriert `a5d11819`, neuer Migrationvertrag konkret freigegeben. |
+| Reviewer `feature_catalog` | STORAGE-ENTITY001.2 | Unabhängiger Codereview und eigene Probes | Read-only Storageproduktion; exklusives eigenes Reviewdokument. SIM-03.3 ist unabhängig CLEAN integriert. |
+| Oracleagent `gen05_2_router_oracle` | GEN-05.2 Original-JAR-Abnahme | Referenzcorpus wird erweitert | Genau fünf Oracle-/Generator-/Fixturedateien; keine Rustproduktion. Der frühere Storageautor ist beendet. |
 | Weltagent `item_transfer_primitives` | GEN-05.2 | Seed-/Scalar-/Climateumsetzung | World-Crate und GEN-05-Brief; Compiler CLEAN als `c4e3dc76` integriert, konkreter .2-Vertrag durch Root freigegeben. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen

@@ -235,27 +235,36 @@ Rust-Workspace, Java-/Plugincontracts, Generator-/Originaldaten-/Claimchecks
 und alle sieben Client-/Neustartgates grün. Die bewegten GEN-05.2-, SIM-03.3-
 und STORAGE-ENTITY001.2-Implementierungen gehören noch nicht zu diesem Lauf.
 
+## Item-State-Runtimeintegration
+
+SIM-03.3/SRV-02.1 ist nach unabhängigem
+[Rootreview](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md) CLEAN als
+`84967c54` integriert. Root Debug/Release je252 Tests grün:249 Autorentests
+plus3 Probes mit65.536 Zählerfällen,2.048 unabhängigen Motionbitfällen und1.024
+Slotinterleavings. Strict alltargetclippy/fmt grün; alle10 Main-/Snapshot-
+Freezehashes nach vollständigem Entfernen der Probes gleich. Echte Items
+besitzen sealed Zustand im bisherigen Ownerslot und native Capture-/Restore-
+APIs; Drops/Pickup/Physics/Tracking/Apppersistenz werden dadurch noch nicht
+ausgeführt. Die frühere Gesamt-CI9025 enthält diese Runtime noch nicht.
+
+STORAGE-ENTITY001.2 ist implementiert und eingefroren: Autoren-Debug und
+unabhängiges Rootrelease jeweils243 Tests grün. Rootrelease aufd9feaa82 plus
+13 eingefrorenen Files, Log `.codex-tmp/storage-entity001_2-root-release.log`.
+Der separate Codereview läuft noch; daher noch keine CLEAN-/Integrationmeldung.
+
 ## Laufende Folgearbeit
 
-- `feature_catalog`: REG-WORLDGEN001 abgeschlossen555ee2aa; STORAGE-ENTITY001.1 unabhängig CLEAN geprüft und
-  integriert `a5d11819`. Vollständiger Sim-Item-Entity-Vertrag durch Root geprüft
-  und freigegeben; Runtimeumsetzung SIM-03.3/SRV-02.1 begonnen. Keine
-  vorzeitige Gameplayaktivierung.
+- `feature_catalog`: SIM-03.3/SRV-02.1 nach Rootreview CLEAN integriert84967c54;
+  jetzt unabhängiger STORAGE-ENTITY001.2-Codereview an eingefrorener Produktion.
 - `item_transfer_primitives`: GEN-04.3 originale kubische Splines integriert;
   GEN-05.1-Compiler unabhängig CLEAN geprüft und als `c4e3dc76` integriert.
   Der separate echte JAR-Codec- und Strukturoracle-Auftrag ist beendet.
   Jetzt freigegebene GEN-05.2-Seed-/Scalar-/Climateumsetzung; danach
   NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
-- `select_world_ticket`: STORAGE-ENTITY001.1 integriert `a5d11819`;
-  unabhängige Debug-/Releaseabnahme je212 Tests plus9 eigene Probes,39 tatsächliche
-  Writeabortcutpoints und Lostreply/Reopen sowie strictchecks grün.
-  [Implementationreview](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE_REVIEW.md) CLEAN.
-  Konkrete .2-Migration nach vollständigem Rootdesignreview in Umsetzung.
-  Root reserviert die vier Präzisierungen des unabhängigen Designreviews;
-  Online prüft angetroffene Beziehungen, Pages sind nach tatsächlichen Bytes
-  begrenzt, Änderungen haben definierte Epoch-/No-opregeln. Explizite4→5-
-  Migration folgt als separates .2-Ticket; keine bestehende Welt wird automatisch
-  umgestellt. Atomare Inventory↔Entity-CAS-/Receipttransfers bleiben danach offen.
+- `gen05_2_router_oracle`: ersetzt den abgeschlossenen .2-Storageautor im dritten
+  Childslot; erweitert das echte Original-JAR-Orakel unter getrenntem
+  fünf-Dateien-Besitz. `select_world_ticket` hält seine .2-Produktion bis zum
+  Review unverändert. Atomare Inventory↔Entity-CAS-/Receipttransfers folgen.
 
 Drop/Pickup, Mining/Loot/Crafting, Physik/Tracking/Kampf/Mobs und sämtliche
 Dimension-/Bossconsumer bleiben anhand des [Katalogs](MINECRAFT_FEATURE_CATALOG.md)
