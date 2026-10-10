@@ -16,6 +16,10 @@ ferrumc-registry = { workspace = true }
 ferrumc-items = { workspace = true }
 # Original Xoroshiro positional names use MD5-128, already pinned in the workspace lock.
 md5 = { package = "md-5", version = "0.10" }
+# Bounded builtin JSON string/escape decoding and structural oracle JSON.
+# Number tokens are retained by World's own checked lexer and independently
+# decoded as original FLOAT/DOUBLE/INT. No runtime I/O or sampling API is added.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 # Classifying error variants for bit-packing / indexing failures.
 thiserror = { workspace = true }
 

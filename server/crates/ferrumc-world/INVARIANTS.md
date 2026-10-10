@@ -109,8 +109,9 @@
   with pinned official mappings and bundled library hashes. Comparisons use
   exact integers and float bits. They establish the tested primitive cases on
   the documented toolchain, not complete world-seed or cross-platform parity.
-- No density router, chunk consumer, Natural-world identity, persistence gate,
-  event, storage/thread handle or Gaussian API is activated by these modules.
+- No seeded density/router sampling, chunk consumer, Natural-world identity,
+  persistence gate, event, storage/thread handle or Gaussian API is activated
+  by these primitives. The separate seed-free compiler exposes metadata only.
 - Simplex retains only the original 256 addressed permutation values. Its
   original extra 256 zero entries are unused. Construction shares the identical
   Improved shuffle; seeded offsets are not added by the original 2D/3D samplers.
@@ -181,6 +182,46 @@
   and source-error traces are compared separately from Rust nonfinite policy.
   It supplies no copied `TerrainProvider` profiles, density/registry/router,
   codec/visitor, aquifer, surface, biome or natural-chunk implementation.
+
+## Original builtin density compiler
+
+- `DensityTemplate::compile_definition` and `RouterTemplate::compile_builtin`
+  admit only typed pinned Registry resources. All 35 density definitions,
+  including unused definitions, are validated before a template is returned.
+  No raw JSON compiler, unchecked node handle, default router, sample method,
+  seeded noise, natural-world identity or chunk output is exposed.
+- Graphs are owned immutable `Arc` data. Every original density helper input,
+  including inline constants/objects, retains its `HolderHolder`; raw spline
+  coordinate holders remain separate vertices. Named targets are resolved only
+  after every definition has been parsed. Joint cycle/depth checks include all
+  density, spline, coordinate and holder edges and unreachable nodes.
+- Preflight charges each distinct density/settings/noise original source before
+  parsing, with an aggregate 2 MiB cap. Per-source bounds are 128 KiB, 4096 JSON
+  values/keys, depth 32 (root zero), 256 container entries and 256 decoded UTF-8
+  bytes per key/string. The whole source bounds temporary escape-decoder memory.
+- Private IR appends check 4096 vertices/8192 edges before growth. Combined
+  depth is at most 96 (leaf one); the actual seven-router codec union measures
+  3102/3435/depth87. Original spline-local limits also apply; they never replace
+  the joint cycle/depth check. No partial public graph escapes on failure.
+- The bounded JSON lexer preserves original number tokens and full grammar,
+  rejects duplicate decoded keys/trailing input and delegates only string escape
+  decoding. DOUBLE and FLOAT decode directly to their respective bit widths.
+  INT preserves original Gson truncation/wrapping before range validation,
+  including its 10000-character token cap and absolute decimal scale <10000.
+- Spline derivative is required by the actual codec. Unknown fields, nonfinite
+  DOUBLE/FLOAT values and nonascending spline locations are explicit additional
+  checked admission policy. Original codecs permit reversed clamp/range and
+  equal/reversed gradient endpoints; compilation does too.
+- Noise inputs are named pinned builtin references. Original codec inline noise
+  parameter holders are outside this closed public builtin compiler scope and
+  are rejected by private admission rather than conflated with named resources.
+- Producer byte/node/depth and compiled dependency categories are independently
+  checked. Original default block/fluid, surface and spawn payloads stay bounded
+  deferred static slices; material/surface/spawn execution remains absent.
+- Actual original-JAR codec projections verify all 35 definitions, seven routers,
+  raw bits, holder identities and 32 node forms; six direct factory probes are
+  separate evidence for later visitor lowering. Structural acceptance supplies
+  no density sampling, worldgen, Survival or Paper-runtime parity.
 
 ## Block-entity persistence
 

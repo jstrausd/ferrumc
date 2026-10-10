@@ -779,6 +779,7 @@ dependencies = [
  "ferrumc-nbt",
  "ferrumc-registry",
  "md-5",
+ "serde_json",
  "thiserror",
 ]
 

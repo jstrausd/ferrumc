@@ -25,6 +25,8 @@
 //! - [`ChunkGenerator`] and [`GenerationIdentity`] — a pure versioned baseline
 //!   contract with an explicit numeric [`WorldSeed`]. Storage adoption and
 //!   natural terrain are separate implementation steps.
+//! - [`density`] — checked seed-free builtin density/router graphs and metadata;
+//!   no evaluation or natural terrain is activated by their compilation.
 //!
 //! The network encoder turns a [`Chunk`] into the wire bytes a 1.21.8 client
 //! expects: [`encode_chunk_section_data`] for the paletted section blob,
@@ -36,6 +38,7 @@ mod block_entity_codec;
 mod block_state;
 mod chunk;
 mod chunk_section;
+pub mod density;
 mod dirty;
 mod error;
 mod generation;

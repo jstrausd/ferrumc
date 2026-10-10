@@ -2,6 +2,32 @@
 
 Pure world model. No threads, no DB, no packets.
 
+The seed-free `density` module now compiles every original Minecraft 1.21.8
+builtin density definition and all seven builtin settings routers into checked,
+immutable private graphs. `DensityTemplate::compile_definition` and
+`RouterTemplate::compile_builtin` expose geometry, flags, noise references and
+graph metadata. They validate all 35 definitions, including unused graphs.
+They provide no density sampling or natural chunk generation; the executable
+server still uses the flat generator described below.
+
+Admission retains both direct/reference `HolderHolder` nodes and distinct raw
+spline-coordinate holders. Bounds are 2 MiB distinct original source bytes,
+4096 vertices, 8192 edges and combined depth 96. The original spline-local
+limits remain separate. Decimal tokens round directly to the original f64/f32
+codec widths, including signed zero. INT fields truncate/wrap with the pinned
+Gson rules before range validation. Required spline derivatives, resource roles
+and original geometry guards are checked. Extra field/finite/ascending-point
+restrictions are explicit `FerrumC` policy. Original inline noise parameters
+remain outside the closed builtin resource API. Default materials, surface
+rules and spawn targets are deferred payloads, without executable behavior.
+
+Structural fixtures decode the real original JAR's codecs and compare all
+35 definitions, seven routers and 32 node forms; this establishes no sampled
+terrain, Survival or Paper runtime parity. See the
+[density oracle](tests/reference/density_compiler.md) and
+[GEN-05](../../../docs/agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md) for the
+exact projection scope, corrected holder inventory and next consumers.
+
 This crate owns the world's block-storage value types and a flat-world
 generator:
 
