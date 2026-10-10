@@ -7,6 +7,14 @@ use ferrumc_math::Vec3;
 
 use crate::random::WorldgenRandomSource;
 
+mod blended;
+mod normal;
+mod simplex;
+
+pub use blended::{BlendedNoise, BlendedNoiseParameters};
+pub use normal::{NormalNoise, MAX_NORMAL_NOISE_COORDINATE};
+pub use simplex::SimplexNoise;
+
 /// Maximum stored octave span, checked before allocation or RNG consumption.
 pub const MAX_NOISE_OCTAVES: usize = 64;
 /// Lowest supported octave exponent (a configuration bound, not a Vanilla cap).
@@ -37,6 +45,9 @@ pub enum NoiseError {
     /// A finite caller configuration overflowed a computed bound or sample.
     #[error("noise arithmetic produced a nonfinite result")]
     NonFiniteResult,
+    /// A blended-noise parameter falls outside its original codec range.
+    #[error("blended-noise parameter {0} is nonfinite or outside its codec range")]
+    InvalidBlendedParameter(&'static str),
 }
 
 // The final four entries intentionally duplicate particular original gradients.
@@ -273,17 +284,8 @@ impl PerlinNoise {
         legacy: bool,
     ) -> Result<Self, NoiseError> {
         validate_octaves(first_octave, amplitudes, legacy)?;
-        let value_factor = power_of_two(i32::from(amplitudes.len() as u8) - 1)
-            / (power_of_two(i32::from(amplitudes.len() as u8)) - 1.0);
-        let mut factor = value_factor;
-        let mut max_value = 0.0;
-        for &amplitude in amplitudes {
-            if amplitude != 0.0 {
-                max_value += amplitude * 2.0 * factor;
-            }
-            factor /= 2.0;
-        }
-        finite(max_value)?;
+        let value_factor = octave_value_factor(amplitudes.len());
+        let max_value = octave_max_value(amplitudes)?;
         let mut octaves: Vec<_> = amplitudes
             .iter()
             .map(|amplitude| Octave {
@@ -441,6 +443,24 @@ fn validate_octaves(first: i32, amplitudes: &[f64], legacy: bool) -> Result<(), 
         return Err(NoiseError::PositiveLegacyOctave);
     }
     Ok(())
+}
+
+fn octave_value_factor(count: usize) -> f64 {
+    power_of_two(i32::from(count as u8) - 1) / (power_of_two(i32::from(count as u8)) - 1.0)
+}
+
+// Both Perlin and Normal preflight the exact original diagnostic before any
+// allocation or RNG mutation; Normal must also check the two-stack sum.
+fn octave_max_value(amplitudes: &[f64]) -> Result<f64, NoiseError> {
+    let mut factor = octave_value_factor(amplitudes.len());
+    let mut value = 0.0;
+    for &amplitude in amplitudes {
+        if amplitude != 0.0 {
+            value += amplitude * 2.0 * factor;
+        }
+        factor /= 2.0;
+    }
+    finite(value)
 }
 
 fn validate_input(position: Vec3, y_scale: f64, y_max: f64) -> Result<(), NoiseError> {

@@ -110,6 +110,30 @@
   the documented toolchain, not complete world-seed or cross-platform parity.
 - No density router, chunk consumer, Natural-world identity, persistence gate,
   event, storage/thread handle or Gaussian API is activated by these modules.
+- Simplex retains only the original 256 addressed permutation values. Its
+  original extra 256 zero entries are unused. Construction shares the identical
+  Improved shuffle; seeded offsets are not added by the original 2D/3D samplers.
+  Strict/equal ordering branches, saturating double-to-int floor casts and
+  wrapping i32 floor sums are preserved, including distant coordinates.
+- Normal constructs two independently initialized Perlin stacks. Original
+  amplitude-span normalization includes Java's overflowing sentinel subtraction
+  for all-zero lists. It validates both stack maxima and their combined maximum
+  before allocation or RNG consumption; signed amplitudes/zeros are retained.
+  Its explicit caller cap is `MAX_NOISE_COORDINATE / 1.0181268882175227` and the
+  second scaled coordinates are independently checked before either stack runs.
+- Blended parameters are private validated values in the original codec domain:
+  four finite factors in 0.001..1000, smear in 1..8. This deliberately excludes
+  out-of-codec inputs accepted by the original Java testing constructor.
+  The 16/16/8 legacy stacks are reconstructed by `with_new_random` using only
+  retained parameters; old stacks and the original parent are never mutated.
+  Public sampling accepts every i32 `BlockPos`; internal wrapped coordinates
+  and unwrapped yMax bypass public Improved/Perlin caller caps. Original
+  8-/16-iteration order, division, clamp flags and strict clamped-lerp boundaries
+  are preserved. Constructor errors leave the supplied RNG unchanged.
+- Composite-noise fixtures are separate from GEN-04.1. They call actual Normal,
+  Simplex, Blended, and Mth original-JAR methods after original version detection
+  and registry bootstrap; the oracle contains no copied numerical noise formula.
+  Public sampling is immutable, allocation-free, synchronous and free of I/O.
 
 ## Block-entity persistence
 

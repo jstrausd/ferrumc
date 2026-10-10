@@ -70,9 +70,36 @@ Checked fixtures invoke the real original Minecraft 1.21.8 JAR and compare
 Reproduction, exact pins and numerical scope are in
 [GEN-04.1](../../../docs/agent-tasks/GEN-04_1_RANDOM_NOISE.md).
 These modules activate no natural terrain and add no executable generator
-identity. Density routing/sampling, Normal-/Blended-/Simplex noise,
-`WorldgenRandom` feature/decoration seeding, Overworld/Nether/End consumers and
-world seed parity remain separate work.
+identity.
+
+`SimplexNoise` now supplies the original 2D/3D sampler, including equality
+branches and Java integer overflow. Its offsets are diagnostics; the original
+samplers do not add them to input coordinates. `NormalNoise` supplies original
+modern or explicit legacy two-stack sampling and nonzero-amplitude-span
+normalization. Its caller coordinate cap is
+`MAX_NOISE_COORDINATE / 1.0181268882175227`, with the second scaled coordinates
+also checked. These are explicit `FerrumC` limits, not Vanilla defaults.
+
+`BlendedNoise` supplies original 16/16/8 legacy stacks, interpolation clamps,
+bound diagnostics and `with_new_random` reconstruction. Its checked
+`BlendedNoiseParameters` supports the original codec ranges: four factors in
+`0.001..=1000`, smear multiplier in `1..=8`. The original Java testing constructor
+does not enforce those ranges; this Rust API deliberately rejects that wider
+domain. Sampling accepts the full typed `BlockPos` i32 domain and preserves
+internal wrap/vertical semantics without applying public Perlin coordinate caps
+to intermediate consumer values. No implicit unseeded/default constructor is
+provided. All samplers allocate nothing and consume no random output while
+sampling. Constructor errors preserve the supplied parent random state.
+
+A separate original-JAR oracle covers 16,974 composite-noise records with exact
+float bits, complete active permutations, signed seed extrema, parent RNG
+consumption, normal scaling boundaries, Blended codec endpoints and clamped
+interpolation boundaries. See
+[GEN-04.2](../../../docs/agent-tasks/GEN-04_2_NORMAL_SIMPLEX_BLENDED.md).
+Density routing/sampling, End island density, `WorldgenRandom` feature/decoration
+seeding, Overworld/Nether/End chunk consumers and complete world seed parity
+remain separate work. Primitive goldens do not establish complete terrain or
+cross-platform parity.
 
 ## Block-entity storage codec
 
