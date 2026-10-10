@@ -26,6 +26,9 @@ async-trait = "0.1"
 # The durable embedded backend (`RedbStore`). Pure-Rust, embedded, ACID, no
 # native deps; the project default per docs/adr/0007-storage-backend.md.
 redb = { workspace = true }
+# Incremental logical-snapshot and closed-backup SHA-256 for the explicit
+# offline migration contract. Existing lockfile version; pure Rust, no runtime.
+sha2 = "0.10"
 # `RedbStore` runs every (blocking) redb transaction on `spawn_blocking` so DB
 # work never blocks an async executor worker, satisfying the "no blocking in
 # async" rule. Only the `rt` capability is used; the raw redb handle never

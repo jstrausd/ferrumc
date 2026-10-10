@@ -734,6 +734,7 @@ dependencies = [
  "ferrumc-nbt",
  "ferrumc-world",
  "redb",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",

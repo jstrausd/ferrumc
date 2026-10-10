@@ -172,10 +172,8 @@ impl<'a> Reader<'a> {
 
     /// Reads exactly 16 bytes (a raw UUID).
     ///
-    /// Only the mutation-journal decoder needs this, which is test-only this
-    /// milestone (the journal is write-only in production), so it is gated to
-    /// avoid a dead-code warning in the library build.
-    #[cfg(test)]
+    /// Used by the mutation-journal decoder, including the production offline
+    /// generation migration's validation of player actor identifiers.
     fn read_uuid_bytes(&mut self) -> Result<[u8; 16], StorageError> {
         self.take(16)?
             .try_into()
@@ -617,9 +615,7 @@ pub(crate) fn encode_mutation_log_record(record: &BlockMutationLogRecord) -> Vec
 /// with [`StorageError::Backend`].
 ///
 /// The journal is write-only this milestone, so the decoder (the future
-/// crash-replay entry point and the pair to [`encode_mutation_log_record`]) is
-/// exercised only by tests for now and gated accordingly.
-#[cfg(test)]
+/// offline migration validator and the pair to [`encode_mutation_log_record`]).
 pub(crate) fn decode_mutation_log_record(
     bytes: &[u8],
 ) -> Result<BlockMutationLogRecord, StorageError> {

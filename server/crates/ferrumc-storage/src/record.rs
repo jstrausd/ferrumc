@@ -832,9 +832,7 @@ impl MutationLogCause {
 
     /// Recovers a cause from its wire tag, or `None` if the tag is unknown.
     ///
-    /// Pairs with [`MutationLogCause::as_id`] in the journal decoder, which is
-    /// test-only this milestone (the journal is write-only in production).
-    #[cfg(test)]
+    /// Pairs with [`MutationLogCause::as_id`] in the offline journal validator.
     pub(crate) fn from_id(id: u8) -> Option<Self> {
         match id {
             0 => Some(MutationLogCause::PlayerCreative),

@@ -37,7 +37,8 @@
 - The production `RedbStore::open` keeps database format 3 and its exact
   eight-table catalog. Only `open_with_generation_metadata` supports format 4
   with a ninth `ferrumc:generation` table. Neither opener rewrites the other
-  format; format-4 opening of format 3 requires explicit future migration.
+  format; format-4 opening of format 3 requires the separate explicit offline
+  migration API, never an automatic upgrade.
   Chunk/overlay envelopes version 2 remain unchanged in both layouts.
   Inner block-entity payloads explicitly distinguish versioned lossless records
   from readable legacy sign/chest records; caller `SchemaVersion` is preserved.
@@ -82,3 +83,45 @@
 - WG-002 supplies neither format migration nor production App/Sim activation,
   natural terrain, configurable startup seeds, Vanilla-NBT interoperability,
   or process-kill/power-loss recovery evidence.
+
+## Explicit offline generation migration (WG-002-MIG)
+
+- Only `prepare_generation_migration` can prepare format 3 -> 4; normal openers
+  never upgrade. Legacy flat-v1 / 1.21.8 / Overworld / seed 0 is explicitly
+  operator-declared. Seed 0 is assigned deliberately, never reconstructed.
+- A declaration contains 1..=4096 unique typed scopes. Every scoped record is
+  covered. Existing unscoped players, journal, receipts (even empty receipts)
+  or watermark require exactly one declaration scope; ambiguity is refused.
+- Full catalog/type/metadata/key/record validation streams one row at a time.
+  Raw encoded records are never normalized by decoding/reencoding. Opaque
+  entity/player payload validity beyond the current codec remains their owner.
+  Migration plugin IDs are explicitly capped at 4096 UTF-8 bytes; existing
+  plugin key/value caps remain 512 bytes/1 MiB.
+- Journal key IDs begin at zero, are contiguous, match record IDs and exactly
+  agree with the watermark. Every nonempty receipt range exists and is within
+  MAX_SAVE_BATCH; distinct receipts cannot overlap. A private disposable disk
+  index sorts ranges with 16 MiB cache, without materializing all receipts.
+- The prepared source remains exclusively redb-locked until migration/drop.
+  A separately create_new-created logical backup reproduces all existing
+  raw key/value bytes, is closed, fsynced and completely verified. Its lock
+  survives redb close/open and closed-file SHA-256 computation. Reuse requires
+  the caller's recorded physical hash plus the exact logical snapshot.
+- Prepare/refusal do not change FerrumC tables, records or format marker.
+  redb open/close may change physical recovery/allocator bytes: unchanged
+  physical source SHA-256 is deliberately not the contract. Dirty/recovery-
+  required source files are refused before opening via a bounded header/
+  geometry guard pinned to redb 2.6.3 and an aborting repair callback.
+- Source/file path identity and backup hash are checked again immediately
+  before commit. In the same real source writer transaction, the complete
+  current snapshot is compared to the prepared incremental logical SHA-256,
+  then all descriptors, new table and format marker 4 commit atomically.
+- Format-4 retry is successful only after full data validation and exact
+  equality of the complete descriptor set and caller declaration. Unknown,
+  inconsistent, malformed or partial states are never repaired as migration.
+- File identity/directory-fsync support currently requires Unix; unsupported
+  platforms refuse explicitly. Source/backup redb caches are 64 MiB each;
+  one record's decoded heap and redb internal overhead are additional.
+- Rollback is explicit manual offline restoration of the verified format-3
+  backup, after closing all handles and separately preserving the replaced
+  state. No blind backup overwrite or automatic rollback after an ambiguous
+  commit. Processkill/power-loss evidence and App/Sim activation remain separate.

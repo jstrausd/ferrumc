@@ -54,6 +54,8 @@ use crate::{
     MAX_GENERATION_IDENTITIES,
 };
 
+pub(crate) mod migration;
+
 /// On-disk layout version recorded in the metadata table.
 ///
 /// Distinct from a record's [`crate::SchemaVersion`]: this versions the overall

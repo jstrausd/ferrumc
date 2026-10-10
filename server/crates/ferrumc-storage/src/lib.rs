@@ -23,6 +23,12 @@ pub use record::{
     MutationLogCause, PlayerRecord, MAX_CHUNK_BLOCK_ENTITY_DATA_LEN, MAX_CHUNK_RECORD_LEN,
     MAX_ENTITY_DATA_LEN, MAX_OVERLAY_BLOCK_ENTITIES, MAX_OVERLAY_SECTIONS, MAX_PLAYER_DATA_LEN,
 };
+pub use redb_store::migration::{
+    BackedUpGenerationMigration, GenerationMigrationBackup, GenerationMigrationError,
+    GenerationMigrationOutcome, GenerationMigrationPreparation, GenerationMigrationReport,
+    GenerationMigrationTable, LegacyGenerationDeclaration, PreparedGenerationMigration,
+    MAX_MIGRATION_PLUGIN_ID_LEN,
+};
 pub use redb_store::RedbStore;
 pub use schema::SchemaVersion;
 pub use store::{PlayerStore, PluginStore, WorldStore, MAX_PLUGIN_VALUE_LEN, MAX_SAVE_BATCH};

@@ -110,11 +110,77 @@ WG-001 values map to `Internal` with their specific diagnostic cause. Missing
 or different descriptors map to `InvalidState`, and the count limit maps to
 `Capacity`. Operational backend errors remain internal backend failures.
 
-This opt-in API is not wired into App/Sim. Explicit offline migration and
-consumer activation are follow-up tickets; no natural world generation or
+This opt-in API is not wired into App/Sim. Consumer activation remains a
+follow-up ticket; no natural world generation or
 startup seed selection is activated here. Transaction abort/drop and lost
 response tests cover atomicity and retry behavior, not process-kill/power-loss
 durability or runtime parity with Paper.
+
+## Explicit offline format migration
+
+[`RedbStore::prepare_generation_migration`] completely validates an existing
+format-3 store while holding an exclusive source lock. The operator must
+explicitly assert [`LegacyGenerationDeclaration::ferrumc_flat_v1_seed_zero`]:
+1.21.8 / `FerrumC` flat-v1 / Overworld with deliberately assigned seed 0, and a
+complete set of 1..=4096 unique typed scopes. No seed is guessed from chunks or
+configuration. Unscoped players/journal/receipts/watermark require exactly one
+declared scope. Wrong catalog/type/metadata, malformed or over-limit records,
+missing scopes, discontinuous journals and overlapping receipts are refused.
+
+```no_run
+use ferrumc_core::{DimensionId, WorldId};
+use ferrumc_storage::{
+    GenerationKey, GenerationMigrationError, GenerationMigrationPreparation,
+    LegacyGenerationDeclaration, RedbStore,
+};
+
+# fn offline() -> Result<(), GenerationMigrationError> {
+let scope = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+let declaration = LegacyGenerationDeclaration::ferrumc_flat_v1_seed_zero([scope])?;
+match RedbStore::prepare_generation_migration("world.redb", declaration)? {
+    GenerationMigrationPreparation::Required(prepared) => {
+        // Present/store this report before the operator initiates backup/commit.
+        let report = prepared.report().clone();
+        let backed_up = prepared.create_backup("world-before-format4.redb")?;
+        let backup = backed_up.backup().clone();
+        // Retain report and backup evidence even if the following result is lost.
+        let outcome = backed_up.migrate()?;
+        assert_eq!(outcome.report(), &report);
+        assert_eq!(outcome.backup(), &backup);
+    }
+    GenerationMigrationPreparation::AlreadyCompatible(report) => {
+        assert_eq!(report.source_format(), 4);
+    }
+}
+# Ok(())
+# }
+```
+
+Only [`BackedUpGenerationMigration`] exposes `migrate`: a separately
+`create_new`-created, closed/fsynced and fully verified backup is mandatory.
+Backup copies original raw rows without record normalization. The report's
+incremental logical SHA-256 differs from the backup's closed physical-file
+SHA-256; redb can alter recovery/allocator housekeeping bytes during open/close.
+Existing files are never overwritten. An explicitly reused backup requires
+its previously recorded file hash and exactly matching validated logical rows.
+The source/backup locks survive report, verification and commit; the complete
+source snapshot, path identity and backup hash are rechecked before the atomic
+generation-table/descriptors/format-4 commit. A format-4 retry validates all
+records and the complete exact declaration, rather than merely its marker.
+
+These methods perform synchronous offline I/O/CPU work and require Unix inode
+identity/directory fsync in this release. Source/backup caches are bounded to
+64 MiB each; receipt validation uses a disposable disk index with 16 MiB cache,
+and existing record-codec caps still apply. This is no whole-world heap copy or
+guaranteed total RSS bound. Recovery-required files need separate recovery;
+there is no automatic startup upgrade or data repair. Failed backup attempts
+may leave their own incomplete file for operator inspection.
+
+Rollback requires closing every handle, separately preserving the state being
+replaced, and explicitly restoring the verified format-3 backup offline. No
+automatic overwrite follows an ambiguous commit, and the backup excludes later
+gameplay changes. Operator CLI, runtime metadata activation, natural generation
+and processkill/power-loss acceptance remain separate tasks.
 
 ## Async strategy
 
