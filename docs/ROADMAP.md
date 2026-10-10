@@ -1,3 +1,11 @@
+# Historical roadmap — source audit supersedes this status
+
+The code at upstream `8315da2c` has advanced beyond this checklist. The current
+fork backlog, dependencies and acceptance criteria are in
+[V2_IMPLEMENTATION_PLAN.md](V2_IMPLEMENTATION_PLAN.md); verification results are
+in [V2_VALIDATION.md](V2_VALIDATION.md). Existing items below are retained as
+historical context and must be checked against source before implementation.
+
 # FerrumC v2 — Vanilla-Parity Roadmap
 
 > The full vanilla-server surface, tracked against the current build.

@@ -1,3 +1,11 @@
+# Historical checklist — source audit supersedes this status
+
+As of the 2026-10-10 source audit, this file understates the v2 code. Player
+persistence, serverbound budgets, Anvil import, trusted native plugins and
+additional gameplay/presentation commands have been implemented. Read
+[V2_IMPLEMENTATION_PLAN.md](V2_IMPLEMENTATION_PLAN.md) and
+[V2_VALIDATION.md](V2_VALIDATION.md) before treating an item below as missing.
+
 # FerrumC v2 — Implemented Features
 
 > What actually works **end-to-end against a real vanilla client** today.
