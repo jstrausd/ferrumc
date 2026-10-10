@@ -1,5 +1,6 @@
 # Build artifacts
 /server/target
+/.codex-tmp/
 **/*.rs.bk
 
 # IDE

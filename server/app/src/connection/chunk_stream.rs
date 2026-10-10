@@ -4,15 +4,16 @@
 use std::collections::BTreeSet;
 
 use tokio::sync::oneshot;
+use tokio::time::sleep_until;
 
 use ferrumc_math::{BlockPos, ChunkPos, Vec3};
-use ferrumc_net::{CompressionState, OutboundPriority, PlayWriter};
+use ferrumc_net::{CompressionState, LivenessDeadline, OutboundPriority, PlayWriter};
 use ferrumc_observability::SessionDebug;
 use ferrumc_proto::generated::play::{
     ClientboundPlayPacket, SetCenterChunk, SynchronizePlayerPosition, UnloadChunk,
 };
 
-use crate::driver::SimCommand;
+use crate::driver::{SimCommand, StreamedChunk};
 use crate::player_data::is_valid_player_position;
 
 use super::context::ConnContext;
@@ -206,6 +207,7 @@ pub(super) async fn apply_chunk_stream(
     chunk_stream: &mut ChunkStream,
     debug: &mut SessionDebug,
     compression: &CompressionState,
+    deadline: Option<LivenessDeadline>,
 ) -> anyhow::Result<()> {
     // Position path: recenter on the latest accepted target, if any.
     if let Some(position) = chunk_stream.pending_position.take() {
@@ -230,7 +232,7 @@ pub(super) async fn apply_chunk_stream(
 
     // Always advance the view toward full view distance from the current center,
     // whether or not a position packet moved it.
-    pump_chunk_stream(ctx, writer, chunk_stream, debug, compression).await
+    pump_chunk_stream(ctx, writer, chunk_stream, debug, compression, deadline).await
 }
 
 /// Advances the chunk view one bounded batch toward the full view distance around
@@ -250,6 +252,7 @@ pub(super) async fn pump_chunk_stream(
     chunk_stream: &mut ChunkStream,
     debug: &mut SessionDebug,
     compression: &CompressionState,
+    deadline: Option<LivenessDeadline>,
 ) -> anyhow::Result<()> {
     let clock = &ctx.clock;
     let center = chunk_stream.center;
@@ -271,8 +274,9 @@ pub(super) async fn pump_chunk_stream(
         return Ok(());
     }
 
-    // Drop the departed columns from the client now (tiny packets) and from the
-    // tracked set; the driver releases their tickets via the command below.
+    // Queue departed columns now, but retain their ticket bookkeeping until the
+    // command is admitted. An absolute deadline may cancel the bounded send;
+    // teardown must then still release every ticket the driver has not seen.
     for pos in &to_unload {
         let outcome = enqueue_traced(
             writer,
@@ -282,27 +286,33 @@ pub(super) async fn pump_chunk_stream(
             OutboundPriority::World,
             ClientboundPlayPacket::UnloadChunk(UnloadChunk::new(pos.z(), pos.x())),
         );
-        // Count only unloads that actually reach the queue. The column always
-        // leaves the tracked set, though: the driver releases its ticket via the
-        // `StreamChunks` command below regardless of whether the packet queued.
+        // Count only unloads that actually reach the queue. Ticket bookkeeping
+        // changes only after the bounded driver send below succeeds.
         if outcome.is_enqueued() {
             ctx.metrics.incr_chunk_unloaded(1);
         }
-        chunk_stream.loaded.remove(pos);
     }
 
     let (reply_tx, reply_rx) = oneshot::channel();
-    ctx.commands
-        .send(SimCommand::StreamChunks {
-            load: to_load,
-            unload: to_unload,
-            reply: reply_tx,
-        })
-        .await
-        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
-    let packets = reply_rx
-        .await
-        .map_err(|_| anyhow::anyhow!("simulation driver dropped the chunk-stream reply"))?;
+    let send = async {
+        ctx.commands
+            .send(SimCommand::StreamChunks {
+                load: to_load,
+                unload: to_unload.clone(),
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))
+    };
+    if deadline.is_some() {
+        super::play::guard_play_work(deadline, send).await?;
+    } else {
+        send.await?;
+    }
+    for pos in &to_unload {
+        chunk_stream.loaded.remove(pos);
+    }
+    let packets = receive_stream_reply(reply_rx, deadline, &mut chunk_stream.loaded).await?;
 
     // Only the chunks the driver actually built come back; record exactly those so
     // a skipped chunk is retried on a later update rather than treated as sent.
@@ -338,6 +348,35 @@ pub(super) async fn pump_chunk_stream(
         }
     }
     Ok(())
+}
+
+/// Closing before inspecting a timed-out receiver makes the ticket handoff
+/// atomic: an already delivered batch is retained for teardown; every later
+/// driver send fails and releases its own actual acquired tickets.
+async fn receive_stream_reply(
+    mut reply: oneshot::Receiver<Vec<StreamedChunk>>,
+    deadline: Option<LivenessDeadline>,
+    loaded: &mut BTreeSet<ChunkPos>,
+) -> anyhow::Result<Vec<StreamedChunk>> {
+    if let Some(deadline) = deadline {
+        tokio::select! {
+            biased;
+            () = sleep_until(deadline.at()) => {
+                reply.close();
+                if let Ok(packets) = reply.try_recv() {
+                    for packet in packets {
+                        loaded.insert(ChunkPos::new(packet.chunk.x(), packet.chunk.z()));
+                    }
+                }
+                Err(deadline.timeout().into())
+            }
+            packets = &mut reply => packets.map_err(|_| anyhow::anyhow!("simulation driver dropped the chunk-stream reply")),
+        }
+    } else {
+        reply
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver dropped the chunk-stream reply"))
+    }
 }
 
 /// The chunk column the world `position` falls in (flooring so negatives land on
@@ -421,6 +460,82 @@ fn next_chunk_transition(
 
 #[cfg(test)]
 mod tests {
+    fn streamed_fixture(pos: ferrumc_math::ChunkPos) -> crate::driver::StreamedChunk {
+        let chunk = ferrumc_world::FlatWorldGenerator::new().generate(pos);
+        crate::driver::StreamedChunk {
+            chunk: crate::world::chunk_packet(pos, &chunk).expect("fixture chunk encodes"),
+            block_entities: Vec::new(),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_reply_recovers_an_already_delivered_unconsumed_ticket() {
+        use ferrumc_math::ChunkPos;
+        use ferrumc_net::LivenessTimeout;
+        use std::collections::BTreeSet;
+        use std::time::Duration;
+        use tokio::sync::oneshot;
+        use tokio::time::{advance, Instant};
+
+        let mut liveness =
+            super::super::play::play_liveness(Instant::now(), Duration::from_secs(30))
+                .expect("Play tracker");
+        liveness
+            .keep_alive_sent(7, Instant::now())
+            .expect("request sent");
+        let pos = ChunkPos::new(4, 5);
+        let (sender, receiver) = oneshot::channel();
+        assert!(sender.send(vec![streamed_fixture(pos)]).is_ok());
+        // Delivery succeeded, but the connection has not yet polled the reply.
+        advance(Duration::from_secs(15)).await;
+        let mut loaded = BTreeSet::new();
+        let error = super::receive_stream_reply(receiver, liveness.next_deadline(), &mut loaded)
+            .await
+            .err()
+            .expect("the response deadline still wins");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&LivenessTimeout::KeepAlive { id: 7 })
+        );
+        assert_eq!(
+            loaded,
+            BTreeSet::from([pos]),
+            "teardown retains the actual acquired ticket"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_reply_closes_before_a_later_driver_delivery() {
+        use ferrumc_math::ChunkPos;
+        use std::collections::BTreeSet;
+        use std::time::Duration;
+        use tokio::sync::oneshot;
+        use tokio::time::{advance, Instant};
+
+        let mut liveness =
+            super::super::play::play_liveness(Instant::now(), Duration::from_secs(30))
+                .expect("Play tracker");
+        liveness
+            .keep_alive_sent(7, Instant::now())
+            .expect("request sent");
+        let (sender, receiver) = oneshot::channel();
+        advance(Duration::from_secs(15)).await;
+        let mut loaded = BTreeSet::new();
+        super::receive_stream_reply(receiver, liveness.next_deadline(), &mut loaded)
+            .await
+            .err()
+            .expect("undelivered reply timed out");
+        let returned = sender
+            .send(vec![streamed_fixture(ChunkPos::new(4, 5))])
+            .expect_err("closed receiver returns the driver's acquired ticket for durable cleanup");
+        assert_eq!(returned.len(), 1);
+        assert_eq!(
+            loaded.len(),
+            0,
+            "the driver owns cleanup of the undelivered ticket"
+        );
+    }
+
     #[test]
     fn chunk_pump_makes_center_out_progress_without_a_position_packet() {
         use std::collections::BTreeSet;

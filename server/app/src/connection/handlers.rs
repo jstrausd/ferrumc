@@ -7,7 +7,7 @@ use ferrumc_command::{CommandSource, CommandTree};
 use ferrumc_core::{GameMode, PlayerId, TextColor, TextComponent};
 use ferrumc_items::{left_click_exchange, ItemStack, UntrustedItemStack};
 use ferrumc_math::{BlockPos, Direction, Vec3, WorldIntent};
-use ferrumc_net::{CompressionState, ConnectionState, DecodeError, PlayWriter};
+use ferrumc_net::{CompressionState, ConnectionLiveness, ConnectionState, DecodeError, PlayWriter};
 use ferrumc_observability::{PacketState, SessionDebug};
 use ferrumc_plugin_api::{
     BlockBreakAttempt, BlockPlaceAttempt, ChatAttempt, InteractAttempt, InteractHand,
@@ -67,8 +67,9 @@ enum PlayBodyDecode {
 /// Protocol-valid but unmodelled packets are ignored because the generated slice
 /// intentionally covers only what `FerrumC` handles. A malformed modelled packet,
 /// an impossible protocol-772 id, or trailing outer/nested bytes is a classified
-/// fatal decode error. Teleport confirmation and Keep Alive are decoded strictly
-/// but otherwise ignored. A `ChatCommand` is dispatched locally; every other
+/// fatal decode error. Keep Alive echoes must match the one outstanding request
+/// before its deadline; teleport confirmations remain decoded and ignored.
+/// A `ChatCommand` is dispatched locally; every other
 /// modelled packet is forwarded to the simulation unless policy vetoes it.
 /// Movement is validated atomically and admitted to the bounded shard route
 /// before it may update any connection-local mirror.
@@ -88,6 +89,7 @@ pub(super) async fn handle_play_body(
     body: &[u8],
     debug: &mut SessionDebug,
     compression: &CompressionState,
+    liveness: &mut ConnectionLiveness,
 ) -> anyhow::Result<()> {
     let decoded = match decode_play_body(body) {
         Ok(PlayBodyDecode::Modelled(decoded)) => decoded,
@@ -125,6 +127,15 @@ pub(super) async fn handle_play_body(
         MovementValidation::Valid(movement) => Some(movement),
         MovementValidation::Invalid => return Ok(()),
     };
+
+    // Validate liveness only after strict body and movement validation, before any
+    // observable packet effect. Ordinary traffic cannot satisfy a Keep Alive.
+    let now = tokio::time::Instant::now();
+    if let ServerboundPlayPacket::ServerboundKeepAlive(keep_alive) = &packet {
+        liveness.keep_alive_received(keep_alive.keep_alive_id(), now)?;
+    } else {
+        liveness.valid_packet_observed(now)?;
+    }
 
     // Record the inbound play trace with the exact frame-body size.
     debug.record_inbound(observe::trace_inbound_play(
@@ -345,9 +356,8 @@ pub(super) async fn handle_play_body(
             )
             .await;
         }
-        // The teleport confirmation (reply to the join position sync) and the
-        // Keep Alive echo are accepted and need no action: the slice does not
-        // validate teleport ids and the keep-alive timer is fire-and-forget.
+        // Keep Alive was validated above. Teleport confirmation remains the
+        // pre-existing decode-only path; teleport-ID authority is a later task.
         ServerboundPlayPacket::ConfirmTeleportation(_)
         | ServerboundPlayPacket::ServerboundKeepAlive(_) => return Ok(()),
         _ => {}
@@ -1841,9 +1851,9 @@ mod tests {
     };
     use ferrumc_plugin_host::PluginHost;
     use ferrumc_proto::generated::play::{
-        ClientboundPlayPacket, ServerboundKeepAlive, ServerboundPlayPacket, SetCenterChunk,
-        SetCreativeSlot, SetPlayerPosition, SetPlayerPositionAndRotation, SetPlayerRotation,
-        UpdateSign, UseItemOn,
+        ClientboundPlayPacket, ConfirmTeleportation, ServerboundKeepAlive, ServerboundPlayPacket,
+        SetCenterChunk, SetCreativeSlot, SetPlayerPosition, SetPlayerPositionAndRotation,
+        SetPlayerRotation, UpdateSign, UseItemOn,
     };
     use ferrumc_proto::types::BlockPosition;
     use ferrumc_sim::SimShard;
@@ -1858,6 +1868,7 @@ mod tests {
     use crate::config::AppConfig;
     use crate::connection::chunk_stream::{apply_chunk_stream, ChunkStream};
     use crate::connection::context::{build_status_response, ConnContext};
+    use crate::connection::play::play_liveness;
     use crate::connection::rate_limiter::ChatRateLimiter;
     use crate::driver::SimCommand;
     use crate::inventory::{PlayerInventory, HOTBAR_START};
@@ -1918,6 +1929,134 @@ mod tests {
             decode_play_body(&tick_end),
             Ok(PlayBodyDecode::Unmodelled { id: 0x0c })
         ));
+    }
+
+    /// Runs the real packet handler with a socket-free fixture. These packets
+    /// should never enqueue simulation work or outbound gameplay effects.
+    fn handle_liveness_packet<'call>(
+        ctx: &'call ConnContext,
+        liveness: &'call mut ferrumc_net::ConnectionLiveness,
+        packet: ServerboundPlayPacket,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + 'call {
+        // The complete handler fixture owns an inventory and session trace;
+        // keep that future off the test task's stack.
+        Box::pin(async move {
+            let mut body = BytesMut::new();
+            packet.encode(&mut body)?;
+            let mut writer = PlayWriter::with_defaults(ctx.limits);
+            let result = handle_play_body(
+                ctx,
+                PlayerId::offline("LivenessProbe"),
+                "LivenessProbe",
+                &mut writer,
+                &mut ChunkStream::new(ctx),
+                &mut ChatRateLimiter::new(ctx.clock.now()),
+                &mut PlayerInventory::with_creative_kit(GameMode::Creative),
+                &mut WindowState::new(),
+                &mut 0.0,
+                &mut 0.0,
+                &body,
+                &mut SessionDebug::new("LivenessProbe"),
+                &CompressionState::disabled(),
+                liveness,
+            )
+            .await;
+            assert_eq!(writer.total_queued(), 0);
+            result
+        })
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn keep_alive_echo_is_accepted_once_and_must_match() {
+        use ferrumc_net::KeepAliveError;
+        use tokio::time::Instant;
+
+        let (commands, mut inbox) = mpsc::channel(8);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let echo = ServerboundPlayPacket::ServerboundKeepAlive(ServerboundKeepAlive::new(7));
+        let mut liveness = play_liveness(Instant::now(), ctx.io_timeout).expect("Play tracker");
+        let error = handle_liveness_packet(&ctx, &mut liveness, echo.clone())
+            .await
+            .expect_err("unsolicited Keep Alive must terminate the connection");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&KeepAliveError::Unexpected { received: 7 })
+        );
+
+        let mut liveness = play_liveness(Instant::now(), ctx.io_timeout).expect("Play tracker");
+        liveness
+            .keep_alive_sent(8, Instant::now())
+            .expect("request sent");
+        let error = handle_liveness_packet(&ctx, &mut liveness, echo.clone())
+            .await
+            .expect_err("wrong ID must terminate the connection");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&KeepAliveError::Mismatched {
+                expected: 8,
+                received: 7
+            })
+        );
+
+        let mut liveness = play_liveness(Instant::now(), ctx.io_timeout).expect("Play tracker");
+        liveness
+            .keep_alive_sent(7, Instant::now())
+            .expect("request sent");
+        handle_liveness_packet(&ctx, &mut liveness, echo.clone())
+            .await
+            .expect("matching echo");
+        assert_eq!(liveness.outstanding_keep_alive(), None);
+        let error = handle_liveness_packet(&ctx, &mut liveness, echo)
+            .await
+            .expect_err("replay must terminate the connection");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&KeepAliveError::Unexpected { received: 7 })
+        );
+        assert!(
+            inbox.try_recv().is_err(),
+            "Keep Alive never reaches simulation"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ordinary_packet_cannot_extend_or_satisfy_keep_alive_deadline() {
+        use ferrumc_net::{KeepAliveError, LivenessTimeout};
+        use std::time::Duration;
+        use tokio::time::{advance, Instant};
+
+        let (commands, mut inbox) = mpsc::channel(8);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut liveness = play_liveness(Instant::now(), ctx.io_timeout).expect("Play tracker");
+        liveness
+            .keep_alive_sent(7, Instant::now())
+            .expect("request sent");
+        let deadline = liveness.next_deadline().expect("response deadline");
+        advance(Duration::from_secs(14)).await;
+        handle_liveness_packet(
+            &ctx,
+            &mut liveness,
+            ServerboundPlayPacket::ConfirmTeleportation(ConfirmTeleportation::new(1)),
+        )
+        .await
+        .expect("ordinary valid packet");
+        assert_eq!(liveness.next_deadline(), Some(deadline));
+        assert!(liveness.outstanding_keep_alive().is_some());
+        advance(Duration::from_secs(1)).await;
+        let error = handle_liveness_packet(
+            &ctx,
+            &mut liveness,
+            ServerboundPlayPacket::ServerboundKeepAlive(ServerboundKeepAlive::new(7)),
+        )
+        .await
+        .expect_err("an echo at the deadline is late");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&KeepAliveError::TimedOut {
+                timeout: LivenessTimeout::KeepAlive { id: 7 },
+            })
+        );
+        assert!(inbox.try_recv().is_err());
     }
     /// Test plugin that makes a `PlayerMove` callback observable without changing
     /// production metrics or relying on captured logs.
@@ -2307,6 +2446,8 @@ mod tests {
                 &body,
                 &mut debug,
                 &compression,
+                &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)
+                    .expect("Play liveness"),
             )
             .await
             .expect("reject hostile movement cleanly");
@@ -2339,6 +2480,7 @@ mod tests {
             &body,
             &mut debug,
             &compression,
+            &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("Play liveness"),
         )
         .await
         .expect("admit valid movement");
@@ -2369,6 +2511,7 @@ mod tests {
             &body,
             &mut debug,
             &compression,
+            &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("Play liveness"),
         )
         .await
         .expect("reject later hostile movement");
@@ -2443,6 +2586,7 @@ mod tests {
             &mut overflow_stream,
             &mut debug,
             &compression,
+            None,
         )
         .await
         .expect_err("a dropped mandatory stream centre terminates the session");
@@ -2586,6 +2730,8 @@ mod tests {
                     &body,
                     &mut debug,
                     &compression,
+                    &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)
+                        .expect("Play liveness"),
                 )
                 .await
                 .expect("reject hostile placement cursor cleanly");
@@ -2625,6 +2771,7 @@ mod tests {
             &body,
             &mut debug,
             &compression,
+            &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("Play liveness"),
         )
         .await
         .expect("cursor rejection precedes malformed-face acknowledgement");
@@ -2684,6 +2831,8 @@ mod tests {
                 &body,
                 &mut debug,
                 &compression,
+                &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)
+                    .expect("Play liveness"),
             )
             .await
             .expect("admit valid placement cursor");

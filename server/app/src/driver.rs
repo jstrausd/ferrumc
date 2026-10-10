@@ -1039,8 +1039,8 @@ async fn handle_command(
             // acquiring, so a chunk that both left and re-entered nets out cleanly.
             release_chunks(shard, storage_tx, tick, next_mutation_id, &unload).await?;
             let packets = load_chunks(shard, store, generator, &load).await;
-            // A gone connection just discards the packets; nothing to clean up.
-            let _ = reply.send(packets);
+            deliver_streamed_chunks(reply, packets, shard, storage_tx, tick, next_mutation_id)
+                .await?;
         }
         SimCommand::ReleaseChunks { positions } => {
             // Disconnect path: await the worker's commit before releasing tickets so
@@ -1375,6 +1375,27 @@ async fn load_chunks(
         }
     }
     packets
+}
+
+/// A timed-out stream request drops its receiver. Release only the player
+/// tickets actually acquired for the returned packets, behind the same durable
+/// flush barrier as ordinary unloads; another player's tickets remain held.
+async fn deliver_streamed_chunks(
+    reply: oneshot::Sender<Vec<StreamedChunk>>,
+    packets: Vec<StreamedChunk>,
+    shard: &mut SimShard,
+    storage_tx: &mpsc::Sender<StorageFlushRequest>,
+    tick: Tick,
+    next_mutation_id: &mut u64,
+) -> ServerResult<()> {
+    if let Err(packets) = reply.send(packets) {
+        let positions = packets
+            .iter()
+            .map(|packet| ChunkPos::new(packet.chunk.x(), packet.chunk.z()))
+            .collect::<Vec<_>>();
+        release_chunks_acked(shard, storage_tx, tick, next_mutation_id, &positions).await?;
+    }
+    Ok(())
 }
 
 /// Releases the player ticket on each chunk in `positions`.
@@ -1734,8 +1755,8 @@ mod tests {
     use crate::storage_worker::StorageFlushRequest;
 
     use super::{
-        drain_shard_inputs, handle_command, release_chunks, release_chunks_acked,
-        route_input_command, try_flush_persist_dirty, SimCommand,
+        deliver_streamed_chunks, drain_shard_inputs, handle_command, load_chunks, release_chunks,
+        release_chunks_acked, route_input_command, try_flush_persist_dirty, SimCommand,
     };
 
     /// Builds one shard-mutating driver command for the saturation matrix.
@@ -1862,6 +1883,61 @@ mod tests {
         assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
         assert!(shard.loaded_chunks().has_persist_dirty());
         (shard, pos)
+    }
+
+    #[tokio::test]
+    async fn abandoned_stream_reply_releases_its_ticket_only_after_durable_ack() {
+        for commit_succeeds in [true, false] {
+            let (mut shard, pos) = dirty_player_chunk().await;
+            let packets = load_chunks(
+                &mut shard,
+                &InMemoryStore::new(),
+                &FlatWorldGenerator::new(),
+                &[pos],
+            )
+            .await;
+            assert_eq!(packets.len(), 1);
+            assert_eq!(shard.loaded_chunks().ticket_count(pos), 2);
+            let (reply, receiver) = oneshot::channel();
+            drop(receiver); // The connection's absolute deadline canceled its wait.
+            let (storage_tx, mut storage_rx) = mpsc::channel::<StorageFlushRequest>(1);
+            let worker = tokio::spawn(async move {
+                let mut request = storage_rx.recv().await.expect("durability barrier request");
+                assert_eq!(request.overlays.len(), 1);
+                let result = if commit_succeeds {
+                    Ok(())
+                } else {
+                    Err(ServerError::internal(
+                        "injected stream cleanup commit failure",
+                    ))
+                };
+                request
+                    .ack
+                    .take()
+                    .expect("cleanup waits for commit")
+                    .send(result)
+                    .expect("cleanup receiver remains live");
+            });
+            let result = deliver_streamed_chunks(
+                reply,
+                packets,
+                &mut shard,
+                &storage_tx,
+                Tick::ZERO,
+                &mut 0,
+            )
+            .await;
+            assert_eq!(result.is_ok(), commit_succeeds);
+            assert_eq!(
+                shard.loaded_chunks().ticket_count(pos),
+                if commit_succeeds { 1 } else { 2 }
+            );
+            assert!(
+                shard.loaded_chunks().is_loaded(pos),
+                "the other player's ticket stays held"
+            );
+            worker.await.expect("barrier worker returned");
+        }
     }
 
     #[tokio::test]
