@@ -1,0 +1,25 @@
+minecraft_version = "1.21.8"
+data_version = 4440
+paper_build = 60
+paper_commit = "29c8822d90899c89d2689338e81a98f690bcba12"
+source_directory = "paper-server/src/minecraft/resources/data/minecraft/tags/block"
+
+[[files]]
+name = "fences.json"
+bytes = 89
+sha256 = "a290d819c87ec1cbb13a8358b7901c7de2fd2996ce0b407cb8cb645a3b7489cf"
+
+[[files]]
+name = "wooden_fences.json"
+bytes = 384
+sha256 = "ae7e7af5b34adc0e46445a222f839a199249603c1964a5ab07ca1dd2d7dd24c9"
+
+[[files]]
+name = "leaves.json"
+bytes = 374
+sha256 = "ddcbb71304be64895fcf35604d880c9d53e1cdf46ad313d35cb6a44a58dde320"
+
+[[files]]
+name = "shulker_boxes.json"
+bytes = 618
+sha256 = "22aa9d643b5e742d9c8b44371de676d85d3fed4806156a6b6fe221e6dae9926b"

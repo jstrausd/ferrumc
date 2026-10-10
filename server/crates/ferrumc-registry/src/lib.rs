@@ -3,6 +3,7 @@
 
 pub mod biome;
 pub mod block_state;
+pub mod connection;
 pub mod dimension;
 pub mod item;
 

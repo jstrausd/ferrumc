@@ -34,3 +34,11 @@
   Source snapshots remain unchanged. Contextual attachment and support checks
   belong to placement/simulation, not registry lookup.
 - This crate may depend only on `ferrumc-core`; never on sim, net, or storage.
+- Built-in connection facts are pinned to Minecraft 1.21.8 / Paper Build 60.
+  Fence families follow explicit `FENCES`/`WOODEN_FENCES` membership (including
+  crimson and warped as wooden); exceptions follow the reviewed block classes,
+  explicit names and `SHULKER_BOXES` membership. Tag facts retain checksummed
+  source fixtures and are cross-checked against the vendored block registry.
+- Unknown/malformed block names never become known non-exceptions. The facts
+  do not include dynamic datapack tag overrides or classify full supporting
+  faces: the registry's `boundingBox` flag is not support-shape evidence.

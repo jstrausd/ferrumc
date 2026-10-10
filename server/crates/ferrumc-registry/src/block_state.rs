@@ -79,8 +79,10 @@ pub struct BlockMetadata {
     pub min_state: u32,
     /// The highest state id in this block's dense range.
     pub max_state: u32,
-    /// Whether the block is a full solid cube (`boundingBox == "block"`), used by
-    /// the placement layer to decide fence connectivity to non-fence neighbours.
+    /// Whether the vendored snapshot reports `boundingBox == "block"`.
+    ///
+    /// This coarse classification does not describe state/face support shapes
+    /// and cannot by itself prove a full supporting face for fence connections.
     pub is_solid_cube: bool,
     /// The block's properties, in state-id encoding order.
     pub properties: &'static [Property],

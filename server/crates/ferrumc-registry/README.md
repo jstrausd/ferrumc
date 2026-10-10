@@ -15,6 +15,9 @@ so a re-pin to a newer data version cannot silently desync them.
 
 - Version constants: `MINECRAFT_VERSION`, `PROTOCOL_VERSION`, `DATA_VERSION`.
 - `block_state` — fixed block-*state* (palette) ids for the flat-world block set.
+- `connection` — built-in fence-family and connection-exception facts pinned to
+  Minecraft 1.21.8 / Paper Build 60. Unknown block names are refused; these facts
+  do not evaluate support shapes or runtime datapack overrides.
 - `default_block_state_id(name)` — resource-location → default state id lookup.
 - `dimension` — overworld geometry constants (`OVERWORLD`, `MIN_Y`, `HEIGHT`).
 - `biome` — biome resource-location constants (`PLAINS`).
