@@ -30,6 +30,10 @@
 //!   advanced one tick at a time with **no catch-up**.
 //! - [`SimShard`] — owns a bounded inbox, the player set, and the resident
 //!   chunks, applying inputs only at tick boundaries.
+//! - [`EntityStore`] — optional bounded non-player registrations with separate
+//!   UUID/wire identity and fixed owner-local chunk indexes. Shard mutations
+//!   use [`EntityTickContext`] at an explicit tick entry; no entity gameplay or
+//!   application consumer is enabled by initializing this producer.
 //! - [`ShardPartitioner`] / [`ShardOwnershipMap`] — deterministic typed 8x8
 //!   region partitioning and overlap-free runtime ownership claims.
 //! - [`ShardLifecycle`] — the explicit eligibility lifecycle used by the
@@ -65,6 +69,7 @@
 
 mod coordinator;
 mod cross_shard;
+mod entity;
 mod error;
 mod generation;
 mod harness;
@@ -84,6 +89,11 @@ mod ticket;
 mod time;
 
 pub use coordinator::{TickCoordinator, TickRate};
+pub use entity::{
+    EntityChunkIter, EntityData, EntityHandle, EntitySpawn, EntityStore, EntityStoreError,
+    EntityTickContext, EntityTransform, EntityTransformComponent, MAX_ENTITIES_PER_SHARD,
+    MAX_ENTITY_HORIZONTAL_POSITION, MAX_ENTITY_VERTICAL_POSITION,
+};
 pub use error::{SimError, SimResult};
 pub use generation::{GenerationBinding, VerifiedGenerationBinding};
 pub use harness::{SimHarness, TickOutcome};

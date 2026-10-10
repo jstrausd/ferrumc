@@ -20,6 +20,7 @@ use ferrumc_world::{
 };
 
 use crate::cross_shard::{CrossShardIntent, CrossShardPayload};
+use crate::entity::{EntityStore, EntityStoreError, EntityTickContext};
 use crate::error::SimError;
 use crate::loaded::LoadedChunkMap;
 use crate::message::{GameInput, GameOutput};
@@ -220,7 +221,9 @@ struct PendingMove {
 /// A shard exclusively owns its players, a bounded inbox, and the chunks
 /// resident for its world/dimension (a [`LoadedChunkMap`]). It applies queued
 /// [`GameInput`]s **only** at tick boundaries and returns the resulting
-/// [`GameOutput`]s. Entity ownership arrives in later milestones.
+/// [`GameOutput`]s. An opt-in bounded non-player store admits resident targets
+/// through [`run_tick_with_entity_work`](Self::run_tick_with_entity_work);
+/// entity physics, tracking, AI and persistence remain separate consumers.
 ///
 /// # Chunk ownership
 ///
@@ -292,6 +295,7 @@ pub struct SimShard {
     inbox_capacity: usize,
     players: BTreeMap<PlayerId, PlayerState>,
     chunks: LoadedChunkMap,
+    entities: Option<EntityStore>,
     /// Accepted gameplay mutations buffered for the storage journal, drained each
     /// tick by the driver. Bounded by [`MUTATION_LOG_CAP`].
     mutation_log: Vec<PendingMutation>,
@@ -395,6 +399,7 @@ impl SimShard {
             inbox_capacity: capacity.get(),
             players: BTreeMap::new(),
             chunks,
+            entities: None,
             mutation_log: Vec::new(),
             undo_history: BTreeMap::new(),
             region_limits: RegionLimits::default(),
@@ -425,6 +430,72 @@ impl SimShard {
     /// tickets and collect dirty chunks for saving.
     pub fn loaded_chunks_mut(&mut self) -> &mut LoadedChunkMap {
         &mut self.chunks
+    }
+
+    /// Initializes one empty bounded non-player store for this canonical owner.
+    ///
+    /// Initialization is configuration, not entity mutation. Replacement is
+    /// refused even if the existing store is empty, so issued handles cannot be
+    /// silently retargeted. Arbitrary invalid shard positions are rejected.
+    pub fn initialize_entities(&mut self, capacity: NonZeroUsize) -> Result<(), EntityStoreError> {
+        if self.entities.is_some() {
+            return Err(EntityStoreError::AlreadyInitialized);
+        }
+        let owner =
+            crate::ShardId::try_new(self.chunks.world(), self.chunks.dimension(), self.shard_pos)
+                .map_err(|_| EntityStoreError::InvalidOwner {
+                position: self.shard_pos,
+            })?;
+        let entities = EntityStore::new(owner, capacity)?;
+        self.entities = Some(entities);
+        Ok(())
+    }
+
+    /// Returns immutable opt-in registrations, independent of chunk/tick lifetime.
+    ///
+    /// No raw mutable store accessor is exposed. `Clone` of this shard uses a
+    /// fresh store incarnation and preserves base data only as a snapshot, not
+    /// a second global UUID/wire admission guarantee.
+    pub fn entities(&self) -> Option<&EntityStore> {
+        self.entities.as_ref()
+    }
+
+    /// Runs checked entity work at this tick entry, then the ordinary FIFO tick.
+    ///
+    /// The context requires resident spawn/move targets and never exposes raw
+    /// mutable store/chunks. A missing store refuses before executing the closure
+    /// or draining the inbox. The current chunk-map scope must still match the
+    /// store owner; replacing the public chunk map cannot authorize a foreign
+    /// world/dimension. Mismatch likewise refuses before work or inbox mutation.
+    /// Each entity operation is atomic on error; the
+    /// closure as a whole is not a transaction, and its return value does not
+    /// cancel admitted prior operations or the ordinary tick.
+    ///
+    /// Like `run_tick`, the external coordinator owns tick numbering. This
+    /// explicit entry has no automatic entity ticking, scheduler/app wiring,
+    /// tracking outputs or plugin events. A closure panic is fail-stop, never a
+    /// retry signal for partially applied entity work.
+    pub fn run_tick_with_entity_work<R>(
+        &mut self,
+        work: impl FnOnce(&mut EntityTickContext<'_>) -> R,
+    ) -> Result<(R, Vec<GameOutput>), EntityStoreError> {
+        let entities = self
+            .entities
+            .as_mut()
+            .ok_or(EntityStoreError::NotInitialized)?;
+        let owner = entities.owner();
+        let world = self.chunks.world();
+        let dimension = self.chunks.dimension();
+        if owner.world() != world || owner.dimension() != dimension {
+            return Err(EntityStoreError::ScopeMismatch {
+                owner,
+                world,
+                dimension,
+            });
+        }
+        let result = work(&mut EntityTickContext::new(entities, &self.chunks));
+        let outputs = self.run_tick();
+        Ok((result, outputs))
     }
 
     /// Returns the fixed inbox capacity.

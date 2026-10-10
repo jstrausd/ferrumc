@@ -132,6 +132,46 @@
 - `ShardId` canonically includes world, dimension, and `ShardPos`; each id names
   exactly one logical region. Workers/endpoints are separate runtime concepts
   and may process or route multiple shard ids.
+- Optional non-player registrations belong to one `EntityStore` with an
+  explicit nonzero slot ceiling no greater than 65,536. There is no unbounded
+  default. Slots grow lazily and retired slots count against that ceiling.
+  UUID and wire indexes never exceed the live count; fixed 64 chunk buckets use
+  intrusive slot links, so chunk queries do not scan unrelated registrations.
+- `EntityUuid`, wire `EntityId`, registered `EntityTypeId` and the opaque local
+  `EntityHandle` are separate identities. Spawn refuses duplicate UUID/wire ids
+  locally, a wrong world/dimension/8x8 owner, and the player type. Existing
+  `PlayerState` remains the only player-state owner. UUID/wire allocation and
+  duplicate prevention across stores are not supplied by this producer.
+- Every entity transform is finite, with explicit FerrumC rejection caps of
+  x/z ±30,000,000 and y ±20,000,000 blocks. Those caps are not original setter
+  parity or world build height. Chunk assignment floors negative coordinates.
+  Finite yaw is `% 360` and pitch is `(pitch % 360).clamp(-90, 90)`.
+- Handles bind owner, slot, generation and a weak store incarnation. Remove
+  invalidates old generations; maximum generation permanently retires a slot
+  rather than wrapping. Recreated/cloned stores reject source handles. Clone
+  copies bounded registrations as a snapshot with a fresh incarnation; it is
+  not authorization to activate competing global UUID/wire owners.
+- Entity operations preflight before mutation. Returned errors preserve
+  records, all identity/spatial indexes and handle validity. Successful lookups,
+  borrowed chunk queries and transform updates allocate no heap object. Slot
+  reservation is fallible before commit; standard BTreeMap allocation failure
+  terminates the process and is not advertised as a recoverable Result.
+- `SimShard` exposes registrations read-only. Initialization is explicit and
+  once-only. The mutable `EntityTickContext` exists only inside
+  `run_tick_with_entity_work`; spawn/move validate scope/owner/handle before
+  requiring a ticket-resident target. Every entity tick entry first verifies
+  that the current loaded map's world/dimension still equals the store owner,
+  even after a caller replaces the map through `loaded_chunks_mut`. A missing
+  store or mismatched map refuses before closure execution or ordinary inbox
+  drain, preserving registrations, handles and resident facts. The closure executes before the ordinary
+  tick; each operation is atomic, but the whole closure is not a transaction.
+- Registration, chunk residency, accessible/tracked status and entity-ticking
+  status are distinct. Last-ticket release preserves registrations; subsequent
+  spawn/move into the unloaded target refuses, while remove and migration to a
+  different resident chunk remain available. No chunk is force-loaded. There
+  is no automatic entity tick, activation, AI, collision, item payload, storage,
+  plugin event, tracking output, app/scheduler consumer or cross-shard transfer.
+  Removal returns base data, never a durable delete/save acknowledgement.
 - A logical region may have at most one ownership claim.
 - Shard lifecycle is strictly `Created -> Active -> Draining -> Stopped`.
   Rejected transitions leave the prior state unchanged.
