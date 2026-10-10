@@ -428,11 +428,13 @@ unsupported Methoden müssen konkrete Fehler liefern.
 
 ## Abgenommene Teilverträge und nächste Untertickets
 
-Die 214 Haupttickets bleiben der Gesamtumfang. Die ersten drei Wellen schließen nur
+Die 214 Haupttickets bleiben der Gesamtumfang. Die bisherigen Wellen schließen nur
 die folgenden ausdrücklich begrenzten Teilverträge; lokale kombinierte Prüfungen,
 Artefakte und verbleibende Grenzen stehen im
-[ersten Wellenbericht](AGENT_WAVE_01_VALIDATION.md) und
-[zweiten Wellenbericht](AGENT_WAVE_02_VALIDATION.md). CI bewertet den veröffentlichten
+[ersten Wellenbericht](AGENT_WAVE_01_VALIDATION.md),
+[zweiten Wellenbericht](AGENT_WAVE_02_VALIDATION.md),
+[dritten Wellenbericht](AGENT_WAVE_03_VALIDATION.md) und
+[vierten Wellenbericht](AGENT_WAVE_04_VALIDATION.md). CI bewertet den veröffentlichten
 `main`-Commit zusätzlich. Kein lokaler Teilnachweis ersetzt QA-02–10.
 
 | Untervertrag | Status | Konkreter Umfang / Rest |
@@ -446,10 +448,16 @@ Artefakte und verbleibende Grenzen stehen im
 | SRV-01.1 (ITEMS-TRANSFER-001) | F | [Reine Split-/Transferpläne](agent-tasks/ITEMS-TRANSFER-001.md), `a7f7aa33`: Mengen-/Komponentenerhaltung, 72 Unit-/drei Doctests und Review CLEAN mit unabhängiger Probe. Gameplayconsumer, effektive Paper-Komponentenpolicy und dauerhafte Storage-Ownershiptransaktion bleiben offen; SRV-01 bleibt T. |
 | CAT-02.1 | F | [Originaldatenexport](agent-tasks/CAT-02_1_ORIGINAL_CONTENT.md), `37c037b9`: ausgewählte 3.609 Originalressourcen vollständig/bytegenau geprüft, 17 Helper- und sieben Inventorytests, drei frische Reexporte und Review CLEAN. Weitere CAT-02-Kategorien und Laufzeitconsumer bleiben offen. |
 | GEN-04.1 | F | [Random-/Noiseprimitiven](agent-tasks/GEN-04_1_RANDOM_NOISE.md), `e754254f`: 144 Worldtests, sieben Release-Vertragstests, unabhängiger Rootreexport unter Python `-O` byteidentisch und Review CLEAN. Diese Sampler allein erzeugen kein Terrain; GEN-04 bleibt T. |
-| GEN-12.0 (CONFIG-WG001) | F | [Konfigproducer](agent-tasks/CONFIG-WG001_GENERATION.md), `402df480`: private optionale i64-Seed-/geschlossene Presetdeklaration, erhaltene Auslassung und unabhängiger Import; 30 Tests auch unabhängig grün, Review CLEAN. Produktive App-Auflösung/Anbindung folgt in WG-004; GEN-12 bleibt offen. |
+| GEN-12.0 (CONFIG-WG001) | F | [Konfigproducer](agent-tasks/CONFIG-WG001_GENERATION.md), `402df480`: private optionale i64-Seed-/geschlossene Presetdeklaration, erhaltene Auslassung und unabhängiger Import; 30 Tests auch unabhängig grün, Review CLEAN. Produktive Flat-v1-Anbindung ist getrennt in WG-004 geprüft; vollständiger GEN-12-Umfang bleibt offen. |
 | GEN-11.2 (WG-002-MIG) | F | [Explizite Migration](agent-tasks/WG-002-MIG.md), `b299a5fc`: 177 Tests auch unabhängig grün, strictchecks und Review CLEAN; typisierte Legacydeklaration, logisch raw-bytegleiches neues Backup, vollständiger Scan und atomarer Format3→4-Commit. Keine Startautomatik oder Prozesskill-/Stromausfallabnahme. |
-| GEN-01.2 (WG-003) | F | [Sim-Generatorbindung](agent-tasks/WG-003_SIM_GENERATION.md), `da61c638`: opaque Weak-Arc-/Scope-/Identitätstoken, validiertes Chunkladen und all-or-nothing Dirtycapture; 204 Tests, strikte Checks, Review CLEAN nach unabhängiger Await-RED/GREEN-Repro. App aktiviert die Bindung erst in WG-004. |
+| GEN-01.2 (WG-003) | F | [Sim-Generatorbindung](agent-tasks/WG-003_SIM_GENERATION.md), `da61c638`: opaque Weak-Arc-/Scope-/Identitätstoken, validiertes Chunkladen und all-or-nothing Dirtycapture; 204 Tests, strikte Checks, Review CLEAN nach unabhängiger Await-RED/GREEN-Repro. Appaktivierung ist getrennt in WG-004 geprüft. |
 | SIM-03.1 | F | [Core EntityUuid](agent-tasks/SIM-03_1_CORE_ENTITY_UUID.md), `6998a76e`: dauerhafte 128-Bit-UUID getrennt von Wire-ID/PlayerId; Default-/No-default-/Compile-fail-Checks und unabhängige Contracttests6/4 grün, Review CLEAN. Entityownership, Tracking, UUID-Storagekeys und Mobs bleiben offen. |
+| SIM-03.2a (REG-ENTITY001) | F | [Entitytypenproducer](agent-tasks/REG-ENTITY001_ENTITY_TYPES.md), `cd32fbd2`: alle 151 Entitytypen generiert, opaquer geprüfter Typ und allocfreie Lookup-/Iterationsverträge; Rootcontracts8 und Originalreexport grün, Review CLEAN. Keine aktive Entitysimulation. |
+| GEN-04.2 | F | [Normal-/Simplex-/Blendednoise](agent-tasks/GEN-04_2_NORMAL_SIMPLEX_BLENDED.md), `09fd6657`: 153 Worldtests, 16.974 bitgenaue Original-JAR-Records, unabhängiger Rootreexport und zusätzliche Fremdreviewfälle grün. Review CLEAN; Densityrouter und Terrainconsumer bleiben offen. |
+| GEN-12.1 (WG-004) | F | [Generation-Appanbindung](agent-tasks/WG-004_APP_GENERATION.md), `62a5b74d`: gespeicherter Seed/Format4 vor Import/Spawn/Netzwerk, verifizierte Capture-/Writer-/Stopverträge und explizite Offline-CLI. Fremdreview CLEAN, sieben Rootclientharnesses und Migration/Read-only-Restartprobe grün. Nur Flat-v1 aktiv; natürliche Welt und vollständige GEN-12-Abnahme bleiben offen. |
+| SIM-03.2 | V | [Entityownership](agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md): shardbesessener begrenzter UUID-/Wire-/Chunkindex und generationaler Storehandle; im Fremdreview. F1-Scopeentry-Fix und unabhängige RED→GREEN-Probe vor Integration. Persistenz, Physik, Tracking und Mobs folgen separat. |
+| GEN-04.3 | A | [Kubische Splines](agent-tasks/GEN-04_3_CUBIC_SPLINES.md): `item_transfer_primitives` implementiert originales begrenztes f32-Splineprimitive; Rootdesignprüfung erfolgt. Density-/Terrainconsumer bleiben getrennt. |
+| STORAGE-ENTITY001 | O | `select_world_ticket` erstellt [Schema-/APIentwurf](agent-tasks/STORAGE-ENTITY001_UUID_PERSISTENCE_DESIGN.md). UUIDbasierte Entitypersistenz mit Chunkindex und expliziter Formatmigration; noch keine Produktionsvergabe. DUR-03 atomare Transfer-/Versionsauthority folgt separat. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
@@ -461,15 +469,15 @@ Er implementiert keine Runtimefeatures. Ein Reviewer verwendet einen frei
 gewordenen Umsetzungsslot; vor neuer Vergabe wird bestehende Arbeit beendet
 oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 
-| Rolle / Agent | Ticket | Aktueller Status, Welle 2 | Exklusiver Dateibesitz / nächste Entscheidung |
+| Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Originaldatenagent `feature_catalog` | CAT-02.1, Review SRV-01.1 | abgeschlossen und integriert | Export-/Inventoryscripts, Originaldaten und eigenes Taskdokument; fremdes Items-Review CLEAN. Katalog und Board liegen bei Root. |
-| Welt-/Storageagent `select_world_ticket` | WG-002 = GEN-11.1, Review CAT-02.1 | abgeschlossen und integriert | Nur Storage-Crate und Taskdokument; fremdes Export-Review CLEAN. Keine App-/Sim-Anbindung oder Migration. |
-| Itemsagent `item_transfer_primitives` | ITEMS-TRANSFER-001 = SRV-01.1, Review GEN-11.1 | abgeschlossen und integriert | Nur Items-Crate und Taskdokument; fremdes Storage-Review CLEAN. Kein Gameplayconsumer oder dauerhafter Transfer. |
+| Entityagent `feature_catalog` | SIM-03.2, STORAGE-ENTITY001-Designreview | F1-Fix vor Integration, read-only Designreview | Sim-Crate und eigenes Taskdoc; getrennt eigener Storage-Designreviewreport. REG-ENTITY001 integriert; Persistenz und Mobs noch offen. |
+| Storageagent `select_world_ticket` | SIM-03.2-Fremdreview | read-only Review | Nur eigener Reviewreport und Scratchprobes; UUIDschemaentwurf geliefert, Productionvergabe folgt nach Designreview. |
+| Weltagent `item_transfer_primitives` | GEN-04.3 | in Umsetzung, Design freigegeben | Nur World-Crate und eigenes Taskdoc; WG-004-Review abgeschlossen. Terrainconsumer noch offen. |
 
-Diese Rollenliste erfasst die drei tatsächlich beauftragten Agents dieser
-abgeschlossenen Welle. Reviews nutzten frei gewordene Slots. Root aktualisiert Agentname,
+Diese Rollenliste erfasst die drei tatsächlich beauftragten Agents der
+laufenden Welle. Reviews nutzen frei gewordene Slots. Root aktualisiert Agentname,
 genaue Ticketuntermenge, Dateien und Status nach tatsächlicher Vergabe.
 Wenn ein Feature an fehlenden Verbrauchern hängt, erhält der nächste freie
 Agent das abhängige Producer-/Consumer-/Wiringticket, statt beliebig andere

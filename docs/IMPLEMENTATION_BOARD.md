@@ -5,7 +5,7 @@ in FerrumCs Rust-Simulation, einschließlich Survival, natürlicher Welten und
 der angeforderten Java-/Paper-Kompatibilität. Arbeitsbranch: ausschließlich
 `main`. Ausgangspunkt dieser Runde: `c3e14d0f`.
 
-Aktueller veröffentlichter Ausgangspunkt der dritten Welle: `347080f4`.
+Ausgangspunkt der vierten Welle: `fb0e96e0`; dessen GitHub-CI ist erfolgreich.
 Der Betreiber hat die fortgesetzte Umsetzung bis zu durchspielbarem Survival
 einschließlich Entities, End und Enderdrache ausdrücklich beauftragt. Die
 [Survival-Gesamtabnahme](SURVIVAL_END_TO_END_ACCEPTANCE.md) definiert die
@@ -97,7 +97,7 @@ Die jeweils nächste konkrete Vergabe erhält einen eigenen Dateibesitz und
 Akzeptanzvertrag. Fehlende aktive Verbraucher werden nicht durch ungeprüfte
 Mehr-Crate-Sammeländerungen ersetzt.
 
-## Dritte Welle: tatsächlich laufende Vergaben
+## Dritte Welle: integrierte Grundlagen
 
 | Ticket | Agent | Exklusiver Dateibesitz | Status und Abnahme |
 | --- | --- | --- | --- |
@@ -106,18 +106,31 @@ Mehr-Crate-Sammeländerungen ersetzt.
 | GEN-04.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-world/**`, `docs/agent-tasks/GEN-04_1_RANDOM_NOISE.md` | Geprüft und integriert `e754254f`: 144 Debugtests, sieben Release-Vertragstests und 16.556 bitgenaue Original-JAR-Records; unabhängiger Rootreexport unter Python `-O` bytegleich, Contract7 grün, Review CLEAN. Kein natürliches Terrain allein durch diese Grundlagen. |
 | CONFIG-WG001 / GEN-12.0 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-config/**`, `docs/agent-tasks/CONFIG-WG001_GENERATION.md` | Geprüft und integriert `402df480`: optionale signed numerische Seed-/geschlossene Presetdeklaration ohne implizite Auswahl; 30 Tests auch unabhängig grün, Review CLEAN. App aktiviert den Producer erst in WG-004. |
 | SIM-03.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-core/**`, `docs/agent-tasks/SIM-03_1_CORE_ENTITY_UUID.md` | Geprüft und integriert `6998a76e`: dauerhafte Entity-UUID als eigener Typ, getrennt von signed i32-Wire-ID; Default-/No-default-Tests und strictchecks grün, unabhängige Contracttests6/4 grün, Review CLEAN. Noch keine Entitysimulation oder UUID-basierte Storagekeys. |
-| WG-004 / GEN-12.1 | `select_world_ticket`, Review folgt | `server/app/**`, `docs/agent-tasks/WG-004_APP_GENERATION.md` | Vergeben: produktive Format-4-/Seed-/Generatorbindung, opaque Tickcapture, Writerretries, Unload/Shutdown und explizite Offline-CLI. Alle Producer geprüft. |
-| GEN-04.2 | `item_transfer_primitives`, Review folgt | `server/crates/ferrumc-world/**`, `docs/agent-tasks/GEN-04_2_NORMAL_SIMPLEX_BLENDED.md` | Vergeben: originale Normal-/Simplex-/Blendednoise mit getrennten Original-JAR-Fixtures; keine aktive natürliche Welt durch reine Sampler. |
-| REG-ENTITY001 / SIM-03.2a | `feature_catalog`, Review folgt | `server/crates/ferrumc-registry/**`, `docs/agent-tasks/REG-ENTITY001_ENTITY_TYPES.md` | Vergeben: opaquer EntityTypeId und allocfreie Name-/Wirelookups aus gepinntem Originalreport; vorhandene Registry hat noch keinen Entitytypenproducer. Zuerst separat prüfen und integrieren. |
-| SIM-03.2 | `feature_catalog`, Review folgt | `server/crates/ferrumc-sim/**`, `docs/agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md` | API abgestimmt, wartet auf separat integrierten REG-ENTITY001-Producer: begrenzte Entityverwaltung mit dauerhafter UUID, Wire-/lokalem Handle und Chunkindex, getrennten Lifetime-/Ownerverträgen. Persistenz/Tracking/Item-/Mobconsumer folgen separat. |
 
 Root besitzt Board, Katalog, Abnahme- und gemeinsame Prüfberichte sowie
 Gitintegration. Die vorhandene Generatoridentität wird vom Noiseagenten nicht
 ohne Abstimmung erweitert. Fremdreviews erhalten frei gewordene Slots.
-Als nächstes folgt WG-004 in der App; parallel können nach Freigabe der
-jeweiligen Crates Entity-Ownership/Transfer und natürliche Terrainconsumer
-bearbeitet werden. Die zweite Welle bleibt ein abgeschlossener Nachweis und
-wird nicht als Status der laufenden dritten Welle umgedeutet.
+Der [dritte Wellenbericht](AGENT_WAVE_03_VALIDATION.md) hält 2.271 normale
+Workspace-Tests, 36 Doctests, sieben unabhängige Clientharnesses und die
+erfolgreiche CI für `fb0e96e0` fest. Diese Prüfung betrifft die damalige
+Format-3-App; die Format-4-App folgt in der vierten Welle.
+
+## Vierte Welle: Integration und aktive Folgetickets
+
+| Ticket | Agent / Review | Exklusiver Dateibesitz | Status und Abnahme |
+| --- | --- | --- | --- |
+| REG-ENTITY001 / SIM-03.2a | `feature_catalog`, Review Root | `server/crates/ferrumc-registry/**`, eigenes Taskdoc | Geprüft und integriert `cd32fbd2`: generierter opaquer EntityTypeId für alle 151 Originaltypen, allocfreie Lookups und strikte Generatorvalidation. Rootcontract8 und unabhängiger Originalreexport grün, Review CLEAN. Keine aktiven Mobs. |
+| GEN-04.2 | `item_transfer_primitives`, Review `select_world_ticket` und Root | `server/crates/ferrumc-world/**`, eigenes Taskdoc | Geprüft und integriert `09fd6657`: Normal-/Simplex-/Blendednoise, 153 Worldtests und 16.974 Original-JAR-Records. Fremdreview CLEAN mit zusätzlich 25.950 Records aus neuen Seeds/Parametern; Rootreexport bytegleich. Kein Terrainrouter oder natürliche Chunkgenerierung. |
+| WG-004 / GEN-12.1 | `select_world_ticket`, Review `item_transfer_primitives` und Root | `server/app/**`, eigenes Taskdoc | Geprüft und integriert `62a5b74d`: produktive Format-4-/Seed-/Generatorbindung, verifizierte Tickcapture, Retry-/Unload-/Stopbarrieren und Offline-Migrations-CLI. Fremdreview CLEAN; sieben Rootclientharnesses und zusätzliche Migration/Read-only-Restartprobe grün. Flat-v1 bleibt der aktive Generator. |
+| SIM-03.2 | `feature_catalog`, Review `select_world_ticket` | `server/crates/ferrumc-sim/**`, `docs/agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md` | Implementiert, im Fremdreview: F1 reproduziert Scopewechsel über public Chunkmapersatz; Entryguard/RED→GREEN vor Integration. Begrenzter UUID-/Wire-/Handle-/Chunkindex und Tickadmission; Persistenz/Tracking/Item-/Mobconsumer folgen separat. |
+| GEN-04.3 | `item_transfer_primitives`, Review ausstehend | `server/crates/ferrumc-world/**`, `docs/agent-tasks/GEN-04_3_CUBIC_SPLINES.md` | In Umsetzung: originale kubische Splines; Root hat immutable Graph-/typed Coordinate-/Preflight-/Cap-/Budgetdesign geprüft und freigegeben. Densityrouter und Terrainaktivierung bleiben anschließende Consumer. |
+| STORAGE-ENTITY001 | `select_world_ticket`, Designreview Root | Nur `docs/agent-tasks/STORAGE-ENTITY001_UUID_PERSISTENCE_DESIGN.md` | Designauftrag: UUID-scoped Entitykeys, begrenzter Chunkindex, expliziter Formatwechsel und Migration ohne Wire-ID→UUID-Raten. Noch keine Storageimplementation vergeben. Atomarer Player↔Entity-Transfer ist ein separates DUR-03-Producerticket. |
+
+Root hat die integrierte Runtime `62a5b74d` in einem detached Checkout
+geprüft: 2.304 Tests, 38 Doctests, strict Clippy/fmt und Generatorcheck grün,
+getrennt von aktiven Agentänderungen. Ergebnisse der vierten Welle stehen im
+[Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
+Nachweis für diese neue Runtime.
 
 ## Orchestrierung
 

@@ -6,6 +6,13 @@ Spätere Dokumentationsänderungen präzisieren nur Umfang und Vergaben.
 Root orchestriert Reviews, Tests und Git; Runtimecode stammt von den Agents.
 Arbeitsbranch bleibt `main`.
 
+GitHub-CI ist für den veröffentlichten Dokumentationsstand **`fb0e96e0`**
+erfolgreich: [CI-Lauf 38072169222](https://github.com/jstrausd/ferrumc/actions/runs/38072169222).
+Dieser Commit hat dieselbe Runtime wie die unten eingefrorene Basis.
+Rust-/Java-/Originaldaten-/Generator-/Claims-Gates und alle sieben
+Clientharnesses bestanden. Dieser Lauf belegt keine später integrierten
+Registry-, Noise- oder Format-4-Appänderungen; deren Prüfung ist Welle4.
+
 Die [Survival-Gesamtabnahme](SURVIVAL_END_TO_END_ACCEPTANCE.md) bleibt in
 allen sechs Etappen offen. Diese Welle liefert keine natürliche Welt, keine
 aktiven Item-/Mob-Entities und keinen Nether-/Endfortschritt. Die produktive
