@@ -36,6 +36,12 @@ pub use redb_store::migration::{
     GenerationMigrationTable, LegacyGenerationDeclaration, PreparedGenerationMigration,
     MAX_MIGRATION_PLUGIN_ID_LEN,
 };
+pub use redb_store::uuid_migration::{
+    BackedUpUuidEntityMigration, CheckpointedUuidEntityMigration, PreparedUuidEntityMigration,
+    UuidEntityMigrationBackup, UuidEntityMigrationError, UuidEntityMigrationLimits,
+    UuidEntityMigrationOutcome, UuidEntityMigrationOutcomeKind, UuidEntityMigrationReport,
+    UuidEntityMigrationResume, UuidEntityMigrationScratchKind, UuidEntityMigrationTable,
+};
 pub use redb_store::RedbStore;
 pub use schema::SchemaVersion;
 pub use store::{

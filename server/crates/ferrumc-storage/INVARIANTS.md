@@ -184,5 +184,65 @@
   Legacy openers and 3→4 migration remain separate unchanged contracts.
 - UUID save/delete/move are not ownership CAS, durable operation receipts,
   replay-safe general retries or Player↔Entity transactions. App/Sim activation,
-  gameplay codecs, load reservations, transfer durability and 4→5 migration are
+  gameplay codecs, load reservations and transfer durability are
   separate work; this producer does not claim playable entities or item safety.
+
+## Explicit offline UUID migration (Format4 → Format5)
+
+- Only a complete valid exact-nine-table Format4 store with no legacy entity
+  row is admitted. Every old entity refuses, without UUID/chunk inference or
+  deletion. Stored descriptors are validated and retained, including multiple
+  actual identities; none is declared or invented. Format3 first uses the
+  unchanged separate generation migration. Legacy/metadata/UUID openers never
+  perform an automatic upgrade.
+- The only logical commit delta is marker4→5 plus the three empty UUID-index
+  tables. All common raw keys/values, metadata, descriptors and schema versions
+  remain bytewise identical. Complete staged5 validation includes the catalog,
+  not merely the payload scan. The new twelve-slot migration fingerprint
+  includes table presence, type tags, row lengths and row counts; the original
+  Format5 startup fingerprint and default error contracts remain unchanged.
+- Only the non-cloneable checkpointed typestate has commit authority. Reports
+  and backup evidence contain no raw database handle or constructor for authority.
+  Source, backup, checkpoint and scratch locks fail fast with typed Busy; no
+  lock acquisition waits indefinitely while another role is held.
+- Raw backup copies every one of the nine tables, closes and syncs file/parent
+  before recording its physical hash. All later validation redb-opens a separate
+  bounded physical copy. The immutable recorded backup is never redb-opened,
+  rewritten or replaced, including on errors and lost replies. Reuse requires
+  the previously recorded closed hash and complete logical validation.
+- Source/backup/scratch require separate regular files, final symlink refusal
+  and nlink1 with checked Unix device/inode identity. The checkpoint can have
+  nlink2 only for the exact self-bound final/known-staging pair; unrelated aliases,
+  missing/replaced staging paths and nlink>2 refuse without foreign deletion.
+- Checkpoint size is exactly344 bytes, with versioned constants, twelve bounded
+  counters, source and backup identities, backup physical hash/length, both
+  logical fingerprints, its own inode and staging UUID, and a checksum. Stage
+  create_new/write/readback/fsync precedes atomic no-clobber final hardlink and
+  parent fsync/unlink/parent fsync. A successful authority requires nlink1.
+  Checkpoints never gain a commit flag or get refreshed after the source commit.
+- Resume validates full source, backup and exact delta before stabilizing only
+  its known staging alias. Source inode is binding; source physical length/hash
+  are informational. Generic valid5 opening is not proof of retry completion.
+  Any valid gameplay change, including historical epochs after entity deletion,
+  refuses the captured migration retry without repair or automatic rollback.
+- The source writer revalidates4, creates all three tables, writes marker5,
+  validates5/projection/raw backup delta and late file evidence in one transaction
+  with explicit Durability::Immediate. Returned pre-commit errors abort all rows.
+  An actual commit I/O failure is CommitUncertain and requires checked resume;
+  it is never called a guaranteed abort. Success/lostreply uses the real commit.
+- Both explicit scratch extents are positive, and their sum plus344 must fitu64.
+  The copy and receipt backends reject set_len and checked offset+length beyond
+  their caps before delegating writes. At most one copy and one receipt index
+  exist simultaneously. Permanent backup/source growth and filesystem allocation
+  overhead are outside this bound and can independently fail with I/O errors.
+- Verification/source/backup caches are64MiB each, at most two simultaneously;
+  one16MiB receipt cache, a64KiB streaming buffer and one bounded decoded row
+  are additional, as are redb/allocator/OS overhead. No whole-world or receipt
+  vector is used; cache/encoded extent limits are not a total process-RSS bound.
+- Temporary cleanup checks the exact owned regular-file inode after DB release,
+  preserves foreign replacements and reports cleanup failure explicitly. Failed
+  creation after acquiring a new identity cleans only that identity. If its
+  identity cannot be verified, the path is preserved with a Cleanup error.
+- All APIs are synchronous offline methods requiring Unix in this release.
+  Operator CLI, App/Sim activation, gameplay/Anvil/entity codecs and process-kill/
+  power-loss/Paper runtime acceptance are separate from this storage producer.

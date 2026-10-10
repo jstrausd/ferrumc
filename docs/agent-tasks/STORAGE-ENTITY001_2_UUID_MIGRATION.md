@@ -1,6 +1,6 @@
 # STORAGE-ENTITY001.2 — Explizite Format-4 → 5-Migration
 
-Status: **Design durch Root geprüft und zur Implementierung freigegeben**.
+Status: **Implementiert und lokal grün; zur unabhängigen Implementierungsprüfung eingefroren**.
 Owner: `select_world_ticket`. STORAGE-ENTITY001.1 ist unabhängig CLEAN geprüft
 und als `a5d11819` integriert. Der vollständige Entwurf wurde vor Freigabe von
 Root gelesen; die folgenden zwei Präzisierungen sind verbindlich:
@@ -16,10 +16,13 @@ Root gelesen; die folgenden zwei Präzisierungen sind verbindlich:
 Der unveränderte geprüfte Entwurf vor diesen Rootstatus-/Vertragszusätzen hatte
 SHA256 `9118dd675b9247d0064b48f42bf5d4ad0ee9a51ff7e3eaef80b1c4f41755e385`.
 Alle weiteren API-/Authority-/Delta-/Budget-/Checkpointregeln unten gelten.
-Während dessen unabhängigen Reviews bleiben alle `.1`-Dateien, der `.1`-Brief
-und die älteren Design-/Reviewdokumente unverändert. Dieses Dokument wurde aus
-der tatsächlich vorhandenen `.1`-Production und WG-002-MIG abgeleitet; die
-unten genannten neuen APIs, Guards und Tests existieren noch nicht.
+Der `.1`-Brief und die älteren Design-/Reviewdokumente bleiben unverändert.
+Dieses Dokument wurde aus der tatsächlich vorhandenen `.1`-Production und
+WG-002-MIG abgeleitet. Die neuen APIs, Guards und Tests sind implementiert;
+der vollständige lokale Nachweis und der Dateifreeze folgen unten. Am `.1`-
+Validator ist nur der kontrollierte komplette Migrationeintritt samt begrenztem
+Receiptbranch geändert; Defaultgrammatik/-fingerprint/-fehler bleiben erhalten.
+Die alte neun-Tabellen-3→4-Migration bleibt bytegleich.
 
 ## Ziel und verbindliche Grenze
 
@@ -52,27 +55,27 @@ Verbindliche Grundlage sind der
 Prüfkopievertrag unten konkretisiert R4; Änderungen daran benötigen vor Code
 Rootreview.
 
-## Bestand, Wiederverwendung und fehlende Producer
+## Bestand und implementierte Producer
 
 | Vorhanden | Verwendung in `.2` / konkret fehlender Teil |
 | --- | --- |
 | `migration::validation::scan`, neun Counter, `LegacyGenerationDeclaration` | Unverändert erhalten. Dieser Validator verlangt die erklärte Flat-/Seed0-Identität und bei unscoped State genau einen deklarierten Scope; er ist kein allgemeiner Format4-Validator. Nicht auf12 Tabellen oder beliebige Identitäten lockern. |
-| `migration::copy_snapshot` | Unverändert für Format3. Neuer `copy_format4_snapshot` kopiert exakt alle neun Tabellen einschließlich `ferrumc:generation`. |
-| `migration::{FileIdentity, LockedFile, SharedBackend}` und Header-/Geometry-/Hash-/Syncguards | Intern in ein enges Offline-Filemodul extrahierbar. Alten Errors/Verhalten und Regressionstests erhalten. Neue `.2`-Alias-/Checkpoint-/Budgetregeln sind Wrapper, keine stillschweigende Änderung der alten API. |
-| `uuid_validation::{validate_catalog, scan}` | `.1` prüft vollständig Format5. Für `.2` fehlt ein interner kompletter Eintritt, der **Catalog und Scan zusammen** ausführt; `scan` allein garantiert den Catalog nicht. Kontrollierter Receiptindex-/Cleanup-/Diskbudgetparameter nötig, ohne Lockerung der bestehenden Openerregeln. |
+| `migration::copy_snapshot` | Unverändert für Format3. Neues `uuid_migration::backup::copy_format4` kopiert exakt alle neun Tabellen einschließlich `ferrumc:generation`. |
+| `migration::{FileIdentity, LockedFile, SharedBackend}` und Header-/Geometry-/Hash-/Syncguards | Altes Modul unverändert. Neue eng begrenzte Offlineguards in `uuid_migration::files` behalten den alten Vertrag getrennt; `.2` besitzt eigene Alias-/Checkpoint-/Budget-/Busyregeln. |
+| `uuid_validation::{validate_catalog, scan}` | `.1` prüft vollständig Format5. `.2` verwendet `validate_complete_migration` für **Catalog und Scan zusammen**, mit eigenem begrenzten Receiptindex-/Cleanupbranch; Defaultregeln und Startupfingerprint bleiben erhalten. |
 | `.1`-Fingerprint `FerrumC UUID storage logical snapshot v1` | Bleibt eigener Startupfingerprint. Nicht als Format4-/Migrationsdeltafingerprint umdeuten. Neuer versionierter 12-Slot-Fingerprint mit Tabellenpräsenz und dualer4/5-Projektion. |
 | Format5-Entitygrammatiken und echte Generationadmission | Wiederverwenden für strikten5-Scan; keine neue Entityinterpretation in `.2`. |
-| Neue Offline-APIs, Typestates, Checkpointproducer, Read-only-Backupprüfkopie | Sämtlich fehlen; unten spezifiziert. Keine vorhandene `.1`-Methode aktiviert sie. |
+| Neue Offline-APIs, Typestates, Checkpointproducer, Read-only-Backupprüfkopie | Implementiert und unten spezifiziert; kein vorhandener Runtimeopener aktiviert sie. |
 | Appbefehle/Deploymentwiring | Fehlen bewusst; eigenes Rootticket. Storage-Rustdoc muss angeben, dass alle neuen Methoden synchron/blocking und ausdrücklich offline sind. |
 
 ## API und Authority
 
-Vorgeschlagene öffentliche Namen; alle Typen besitzen private Felder und
+Öffentliche implementierte Namen; alle Typen besitzen private Felder und
 dokumentierte Getter. Reports/Evidenz dürfen Clone sein, Authoritytypen nicht.
 Kein Raw-DBhandle wird veröffentlicht; kein `async fn` kaschiert Blocking-I/O.
 
 ```rust
-// Signaturen zur Designprüfung; keine bereits implementierte API.
+// Öffentlicher Vertrag; Authorityfelder und Backendhandles bleiben privat.
 UuidEntityMigrationLimits::new(
     max_verification_copy_bytes: u64,
     max_receipt_index_bytes: u64,
@@ -386,7 +389,8 @@ Source; eine neue Sourceinode wird nicht unter altem Checkpoint adoptiert.
 
 ## Ressourcenvertrag
 
-`Limits::new` fordert beide expliziten positiven Budgets; keine implizite
+`Limits::new` fordert beide expliziten positiven Budgets und ihre mit344
+Stagingbytes overflowfreie Summe; keine implizite
 Unlimited-Default. MaxVerificationCopy begrenzt physische Prüfkopielänge samt
 etwaigem redb-Openwachstum, MaxReceiptIndex begrenzt den eigenen temporären
 Receiptindex. Vor Copy vollständige Backuplänge admissionieren. Ein privater
@@ -448,15 +452,16 @@ Sleeps; vollständige Rawcatalog-/Rowsnapshots vor/nach Returned-error.
 | Resume Source4/Source5 mit known stagingalias | Fullscan/delta vor checkpointbezogener Cleanup; anschließend fsync/unlink/fsync/nlink1. Fehler erzeugt keinen Completed-Erfolg. |
 | Source5 gültig, aber inzwischen verändert | `MigrationDeltaMismatch`, selbst wenn Entities wieder gelöscht wurden; Epochhistory zählt. Kein Rollback/Checkpointrewrite. |
 
-## Abnahme und Dateiplan nach Rootfreigabe
+## Abnahme und implementierte Dateien
 
-Vorgesehene neue Dateien: `src/redb_store/uuid_migration.rs`, seine
-`{validation,checkpoint,backup,tests}.rs`-Module sowie
-`tests/uuid_entity_migration.rs`. Enges internes Filemodul für tatsächlich
-wiederverwendete Guards; `lib.rs` veröffentlicht nur neue APItypen.
-`uuid_validation.rs` erhält nach `.1`-Integration einen kontrollierten kompletten
-Migrationeintritt und budgetierbaren Receiptproducer. README/INVARIANTS benennen
-Mode-/File-/Checkpoint-/Delta-/Limitvertrag. Kein Lockfile-/Fremdcrateedit.
+Neue Dateien: `src/redb_store/uuid_migration.rs`, seine
+`{files,validation,checkpoint,backup,tests}.rs`-Module sowie
+`tests/uuid_entity_migration.rs`. Das Filemodul hält tatsächlich genutzte Guards;
+`lib.rs` veröffentlicht nur neue APItypen, `redb_store.rs` registriert das Modul.
+`uuid_validation.rs` besitzt den kontrollierten kompletten Migrationeintritt
+und budgetierten Receiptbranch. README/INVARIANTS benennen Mode-/File-/Checkpoint-/
+Delta-/Limitvertrag. Kein Lockfile-/Fremdcrateedit; private konstante Boxfelder
+begrenzen die Größe der Resumeenum, ohne ihre öffentlichen Varianten zu ändern.
 
 Pflichtfälle:
 
@@ -499,6 +504,63 @@ Logs/Hashes/Dateifreeze und unabhängiger Implementierungsreview gehen vor
 Rootintegration. Kein Source-only-, Abort-/Reopen- oder Lostreplytest wird
 nachträglich als Paper-Differenzial-/Prozesskill-/Powerlossabnahme umbenannt.
 
+## Implementierungsnachweis und Reviewfreeze — 2026-10-10
+
+Root stellte den isolierten `a5d11819`-Baseline unter
+`.codex-tmp/storage-entity001_2-isolated` bereit. Ausschließlich der eigene
+Storagebereich wurde dort kopiert, einschließlich der separaten, inzwischen von
+Root als`9025c687` integrierten expliziten `&[u8]`-Typisierung im `.1`-Test.
+Root besitzt Git/App und die abschließende Workspaceintegration. Toolchain:
+Rust/Cargo/Clippy/rustfmt`1.99.0`, Workspaceedition2021, offline/locked, Compile
+`-j2`, Tests`--test-threads=2`; eigener externer Targetpfad
+`.codex-tmp/storage-entity001_2-target`.
+
+| Check | Ergebnis | Vollständiger Log / SHA256 |
+| --- | --- | --- |
+| `cargo +1.99.0 test -p ferrumc-storage --all-targets --offline --locked -j2 -- --test-threads=2` | **233 bestanden**,0 fehlgeschlagen:192 Unit und41 Integration, inklusive aller bisherigen Storage-/WG-002-MIG-Tests. Unitzeit209,62s; öffentliche neue Integrationen10,43s. | `.codex-tmp/storage-entity001_2-final-tests.log`, `9908d3ce389ac32fb66383af5aeab3812fe65b06a28b48d084a36572a3f177fa` |
+| `cargo +1.99.0 test -p ferrumc-storage --doc --offline --locked -j2` | **10 bestanden**,0 fehlgeschlagen; darunter beide README-Offlinesignaturen und Compile-fail für BackedUp ohne Checkpoint. | `.codex-tmp/storage-entity001_2-final-doc-tests.log`, `229d517885e7ec5e35d65f41a0f6fba080bbe8681e2dc5eb9a5e6b18a8a00f3a` |
+| `cargo +1.99.0 clippy -p ferrumc-storage --all-targets --offline --locked -j2 -- -D warnings` | **Grün**,keine Warnungen. | `.codex-tmp/storage-entity001_2-final-clippy.log`, `e95f6f9394a4b61f8d571b41027e9dffe24d71aba86dbbec1a02042d92af3cdb` |
+| `cargo +1.99.0 fmt -p ferrumc-storage --check` | **Grün**,leerer normaler Erfolgslog. | `.codex-tmp/storage-entity001_2-final-fmt.log`, `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` |
+
+Insgesamt**243** Tests grün, davon25 neue Migration-Units,3 öffentliche
+Integrationstests und3 neue Rustdocfälle. Keine separate Release-,
+Prozesskill-, Powerloss- oder Paper-Runtimeausführung wird daraus abgeleitet.
+Nach dem vollständigen Unit-/Integrationslauf wurden nur README/INVARIANTS,
+Brief und die Dokumentation/Fehlermeldung von InvalidLimits präzisiert; die
+abschließenden Rustdoc-/Clippy-/Formatprüfungen verwenden diese Enddateien.
+
+| Tatsächlicher Nachweis | Konkrete Deckung und Grenze |
+| --- | --- |
+| Raw9-Baseline / Raw12-Ziel | Multiworld/-dimension mit3 echten unterschiedlichen Seeds, volle Chunk/Overlay/Player/Plugin/Journal/Receiptwerte, separate generation-inclusive Backupprüfung, genau marker4→5 plus3 leere Tabellen; strikter5-Open,4/3-Openerrefusal, Wiederaufnahme vor/nach Commit. |
+| Admission | Blank/plugin-only ohne Seedinferenz,4096/4097 Descriptoren, alle Catalog-/Type-/Multimaprefusals, malformed/over-limit Chunk/Overlay/Player, Chunkpos-/Koordinatendomäne, tatsächliche gültige Empty/Max-Altentities, Plugin UTF8-/Namespace-/Key-/Valuegrenzen und Journal-/Receiptranges. Vollständige Rawrefusalsnapshots. WG-001 lässt nur seine bekannte Generatorrevision zu; andere Revisionen werden nicht als kompatibel erfunden. |
+| Fingerprint / Retrydelta | Presence-/Typetag-/Length-/Counteroverflowgrammatik; alle12 Tabellenkategorien. Gültige Chunk/Overlay/Player/Plugin/Generation-/Journal-/Receiptsänderungen und Entitysave/delete mit Epochhistory verweigern den alten Retry; malformed neue Locator/Index/Epochgrammatiken werden komplett validiert und nicht repariert. |
+| Reale Producerübergänge |11 Sourcecutpoints,10 Backupcutpointarten,7 Checkpointpublicationarten; tatsächliche tablecreate/markerwrite/Backupcopy/Commit/closed-filehash/fsync/link/unlink-Übergänge. Vor Commit Raw4 unverändert, nach echtem Commit/lostreply CheckedResume als exakte5-Completion. |
+| Commit-I/O | Ein pro Sourcebackend aktivierbarer privater Testfault lässt den realen redb-`StorageBackend::sync_data`-Callback fehlschlagen. Ergebnis ist CommitUncertain mit immutable Backup/Checkpoint; anschließender FullResume prüft4/5 oder verlangt separate Recovery. Kein erfundener Aborterfolg. |
+| Checkpoint/files |344-Byte Parser-/Konstanten-/Checksum-/Countergrenzen, source-inode-binding, source-Länge ausdrücklich informational, Busylocks ohne Wartepfad, hardlink-/known-stage-/unknown-stage-/Final-no-clobber und Pathreplacementrefusals; fremde Replacementdateien bleiben erhalten. |
+| Physische Scratchgrenzen | Realer SharedBackend set_len/write am Cap,+1 und checked Overflow mit unverändertem File; echte Verificationcopy-/Receiptdatabudgetrefusals und Copyexactcap; typed Budgetfehler und own Cleanup. Keine globale Diskquote oder garantierter Prozess-RSS behauptet. |
+| Fehlergrenze | Directory-fsync-Publicationgrenzen sind Fehler-/Lostreplyinjektionen am echten Observerübergang, kein tatsächlicher Hostfilesystem-fsync-Ausfall. Es gibt keinen realen Host-ENOSPC-/fstat-/Prozesskill-/Powerlossversuch. Ein neues unverifizierbares File wird per Cleanupfehler erhalten; verifizierte eigene Creationfailures werden identitychecked bereinigt. |
+
+Der13-Dateien-Freeze liegt in
+`.codex-tmp/storage-entity001_2-freeze.sha256`; Artefaktchecks in
+`.codex-tmp/storage-entity001_2-evidence.sha256`. Alle eingefrorenen eigenen
+Dateien sind bytegleich zur isolierten Prüfung. Die fünf geänderten bisherigen
+Storagedateien sind README, INVARIANTS, lib.rs, redb_store.rs und
+uuid_validation.rs; dazu kommen6 neue interne Moduldateien,1 öffentliche
+Integrationstestdatei und dieser Brief. Keine Lockfile-/Fremdcrate-/App-
+oder alte Design-/Reviewdatei geändert. Alter3→4-Producer/Validator/Tests und
+sonstige `.1`-Dateien sind gegen`9025c687` bytegleich.
+
+Während der Umsetzung wurde eine vermeidbare Edition2024-rustfmt-Reformatierung
+von14 unverändert gemeinten alten Storagefiles erkannt und vollständig aus
+der veröffentlichten Rootbasis restauriert. Seitdem wird ausschließlich
+`cargo +1.99.0 fmt -p ferrumc-storage` mit Edition2021 benutzt. Das finale
+Diff-/Regression-/Freezeergebnis enthält diese alten Formatierungsänderungen
+nicht. Es gab keine Gitmutation durch diesen Agent.
+
+Unabhängiger Implementierungsreview und Rootintegration sind noch offen.
+Keine automatische Migration/CLI, App-/Simaktivierung, neue Worldgeneration,
+Gameplay-/Entitycodec oder Survival-/Paperparität gehört zu diesem Freeze.
+
 ## Gepinnte Referenz und eigene Policy
 
 MC Java1.21.8/772; Paper1.21.8 Build60, Commit
@@ -518,6 +580,7 @@ Util-Replace-/Retrycallees wurden für diesen Entwurf erneut geprüft.
 
 Migration hat keine Bukkit/Paper-Events oder Thread-/Reentrancybridge; alle
 Runtimewriter sind offline geschlossen. Keine neue Paper-Laufzeit-,
-Crash-/Powerloss-, Last- oder Gameplayabnahme wurde in diesem reinen Entwurf
-durchgeführt. Die Source-/Backup-/Checkpointgarantien sind FerrumC-Verträge,
-deren konkrete Producer und unabhängige Abnahme noch umgesetzt werden müssen.
+Crash-/Powerloss-, Last- oder Gameplayabnahme wurde für diesen Offlineproducer
+durchgeführt. Die Source-/Backup-/Checkpointgarantien sind FerrumC-Verträge;
+die konkreten Producer sind implementiert und lokal geprüft. Die unabhängige
+Implementierungsabnahme ist noch offen.

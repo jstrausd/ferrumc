@@ -127,7 +127,7 @@ pub(super) fn initialize(db: &Database, origin: StoreOrigin, path: &Path) -> Res
             }
             (StoreOrigin::Existing, Some(FORMAT)) => {}
             (_, Some(format @ (3 | 4))) => {
-                return Err(StorageError::PersistentEntityMigrationRequired { format }.into())
+                return Err(StorageError::PersistentEntityMigrationRequired { format }.into());
             }
             _ => return Err(incompatible_data_err()),
         }
@@ -175,65 +175,113 @@ fn validate_catalog(txn: &redb::WriteTransaction) -> Result<()> {
 
 /// Point descriptor lookups and one decoded row; no full-world collection.
 pub(super) fn scan(txn: &redb::WriteTransaction, path: &Path) -> Result<Scan> {
-    let mut fingerprint = Fingerprint::new();
-    let watermark = {
-        let meta = txn.open_table(META_TABLE).map_err(schema_table_err)?;
-        let mut watermark = None;
-        fingerprint.table(META_TABLE.name());
-        for row in meta.iter().map_err(backend_err)? {
-            let (key, value) = row.map_err(backend_err)?;
-            match key.value() {
-                META_FORMAT_KEY if value.value() == FORMAT => {}
-                META_LAST_MUTATION_ID_KEY => watermark = Some(value.value()),
-                _ => return Err(bad("ferrumc:meta", "unknown metadata or incorrect format")),
-            }
-            fingerprint.row(0, key.value().as_bytes(), &value.value().to_be_bytes())?;
-        }
-        fingerprint.end(0);
-        watermark
-    };
-    let reader = write_reader(txn)?;
-    let descriptors = super::validate_generation_table(&reader.generations)?;
-    let mut journal = JournalValidation {
+    scan_impl(txn, path, None).map_err(|error| match error {
+        super::uuid_migration::UuidEntityMigrationError::Validation(error) => *error,
+        other => ServerError::internal(other.to_string()),
+    })
+}
+
+/// Complete unchanged Format5 rules with the offline producer's bounded index.
+pub(super) fn validate_complete_migration(
+    txn: &redb::WriteTransaction,
+    path: &Path,
+    receipt_limit: u64,
+) -> super::uuid_migration::MigrationResult<Scan> {
+    validate_catalog(txn)?;
+    scan_impl(txn, path, Some(receipt_limit))
+}
+
+fn scan_impl(
+    txn: &redb::WriteTransaction,
+    path: &Path,
+    receipt_limit: Option<u64>,
+) -> super::uuid_migration::MigrationResult<Scan> {
+    let mut normal_journal = JournalValidation {
         last: None,
         receipts: None,
     };
-    for (slot, definition) in TABLES.into_iter().enumerate() {
-        let index = slot + 1;
-        let name = TABLE_NAMES[slot];
-        // Borrow already-open relation tables: redb forbids duplicate writable opens.
-        let owned;
-        let table = match name {
-            "ferrumc:generation" => &reader.generations,
-            raw::ENTITY => &reader.entities,
-            raw::LOCATOR => &reader.locators,
-            raw::INDEX => &reader.indexes,
-            raw::EPOCH => &reader.epochs,
-            _ => {
-                owned = txn.open_table(definition).map_err(schema_table_err)?;
-                &owned
+    let mut offline_journal =
+        receipt_limit.map(super::uuid_migration::validation::JournalValidation::new);
+    let result = (|| {
+        let mut fingerprint = Fingerprint::new();
+        let watermark = {
+            let meta = txn.open_table(META_TABLE).map_err(schema_table_err)?;
+            let mut watermark = None;
+            fingerprint.table(META_TABLE.name());
+            for row in meta.iter().map_err(backend_err)? {
+                let (key, value) = row.map_err(backend_err)?;
+                match key.value() {
+                    META_FORMAT_KEY if value.value() == FORMAT => {}
+                    META_LAST_MUTATION_ID_KEY => watermark = Some(value.value()),
+                    _ => {
+                        return Err(
+                            bad("ferrumc:meta", "unknown metadata or incorrect format").into()
+                        );
+                    }
+                }
+                fingerprint.row(0, key.value().as_bytes(), &value.value().to_be_bytes())?;
             }
+            fingerprint.end(0);
+            watermark
         };
-        fingerprint.table(name);
-        for row in table.iter().map_err(backend_err)? {
-            let (key, value) = row.map_err(backend_err)?;
-            let (key, value) = (key.value(), value.value());
-            if name == "ferrumc:mutation_log" || name == "ferrumc:mutation_batch" {
-                validate_journal_row(&mut journal, descriptors, name, key, value, path)?;
-            } else {
-                validate_payload_row(&reader, descriptors, name, key, value)?;
+        let reader = write_reader(txn)?;
+        let descriptors = super::validate_generation_table(&reader.generations)?;
+        for (slot, definition) in TABLES.into_iter().enumerate() {
+            let index = slot + 1;
+            let name = TABLE_NAMES[slot];
+            // Borrow already-open relation tables: redb forbids duplicate writable opens.
+            let owned;
+            let table = match name {
+                "ferrumc:generation" => &reader.generations,
+                raw::ENTITY => &reader.entities,
+                raw::LOCATOR => &reader.locators,
+                raw::INDEX => &reader.indexes,
+                raw::EPOCH => &reader.epochs,
+                _ => {
+                    owned = txn.open_table(definition).map_err(schema_table_err)?;
+                    &owned
+                }
+            };
+            fingerprint.table(name);
+            for row in table.iter().map_err(backend_err)? {
+                let (key, value) = row.map_err(backend_err)?;
+                let (key, value) = (key.value(), value.value());
+                if name == "ferrumc:mutation_log" || name == "ferrumc:mutation_batch" {
+                    if let Some(journal) = &mut offline_journal {
+                        journal.row(descriptors, name, key, value, path)?;
+                    } else {
+                        validate_journal_row(
+                            &mut normal_journal,
+                            descriptors,
+                            name,
+                            key,
+                            value,
+                            path,
+                        )?;
+                    }
+                } else {
+                    validate_payload_row(&reader, descriptors, name, key, value)?;
+                }
+                fingerprint.row(index, key, value)?;
             }
-            fingerprint.row(index, key, value)?;
+            fingerprint.end(index);
         }
-        fingerprint.end(index);
+        if let Some(journal) = &offline_journal {
+            journal.validate(watermark)?;
+        } else {
+            if normal_journal.last != watermark {
+                return Err(bad("ferrumc:meta", "journal watermark disagrees").into());
+            }
+            if let Some(index) = &normal_journal.receipts {
+                index.validate_nonoverlapping()?;
+            }
+        }
+        Ok(fingerprint.finish())
+    })();
+    match offline_journal {
+        Some(journal) => journal.finish(result),
+        None => result,
     }
-    if journal.last != watermark {
-        return Err(bad("ferrumc:meta", "journal watermark disagrees"));
-    }
-    if let Some(index) = journal.receipts {
-        index.validate_nonoverlapping()?;
-    }
-    Ok(fingerprint.finish())
 }
 
 fn validate_payload_row(

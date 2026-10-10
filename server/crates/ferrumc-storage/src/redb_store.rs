@@ -56,6 +56,7 @@ use crate::{
 
 pub(crate) mod migration;
 mod uuid_entities;
+pub(crate) mod uuid_migration;
 mod uuid_validation;
 
 /// On-disk layout version recorded in the metadata table.

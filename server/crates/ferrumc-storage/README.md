@@ -277,9 +277,97 @@ plugin rows valid at strict reopen; generic `PluginId` and older mode contracts
 remain unchanged. Plugin keys and values keep their existing bounds.
 
 Existing formats3/4 receive [`StorageError::PersistentEntityMigrationRequired`]
-without raw-row/catalog changes. Format4→5 migration is a separate offline
-ticket; this opener performs no migration or normalization. Existing formats5
+without raw-row/catalog changes. Format4→5 requires the explicit offline API
+below; this opener performs no migration or normalization. Existing formats5
 are not claimed physically hash-invariant across redb open/recovery. Save,
 delete and move provide no ownership CAS, general replay-safe retry, durable
 operation receipt or Player↔Entity transaction. Gameplay codecs, entity-load
 reservation, App/Sim activation and transfer durability remain separate.
+
+## Explicit offline Format4 → Format5 migration
+
+[`RedbStore::prepare_uuid_entity_migration`] validates the exact nine-table
+Format4 catalog and every bounded record using actual stored generation
+identities. Multiple worlds, dimensions and seeds are retained. Every old
+wire-keyed entity row refuses migration, including a valid empty body; storage
+does not invent persistent UUIDs or chunk membership. Format3 must first use
+the separate generation migration. The older openers and 3→4 API are unchanged.
+
+```no_run
+use ferrumc_storage::{RedbStore, UuidEntityMigrationError, UuidEntityMigrationLimits};
+
+# fn offline() -> Result<(), UuidEntityMigrationError> {
+let limits = UuidEntityMigrationLimits::new(64 * 1024 * 1024, 16 * 1024 * 1024)?;
+let prepared = RedbStore::prepare_uuid_entity_migration("world.redb", limits)?;
+let backed = prepared.create_backup("world-before-format5.redb")?;
+// A durable, immutable checkpoint is required before source commit is possible.
+let ready = backed.write_checkpoint("world-format5.checkpoint")?;
+let outcome = ready.migrate()?;
+assert_eq!(outcome.report().source_format(), 4);
+assert_eq!(outcome.report().target_format(), 5);
+# Ok(())
+# }
+```
+
+Only [`CheckpointedUuidEntityMigration`] exposes `migrate`. The backup copies
+all nine raw tables, closes, fsyncs and records its physical SHA256. Every
+verification opens a fresh bounded physical copy, never the recorded original
+backup. Reuse without a checkpoint requires the previously recorded closed
+backup hash. Source, backup and checkpoint roles must be separate regular
+files with checked Unix device/inode identities; locks fail immediately with
+`Busy`. Final symlinks and unexpected hardlink aliases refuse.
+
+The fixed 344-byte checkpoint binds source inode, immutable backup inode/length/
+hash, twelve logical counters, the Format4 snapshot and projected Format5
+snapshot. Publication writes/fsyncs a uniquely named staging file, links the
+final path without overwrite, fsyncs its directory and removes only the known
+staging alias. Failed publication never grants commit authority. Checked
+resume can stabilize the exact known final/staging pair after a lost reply.
+
+`migrate` revalidates the complete source, backup and checkpoint. Its one real
+`Durability::Immediate` transaction changes only the marker 4→5 and creates
+three empty UUID-index tables. Every common raw row is compared to the backup;
+the migration fingerprint includes table presence, types and raw row lengths.
+`CommitUncertain` requires checked resume, because an I/O error is not proof
+that the source transaction aborted. The checkpoint never gains a commit flag.
+
+```no_run
+use ferrumc_storage::{RedbStore, UuidEntityMigrationError,
+    UuidEntityMigrationLimits, UuidEntityMigrationResume};
+
+# fn offline_resume() -> Result<(), UuidEntityMigrationError> {
+let limits = UuidEntityMigrationLimits::new(64 * 1024 * 1024, 16 * 1024 * 1024)?;
+let outcome = match RedbStore::resume_uuid_entity_migration(
+    "world.redb", "world-format5.checkpoint", "world-before-format5.redb", limits,
+)? {
+    UuidEntityMigrationResume::Ready(ready) => ready.migrate()?,
+    UuidEntityMigrationResume::AlreadyCompleted(outcome) => outcome,
+};
+assert_eq!(outcome.report().target_format(), 5);
+# Ok(())
+# }
+```
+
+Resume proves the exact captured Format4 state or its exact Format5 delta. A
+valid Format5 store changed by gameplay, including entity save/delete with
+retained epochs, refuses the old migration retry. Source physical length/hash
+are informational; redb housekeeping is allowed. The original backup's physical
+hash remains binding. Resume never restores a backup or rewrites evidence.
+
+Both scratch budgets must be positive and their sum plus the 344-byte staging
+extent must fit u64. The verification copy and receipt-index backends refuse
+`set_len` and checked write extents above their limits before delegation. At
+most one of each exists per operation. Main/source/backup verification caches
+are each 64 MiB, with at most two active simultaneously; the receipt index adds
+16 MiB. A 64 KiB copy/hash buffer and one bounded decoded row are additional,
+as are redb/allocator/OS overhead. These are file-extent/cache bounds, not a
+total RSS or host-disk quota; the permanent backup and source growth are extra.
+Cleanup checks owned identity and preserves foreign replacements, reporting
+failure explicitly. An unverifiable newly created file identity is also a
+classified cleanup failure, rather than permission to delete its path.
+
+These methods perform synchronous offline I/O and currently require Unix.
+There is no operator CLI, automatic startup migration, App/Sim activation,
+Anvil import or entity codec in this ticket. Tests of actual producer abort,
+commit-I/O and lost replies do not establish process-kill/power-loss durability
+or Paper gameplay parity.
