@@ -1,8 +1,9 @@
 # FerrumC v2 — Umsetzungsplan für den Hosting-Fork
 
 Stand: 10.10.2026. Ausgangspunkt: upstream `rework/v2-skeleton`, Commit
-`8315da2c407a66ef591d2ef9de158aa74e7f6bc4`. Arbeitsbranch:
-`feat/v2-hosting-foundation`.
+`8315da2c407a66ef591d2ef9de158aa74e7f6bc4`. Einziger Arbeitsbranch:
+`main`. Der erste Hosting-PR wurde integriert; die anderen Fork-Branches
+wurden nach Sicherung entfernt.
 
 Dieser Plan basiert auf dem Quellcode und den vorhandenen Tests. Die älteren
 [FEATURES.md](FEATURES.md), [ROADMAP.md](ROADMAP.md) und Teile des README sind
@@ -17,8 +18,11 @@ Prüfbericht und verbleibende Fehler stehen in
 Zuerst ein zuverlässig startbarer, administrierbarer Creative-/Minigame-Server
 für **Minecraft Java 1.21.8, Protokoll 772**, einschließlich Pterodactyl.
 Danach sichere öffentliche Anmeldung, brauchbare Plugin-Fassaden und mehr
-Welt-/Inventarfunktionen. Survival und vollständige Vanilla-Parität sind ein
-eigenes, wesentlich größeres Folgeprojekt.
+Welt-/Inventarfunktionen. Das erweiterte Betreiberziel umfasst inzwischen
+Survival, normales Serververhalten und unveränderte Java-Plugins. Dafür ist
+der Rust-Kern mit Java-Sidecar gemäß
+[ADR-0009](adr/0009-java-plugin-compatibility.md) ausgewählt; diese Funktionen
+sind nicht durch den bisherigen Hosting-PR erledigt.
 
 Jeder Implementierungsschritt verändert eine Produktions-Crate; bei Bedarf
 kommt `ferrumc-testkit` für Testinfrastruktur hinzu. Änderungen über mehrere
@@ -48,7 +52,7 @@ Protokolldateien werden ausschließlich über den Generator geändert.
 | --- | --- | --- | --- |
 | H01 | P0 / umgesetzt | Build-Anleitung, auditierter Plan, dokumentierte Prüfergebnisse. | Frischer Checkout wird aus `server/` mit `--locked` gebaut; Plan nennt vorhandene Funktionen und echte Lücken. |
 | H02 | P0 / lokal geprüft | Mehrstufiges Container-Image, separates Installer-Image und importierbares Pterodactyl-Egg. | Nicht-root-Laufzeit, `/home/container`, konfigurierter Allocation-Port, persistente Daten, Ready-Erkennung, SIGINT/SIGTERM und Reinstall ohne Datenüberschreiben lokal geprüft; Installer ohne Entrypoint-/User-Override wie bei Wings gestartet. |
-| H03 | P0 / offen | Reproduzierbare Toolchain-/CI-Basis festlegen; vorhandene Lintfehler einzeln beheben. | Format, Clippy mit `-D warnings`, Workspace-/Doc-Tests, Generator und Claim-Prüfung grün. Unabhängiger Client-Smoke wird CI-Gate. |
+| H03 | P0 / lokal umgesetzt | Rust 1.99.0 fest gepinnt; vorhandene Lintfehler crateweise behoben; CI für `main` mit Java- und unabhängigen Client-Gates verdrahtet. | Format, strenges Workspace-Clippy, Workspace-/Doc-Tests und Generator lokal bestanden. Java-Maven-Tests, opt-in Rust/JAR-Abnahme und beide Client-Tests sind verpflichtende CI-Schritte; Claim-Prüfung gegen den Index. GitHub-Ausführung wird separat protokolliert. |
 | H04 | P1 / offen | Fork-eigene CI-Branch-Regeln und Release-Pipeline für glibc Linux x86_64/aarch64. | Commit/Version im Artefakt, Prüfsummen, Image-Digest, native Plugin-Ziel dokumentiert; Egg verwendet veröffentlichtes, geprüftes Image. |
 | H05 | P1 / offen | Backup-/Restore- und Upgrade-Verfahren. | Kopie nach sauberem Stop wird auf leerer Instanz wiederhergestellt; Welt, Spieler und unterstützte Plugin-Daten werden geprüft. Schemawechsel hat Test und Rückweg. |
 
@@ -67,7 +71,7 @@ nicht. Ein v1-Release darf nicht als v2-Artefakt installiert werden.
 | N05 | P1 / offen | Vorhandene strengere `PlayIngress`-/Bytebudget-Regeln in den App-Laufzeitpfad integrieren. | Große Frames, komprimierte Daten und unbekannte Pakete beanspruchen begrenzte Bytes/CPU; Paketanzahl-Budget bleibt zusätzlich aktiv. |
 | N06 | P1 / offen | Fristen und einen sicheren Abbruchvertrag für zustandsändernde Handler-/Container-Waits definieren (`ferrumc-app`). | Verzögerte Simulation oder Speicherung blockiert eine Verbindung nicht unbegrenzt; Abbruch verliert oder dupliziert keine Items und lässt keine halb abgeschlossene Transaktion zurück. |
 | I01 | P0 / offen | Cursor-Stack bei voller Spielertasche erhalten (`ferrumc-app`). In `play.rs` und `handlers.rs` werden Reste derzeit nur geloggt und verworfen. | Anzahl und Inhalt der Items bleiben bei Fenster-Schließen, Disconnect und Rejoin erhalten, auch bei voller Tasche. Kein Duplizieren durch wiederholtes Schließen. |
-| I02 | P0 / offen | Truhen-Klick-State-ID und Fensterzustand prüfen (`ferrumc-app`). | Veraltete/falsche Fenster-ID oder State-ID mutiert nichts und synchronisiert den autoritativen Zustand zurück. Zwei Betrachter erhalten konsistente Versionen. |
+| I02 | P0 / umgesetzt | Truhen-Klick-State-ID und Fensterzustand prüfen (`ferrumc-app`); Chest-Snapshot im Driver atomar vergleichen. | Veraltete/falsche Fenster-ID oder State-ID mutiert nichts und synchronisiert Slots/Cursor zurück. Bei Konflikt bleibt der Cursor unverändert; echte Zwei-Client-Regressionsabnahme bestanden. Proaktive Viewer-Updates bleiben I04. |
 | I03 | P1 / offen | Normale Links-/Rechtsklicks für Spielerfenster 0; danach Shift-, Zahlentasten-, Drag-/Split-Klicks in einzelnen Schritten (`ferrumc-app`). | Item-Erhaltung für jedes Klickmodell, manipulierte clientseitige Änderungen zurückweisen, begrenzte Verarbeitung. |
 | I04 | P1 / offen | Offene Truhenfenster aller Betrachter nach einer Mutation aktualisieren. | Zwei Spieler sehen dieselben Slots/Versionen ohne zusätzlichen Klick; konkurrierende alte Klicks werden zurückgewiesen. |
 | S01 | P1 / offen | Periodische Spieler-Checkpoints (`ferrumc-app`). | Bounded/off-thread Speicherung mit definiertem maximalem Verlustfenster; Fehler werden sichtbar; alter Datensatz bleibt bei fehlgeschlagenem Laden unverändert. |
@@ -102,9 +106,11 @@ einen festgelegten Authentifizierungspfad, bevor diese Rechte belastbar sind.
 
 Das heutige Modell heißt **trusted native plugins**. Es führt Bibliotheken im
 Serverprozess aus. Manifest-Capabilities beschreiben angebotene Host-Fassaden.
-Für diesen Plan gilt [ADR-0008](adr/0008-trusted-native-plugins-c-abi.md):
+Für den heutigen nativen Pfad gilt [ADR-0008](adr/0008-trusted-native-plugins-c-abi.md):
 zielabhängige C-ABI-Artefakte, kein Hot-Reload und kein zusätzlicher WASM-Runtime.
-Bukkit-/Spigot-/Paper-Binärplugins gehören nicht zu dieser API.
+Bukkit-/Spigot-/Paper-JARs gehören nicht zu dieser nativen API. Der neu
+angeforderte Rust-/Java-Pfad wird separat gemäß
+[ADR-0009](adr/0009-java-plugin-compatibility.md) implementiert und geprüft.
 
 | ID | Arbeit | Abnahme |
 | --- | --- | --- |
@@ -156,7 +162,7 @@ und dürfen nicht nebenbei in die Hosting-Grundlage aufgenommen werden.
    Kein Catch-up-Tick und kein unbegrenztes Wachstum. Distributed Multi-Server
    bleibt außerhalb dieses Plans.
 
-## M6 — Survival / weitere Vanilla-Parität
+## M6 — Survival / weitere Vanilla-Parität (angefordertes Ziel)
 
 Diese Bereiche sind überwiegend noch nicht vorhanden und setzen M1, Welt-Ticks,
 Item-Komponenten und ein belastbares Entity-/Inventory-Modell voraus:
@@ -176,6 +182,31 @@ Item-Komponenten und ein belastbares Entity-/Inventory-Modell voraus:
 Für jedes Thema wird vor Implementierung ein eigener Umfang mit unabhängigen
 Client-/Welt-Fixtures definiert. Ein großer Sammel-PR wäre weder prüfbar noch
 mit den Crate-Regeln vereinbar.
+
+## M7 — Java-/Paper-Kompatibilität im Rust-Server
+
+Dieser Pfad wurde vom Betreiber ausdrücklich ausgewählt. Es läuft eine
+Java-API-Brücke zur Rust-Simulation, kein Paper-Spielserver. M1–M6 bleiben
+Voraussetzungen für APIs, deren Spielmechanik FerrumC noch nicht besitzt.
+
+| ID | Status / Arbeit | Abnahme |
+| --- | --- | --- |
+| J01 | Umgesetzt und lokal geprüft: Java-21-Sidecar mit echter Paper-1.21.8-API, klassischem `plugin.yml`-Loader, Lifecycle/Konfiguration, Commands/Aliases/Namespaces und Join-/Quit-Listenern; Rust-App-Wiring. | Gewöhnliches, ohne FerrumC-API gebautes JAR aktiviert sich und verarbeitet Client-Commands/Events. Java-Prozess-, Rust-Socket- und unabhängige Zwei-Client-Abnahme bestanden; Rechte, UTF-8, Listener-Reihenfolge, Startup-Rollback, Disable-once und Restart geprüft. Frames/IDs/Metadaten/Queues/Fristen begrenzt; Prozessverlust, Cancel und fehlerhafte Antworten geprüft. |
+| J02 | Offen: Command-Tab-Completion, Bukkit-Permissions samt Defaults/Attachments und Plugin-Services vervollständigen. | Bestehende Permission-Plugins mit genau festgehaltener Version; keine Rechteausweitung durch Sender-Metadaten oder Clientdaten; Kommandokonflikte, Aliases und Suggestions nachvollziehbar. |
+| J03 | Offen: Bukkit-Scheduler und synchroner API-Thread-Vertrag. | Tasks folgen autoritativen Rust-Ticks statt eigener Java-Wanduhr; Delay/Repeat/Cancel, Lag und Plugin-Disable geprüft. Bidir-RPC kann keine Java-/Simulations-Deadlocks erzeugen. |
+| J04 | Offen: World-/Chunk-/Block-/Biome-Fassaden und Rückgaben. | Reads stammen aus autoritativem Zustand; synchrone Mutation hat definierte Commit-Grenze. Block-Edit-Plugins mit unabhängiger Welt-/Client-Abnahme, Chunk-Lebensdauer und Failure-Tests. |
+| J05 | Offen: Player-/Entity-/Inventory-/ItemMeta-/Recipe-APIs. | Item-Erhaltung, Komponenten und Transaktionen stimmen mit M1/M6 überein; GUI-, Inventory- und Survival-Plugins geprüft. |
+| J06 | Offen: übrige Bukkit-/Paper-Events, Mutationen und Cancellation. | Priority/ignoreCancelled und veränderte Ergebnisse wirken vor der Aktion. Block, Inventory, Damage, Movement, Chat und weitere Events jeweils mit echten Vorher-/Nachher-Belegen. |
+| J07 | Offen: Paper-Bootstrap/Lifecycle, `paper-plugin.yml`, Library-/Dependency-Loader und Mapping. | Abhängigkeiten, Zyklen, geteilte Klassen, Library-Auflösung und Versionen reproduzierbar; Metadaten allein gelten nicht als erfolgreiche Aktivierung. |
+| J08 | Offen: NMS-/CraftBukkit- und Packet-Verträge. | Konkrete Klassen/Handles und versionsabhängiges Remapping für ausgewählte externe Plugins; unsupported Aufrufe werden klar benannt. Kein universeller Nachweis aus Bukkit-Interfaces ableiten. |
+| J09 | Offen: breite externe Plugin- und Gameplay-Matrix, Betrieb und Releases. | Unveränderte Plugins für die festgehaltene Serverversion, echte Client-/Survival-Abnahme, Neustart-/Backup-Tests und Langlauf. Jede noch fehlende API/Funktion bleibt sichtbar; erst dann normaler produktiver Serverumfang. |
+
+J01 ist eine funktionale erste API-Teilmenge. Ein JAR-Loader mit bestandener
+Fixture erledigt weder M1–M6 noch J02–J09. Siehe den API-Vertrag in
+[ADR-0009](adr/0009-java-plugin-compatibility.md) und die genauen Grenzen in
+[`server/java-bridge/README.md`](../server/java-bridge/README.md). Die erste
+Rechteübertragung umfasst erlaubte Command-Nodes und konfigurierte Operators;
+Plugin-TabCompleter, allgemeine Bukkit-Permissions und Broadcasts bleiben offen.
 
 ## Abnahme eines Arbeitsschritts
 

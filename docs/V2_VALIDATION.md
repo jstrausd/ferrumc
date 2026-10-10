@@ -1,111 +1,134 @@
 # FerrumC v2 — Prüfbericht des Hosting-Forks
 
-Ausgangscode: `8315da2c407a66ef591d2ef9de158aa74e7f6bc4`,
-upstream `rework/v2-skeleton`. Fork: [jstrausd/ferrumc](https://github.com/jstrausd/ferrumc).
-Prüfumgebung: Linux x86_64, Rust/Cargo 1.99.0. Stand: 10.10.2026.
+Stand: 10.10.2026. Fork: [jstrausd/ferrumc](https://github.com/jstrausd/ferrumc).
+Ausgangspunkt: upstream `rework/v2-skeleton`, Commit
+`8315da2c407a66ef591d2ef9de158aa74e7f6bc4`.
+Prüfumgebung: Linux x86_64, Rust/Cargo 1.99.0, Java 21, Maven 3.9.11.
 
-Die Änderungen betreffen die App-Crate sowie Dokumentation und Deployment.
+`main` enthält v2 und ist der einzige Branch im Fork. Der erste Hosting-PR
+wurde integriert; vor dem Entfernen der übrigen 19 Fork-Branches wurde ein
+vollständiges Git-Bundle samt Branchliste außerhalb des Checkouts gesichert.
+Die Upstream-Branches wurden nicht verändert.
+
+## Geprüfte Änderungen
+
+- Play-Keep-alive mit exakten IDs, absoluten Fristen, fairer Bearbeitung und
+  cancellation-sicherer Socket-/Chunk-Übergabe.
+- Truhen-Klicks prüfen Fenster-/State-ID; der Driver vergleicht die letzte
+  Chest-Sicht atomar. Veraltete Klicks verändern keine Items. Close-Pakete für
+  andere Fenster schließen das aktuelle Fenster nicht.
+- Rust 1.99.0 numerisch gepinnt. Bestehende Compiler-/Clippy-Diagnosen wurden
+  crateweise korrigiert und einzeln committed. Die strenge Workspace-Prüfung
+  ist lokal grün.
+- Optionale Java-21-Brücke gegen die echte, timestamp-gepinnte Paper-1.21.8-API:
+  gewöhnlicher `plugin.yml`-Loader, Lifecycle/Konfiguration, deklarierte Commands,
+  Aliases/Namespaces, aktuelle Spieleridentität/-nachrichten und Join-/Quit-Events.
+- Docker/Pterodactyl enthalten Java-Laufzeit, Adapter, Lizenzhinweise und
+  entsprechende Quellen. CI verwendet `main` und verpflichtende Java- und
+  unabhängige Client-Gates.
+
+FerrumC bleibt der Rust-Spielserver; seine Welt und Netzwerkverbindungen
+gehören der Rust-Laufzeit. Die Java-Brücke implementiert eine getestete
+API-Teilmenge. Die Grenzen stehen im
+[Adaptervertrag](../server/java-bridge/README.md) und
+[ADR-0009](adr/0009-java-plugin-compatibility.md).
 Es wurden keine generierten Protokolldateien geändert.
 
-## Ausgangsprüfung
-
-`cargo test --workspace --locked --no-fail-fast` lief vor den Änderungen
-erfolgreich durch, einschließlich Doc-Tests und dynamischer Plugin-Fixtures.
-`cargo xtask generate --check` bestätigte den eingecheckten Protokollcode.
-Die Claim-Prüfung bestand mit 94 Selbsttest-Fällen.
-
-## Bekannter Upstream-Blocker
-
-Die vorgeschriebene strenge Workspace-Prüfung
-
-```sh
-cd server
-cargo clippy --workspace --all-targets --locked -- -D warnings
-```
-
-scheitert mit Rust 1.99.0 bereits in unverändertem Code:
-`ferrumc-world/src/paletted_container.rs:91`, `clippy::manual_bit_width`.
-Eine fokussierte App-Prüfung findet außerdem den neuen Lint
-`clippy::assert_is_empty` in bestehenden Tests. Weitere Compilerwarnungen
-betreffen `AtomicU64::fetch_update` in `ferrumc-plugin-abi-sys` und einen
-unbenutzten Test-Import in `ferrumc-testkit`.
-
-Die breite CI ist damit noch nicht grün. Die erste Feature-Änderung ersetzt
-nicht nebenbei APIs und Tests in weiteren Crates. Der Toolchain-/Lint-Abgleich
-ist als H03 im [Umsetzungsplan](V2_IMPLEMENTATION_PLAN.md) erfasst.
-
-## Finale Code-Prüfung
+## Code-Prüfung
 
 | Prüfung | Ergebnis |
 | --- | --- |
-| `cargo test --workspace --locked --no-fail-fast` | Bestanden: 1.958 Tests in 144 Testgruppen, keine Fehler oder ignorierten Tests; einschließlich Doc-Tests und nativer Plugin-Fixtures. |
-| Play-Liveness-Regressionsabdeckung | 192 App-Unit-Tests und drei Socket-Regressionsfälle bestanden; diese sind in der Workspace-Summe enthalten. |
 | `cargo fmt --all --check`, `git diff --check` | Bestanden. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Bestanden, ohne CLI-Lint-Ausschlüsse. Drei dokumentierte trait-lokale Ausnahmen betreffen den von `async_trait` erzeugten `double_must_use`-Lint. |
+| `cargo test --workspace --locked --no-fail-fast` | 1.975 Tests in 146 Gruppen bestanden, einschließlich Doc-Tests und nativer Plugin-Fixtures. Ein expliziter Java-Artefakt-Test ist standardmäßig ignoriert und wurde separat erfolgreich aufgerufen. |
+| App-Unit-Abnahme | 208 Tests bestanden; Keep-alive, Truhen-State und Bridge-Parser/Aktor-Fehlerpfade enthalten. |
+| Rust/JAR-Socket-Abnahme | `cargo test -p ferrumc-app --locked --test java_compat -- --ignored` bestanden; fehlende Java-/JAR-Artefakte führen bei Aufruf zum Fehler. Dieser Aufruf ist obligatorisch in CI. |
 | `cargo xtask generate --check` | Bestanden; eingecheckter Protokollcode aktuell. |
-| `python3 scripts/check-forbidden-claims.py --self-test --check-index` | Bestanden: 94 Selbsttest-Fälle und 114 geprüfte Dateien im Index. |
-| Fokussiertes Clippy | Bestanden mit dem unten genannten Ausschluss für bestehende Test-Lints. |
+| `cargo metadata --no-deps --locked --format-version 1` | Bestanden. |
+| Java `mvn -B clean verify` | 11 Parser-/Archiv-Unit-Tests und sechs echte Prozessintegrationstests bestanden; keine übersprungenen Tests. |
 
-Die fokussierte App-Prüfung lautet:
+Die Java-/Rust-Brücke wurde unabhängig auf Prozessbesitz, Reaping, begrenzte
+Frames/Queues/Metadaten, IDs, absolute Fristen inklusive Warteschlange,
+Cancellation, Startup-Rollback und Empfängergrenzen geprüft. Keine offenen
+Blocking-Findings im implementierten Subset. Commandkonflikte werden auch
+bei unterschiedlicher Groß-/Kleinschreibung vor Client-Annahme abgewiesen.
 
-```sh
-cd server
-cargo clippy -p ferrumc-app --all-targets --no-deps --locked -- \
-  -D warnings -A clippy::assert_is_empty
-```
+Die Index-Claim-Prüfung verwendet
+`python3 scripts/check-forbidden-claims.py --self-test --check-index`.
+Bestanden: 94 Selbsttest-Fälle und 115 geprüfte öffentliche Dateien im Index.
 
-Sie ersetzt die noch fehlschlagende strenge Workspace-Prüfung nicht.
-Die Änderung wurde außerdem unabhängig auf faire Bearbeitung von Eingaben,
-absolute Fristen und die Übergabe der Chunk-Tickets bei Timeout geprüft.
-Deterministische Tests decken bereits zugestellte und noch nicht zugestellte
-Chunk-Antworten sowie erfolgreiche und fehlgeschlagene durable Freigabe ab.
+## Java-JAR und unabhängiger Client
 
-## Unabhängiger Client und Laufzeit
+Die Fixture wird separat ausschließlich gegen Paper-API und Java-Standard-API
+kompiliert. Ihr JAR enthält keine FerrumC-Aufrufe und wird ohne Bytecode-Änderung
+geladen. Die Socket-Abnahme prüft den tatsächlich versendeten Commandbaum,
+Login-UUID, Uppercase-/Alias-/Namespace-Routen, Rechte und Autocomplete,
+Listener-Reihenfolge und Neustart. Welt-/Scheduler-Aufrufe melden konkrete
+Fehler; danach funktionieren Commands weiter. Unicode-Exceptions bleiben
+begrenzte Remote-Fehler. Nachrichten an andere Spieler werden abgewiesen.
 
-Das Release-Image `mchosting/ferrumc:v2-local` wurde lokal gebaut. Der Container
-lief als UID 1000 mit FerrumC als PID 1. Ein Allocation-Port abweichend von
-25565 war erreichbar; Status-Ping meldete Protokoll 772. Der vorhandene
-`tests/blackbox/smoke.mjs` bestand gegen den Container: Offline-Login,
-Chunk-Streaming, Platzieren/Entfernen mit Blockstates und Rejoin.
+Zwei echte Startup-Fehlerpfade wurden geprüft: ein unverändertes Fixture-JAR
+mit kollidierendem `spawn`-Alias und ein Fehler während `onEnable`. Beide
+deaktivieren die reale Plugin-Instanz einmal und geben den Listener-Port frei.
 
-Ein zweiter, vom Smoke-Skript verwalteter Lauf verwendete das Release-Binary
-aus dem Image und einen frischen Datenordner:
+`tests/blackbox/java-plugin.mjs` besteht zusätzlich mit unabhängigen
+PrismarineJS-Decodern und zwei Clients. Geprüft werden Join-Prioritäten,
+Command-Rechte, Alias, kanonische UUID, nicht-ASCII-Text, Literal-Completion,
+Fehlerfeedback, Recovery und Nachrichtenrouting. Eine Antwort auf dem
+Gast-Stream bildet eine Barriere vor der Prüfung auf fremde Nachrichten.
+Nach SIGTERM sind `enabled=1`, `disabled=1`, `join-count=2`, `quit-count=2`
+und genau ein Disable-Log belegt.
 
-```sh
-cd tests/blackbox
-MC_MANAGE_SERVER=1 MC_SERVER_BIN=/path/to/ferrumc \
-  MC_RUN_DIR=/path/to/empty-run-dir node smoke.mjs
-```
+Minecrafts NBT verwendet Modified UTF-8: der offizielle 1.21.8-Client ruft
+bei `StringTag` `DataOutput.writeUTF` / `DataInput.readUTF` auf; auch SystemChat
+verwendet diese NBT-Kette. PrismarineJS decodiert Emoji-Surrogatpaare dort als
+sechs Ersatzzeichen. Der unabhängige Texttest prüft deshalb `Grüße Ω`.
+Emoji-JSON-Transport und Rust-NBT-Roundtrip bestehen separat. Der korrekte
+NBT-Encoder wurde wegen dieser Decodergrenze nicht verändert.
 
-Auch dieser Lauf bestand. Nach einem vollständigen Prozessneustart wurden
-alle fünf erwarteten Blöcke einschließlich ausgerichteter Logs/Treppen und
-eines entfernten Blocks durch den unabhängigen Decoder bestätigt.
+## Gameplay und Persistenz
 
-## Pterodactyl-Installer
+Der unabhängige `smoke.mjs` bestand gegen den finalen Debug-Server mit einem
+frischen Datenordner und vollständigem Prozessneustart. Status meldet
+1.21.8/772; Login, Chunk-Streaming, Blockstates, Platzieren/Entfernen mit Acks,
+Cross-Chunk-Edit und Reconnect funktionieren. Alle fünf erwarteten Positionen
+stimmen nach Reconnect und Neustart: Stein, ausgerichteter Log, ausgerichtete
+Treppe, ein entfernter Block und ein zweiter Stein über der Chunk-Grenze.
+Beide Serverprozesse endeten sauber mit Code 0.
 
-Das separate Image `mchosting/ferrumc-installer:v2-local` wurde mit dem
-Dockerfile-Target `installer` gebaut. Seine Metadaten bestätigen `User=0:0`
-und keinen `ENTRYPOINT`. Das echte Egg-Skript lief mit dem Wings-Aufruf
-`/bin/sh /mnt/install/install.sh`, ohne User- oder Entrypoint-Override:
-Erstkopie des Templates, Datenordner und UID/GID 1000 wurden geprüft.
-Erneute Installation erhielt bestehende Konfiguration, Welt- und Plugin-Dateien.
+## Container und Pterodactyl
 
-Der Laufzeit-Container erhielt SIGTERM und SIGINT direkt und meldete jeweils
-`shutdown complete`. Der Datenordner ließ sich erneut öffnen. Ein ungültiger
-Port wurde mit Exit-Code 64 abgewiesen; `--help` funktionierte.
-Die Shell-Prüfung umfasste außerdem Portgrenzen, führende Nullen, lange und
-nichtnumerische Werte sowie die unveränderte Weitergabe separater CLI-Argumente.
+Das Runtime-Image `mchosting/ferrumc:v2-local` und das separate
+`mchosting/ferrumc-installer:v2-local` wurden lokal gebaut. Bookworm erhält
+die Rust-Build-glibc; die kopierte Java-21-JRE stammt aus dem kompatiblen
+Jammy-Image. UID/GID 1000, FerrumC als PID 1, ein Allocation-Port abweichend
+von 25565, Status/Client und SIGINT/SIGTERM wurden geprüft.
 
-## Grenzen der Abnahme
+Das echte Egg-Installationsskript läuft als Root ohne Image-ENTRYPOINT mit
+dem Wings-Aufruf `/bin/sh /mnt/install/install.sh`. Erstinstallation erstellt
+Template und Datenordner. Reinstall erhält bestehende Konfiguration, Welt-
+und Plugin-Dateien. Portfehler enden mit Code 64; `--help` funktioniert.
 
-Der Client-Smoke verwendet die unabhängigen PrismarineJS-Decoder für
-Minecraft Java 1.21.8 / Protokoll 772. Er ist keine interaktive Abnahme mit
-dem offiziellen Vanilla-Client und kein Last-/Kapazitätsnachweis.
+Die Java-Container-Abnahme ist reproduzierbar über
+`python3 deploy/tests/container-java.py`. Sie verwendet den echten Installer,
+Java21 und den unabhängigen Zwei-Client-Test im Image. Zusätzlich prüft sie
+eingebettete Lizenzhinweise, API-/Adapterquellen und Plugin-Lifecycle/Persistenz
+bei graceful Stop und Reinstall.
 
-Das Egg wird als JSON und mit seinem echten Installationsskript geprüft;
-der Container wird lokal betrieben. Eine Installation in Panel/Wings und
-ein veröffentlichtes Registry-Image sind noch nicht durchgeführt.
-Es wurde kein bestehender Hosting-Server geändert oder migriert.
+## Verbleibende Grenzen
 
-Die Play-Deadline unterbricht nur abbrechbare Socket-/Chunk-Waits.
-Zustandsändernde Handler und Containertransaktionen werden nicht mitten in
-einer Inventaränderung abgebrochen; ihre Wartezeiten bleiben Folgearbeit N06.
+Die Fixture belegt die genannte Teilmenge. Scheduler, World/Inventory/Entity-
+APIs, Bukkit-Rechtebaum, Broadcasts, Paper-Bootstrap, NMS/CraftBukkit und viele
+Spielmechaniken fehlen. FerrumC läuft weiter im Offline-Modus; Spielernamen
+sind keine authentifizierten Identitäten. Cursor-Overflow, normale Inventar-
+Klicks, Item-Komponenten, proaktive Viewer-Updates und Survival bleiben im
+[Umsetzungsplan](V2_IMPLEMENTATION_PLAN.md) offen.
+
+Zustandsändernde Handler-/Containertransaktionen werden nicht mitten in einer
+Änderung abgebrochen. Ihr begrenzter Abschlussvertrag bleibt N06. Ein hart
+beendeter Java-Prozess garantiert keine Disable-Hooks.
+
+Die Client-Abnahme ist keine interaktive Vanilla-Client- oder Lastabnahme.
+Panel/Wings wurden nicht tatsächlich installiert; Images wurden nicht in
+eine Registry veröffentlicht. GitHub-CI-Ausführung ist von lokalen Prüfungen
+zu unterscheiden. Kein bestehender Hosting-Server wurde geändert oder migriert.

@@ -13,8 +13,14 @@
 - **Owner:** Saad (GitHub: Sweattypalms)
 - **License:** MIT
 - **Protocol:** Minecraft Java 1.21.8 (protocol version 772)
-- **Repo:** github.com/ferrumc-rs/ferrumc
-- **Branch:** rework/ferrumc-v2
+- **Repo:** github.com/jstrausd/ferrumc (upstream: github.com/ferrumc-rs/ferrumc)
+- **Branch:** main; the fork has one working branch
+
+The operator explicitly expanded the target to normal server behavior and
+unmodified Java plugins. Follow [ADR-0009](docs/adr/0009-java-plugin-compatibility.md)
+for the chosen Rust/Java architecture and verified compatibility contracts.
+The current implementation still uses trusted native plugins. Keep requested
+future support separate from behavior actually implemented and tested.
 
 ---
 

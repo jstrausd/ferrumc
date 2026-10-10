@@ -274,6 +274,14 @@ docs/adr-storage
 
 ## What You're NOT Building
 
+**Hosting-fork update:** the operator has explicitly requested full server
+behavior and Java/Paper plugins, superseding the historical scope exclusions
+below for those features. Work only on `main`; use
+[ADR-0009](docs/adr/0009-java-plugin-compatibility.md) for the runtime/API
+decision. Crate, ownership, bounded-channel, and verification rules still apply.
+Do not describe a loader or a separate Paper process as completed compatibility
+inside FerrumC's Rust simulation.
+
 Don't get clever. Don't scope-creep. If any of these show up in your PR, it's rejected:
 
 - WASM plugin runtime
