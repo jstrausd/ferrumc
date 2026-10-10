@@ -458,7 +458,8 @@ Artefakte und verbleibende Grenzen stehen im
 | SIM-03.2 | F | [Entityownership](agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md), `916251da`: shardbesessener begrenzter UUID-/Wire-/Chunkindex und generationaler Handle; Review CLEAN nach F1-RED→GREEN. Unabhängig Debug/Release jeweils227 und12.000 Modellinterleavings grün. Keine aktive App-/Mobsimulation; persistente Komponenten/Physik/Tracking folgen separat. |
 | GEN-04.3 | F | [Kubische Splines](agent-tasks/GEN-04_3_CUBIC_SPLINES.md),245134eb: unabhängiger Review CLEAN nach Dokumentations-F1; Root163Worlddebug/20Release, bytegleicher Originalreexport und4294 zusätzliche Originalrecords grün. Density-/Terrainconsumer bleiben getrennt. |
 | STORAGE-ENTITY001.1 | A | [UUID-Storageproducer](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE.md): `select_world_ticket` übernimmt fresh/strict Format5 nach unabhängiger Designprüfung/R1–R4. Vorhandene Format4-Welten bleiben unverändert; explizite Migration .2 und DUR-03-CAS-/Receiptauthority folgen getrennt. |
-| REG-WORLDGEN001 | A | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md): `feature_catalog` übernimmt Buildzeitproducer für60/35/7 Originalresources; konkretes API vor Production. Keine aktive Terrainpipeline. |
+| REG-WORLDGEN001 | F | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md),555ee2aa: unabhängiges Rootreview CLEAN, Debug/Release jeweils69 und4 Reviewerproben grün;102 tatsächliche Originalressourcen und195 Amplitudenbits vollständig geprüft. Keine aktive Terrainpipeline. |
+| GEN-05.1 | A | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md): `item_transfer_primitives` implementiert alle35 Originaldefinitionen/sieben Router, bounded private Holder-/Splinegraphen und originalgetreue Zahlenlexeme. Echter JAR-Codec-/Strukturoracle arbeitet separat; Sampling/Terrain bleiben offen. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
@@ -473,12 +474,13 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Registryagent `feature_catalog` | REG-WORLDGEN001 | in Umsetzung, Design freigegeben | Registry-Crate und eigenes Taskdoc; SIM-03.2 und Storage-Designreview abgeschlossen. |
+| Registryagent `feature_catalog` | REG-WORLDGEN001 | abgeschlossen,555ee2aa | Registry-Crate und eigenes Taskdoc; Rootreview CLEAN. Agent hat Lieferung beendet. |
 | Storageagent `select_world_ticket` | STORAGE-ENTITY001.1 | in Umsetzung, Design freigegeben | Storage-Crate und eigener .1-Brief; SIM-03.2-Fremdreview abgeschlossen. Migration .2 und Gameplaytransfers noch offen. |
-| Weltagent `item_transfer_primitives` | GEN-05 | konkreter Compiler-/Routerentwurf read-only | GEN-04.3 integriert245134eb, World-Crate frei für nächsten freigegebenen Consumer. Terrainconsumer noch offen. |
+| Weltagent `item_transfer_primitives` | GEN-05.1 | Compiler in Umsetzung, Design freigegeben | World-Crate; ein separater `gen05_1_codec_oracle`-Agent besitzt ausschließlich eigene Reference-/Fixturedaten. Terrainconsumer noch offen. |
 
-Diese Rollenliste erfasst die drei tatsächlich beauftragten Agents der
-laufenden Welle. Reviews nutzen frei gewordene Slots. Root aktualisiert Agentname,
+Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
+aktiven Slots stehen im Implementierungsboard. Reviews nutzen frei gewordene
+Slots. Root aktualisiert Agentname,
 genaue Ticketuntermenge, Dateien und Status nach tatsächlicher Vergabe.
 Wenn ein Feature an fehlenden Verbrauchern hängt, erhält der nächste freie
 Agent das abhängige Producer-/Consumer-/Wiringticket, statt beliebig andere

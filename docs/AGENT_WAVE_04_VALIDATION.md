@@ -142,8 +142,24 @@ Dieser Lauf enthält den späteren SIM-03.2-Commit noch nicht.
 GitHub-CI für **`b4c88476`**, einschließlich SIM-03.2, ist ebenfalls erfolgreich:
 [CI-Lauf38075509053](https://github.com/jstrausd/ferrumc/actions/runs/38075509053).
 Alle Rust-/Java-/Tool-/Generator-/Claims- und sieben Clientgates bestanden.
-GEN-04.3 ist in diesem zweiten Lauf noch nicht enthalten; CI für den neuen
-veröffentlichten Gesamtstand folgt getrennt.
+GEN-04.3 ist in diesem zweiten Lauf noch nicht enthalten. GitHub-CI für
+**`3a5b4d62866d5f81d9820ec05dd3843389d32d90`**, einschließlich GEN-04.3,
+ist ebenfalls erfolgreich:
+[CI-Lauf38076109486](https://github.com/jstrausd/ferrumc/actions/runs/38076109486).
+Alle Rust-/Java-/Tool-/Generator-/Claims- und sieben Clientgates bestanden.
+Der nachfolgende Registrycommit555ee2aa ist darin noch nicht enthalten.
+
+## Unabhängige Originaldatenprüfung
+
+REG-WORLDGEN001 wurde als **555ee2aa** auf `main` integriert und veröffentlicht.
+Der [Registryreviewbericht](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA_REVIEW.md)
+hält den isolierten zwölf-Dateien-Freeze, vollständigen Source-/Codecvergleich
+und Grenzen fest. Root Debug/Release jeweils69, vier zusätzliche eigene
+Proben, strict Alltargetclippy/fmt und Originalhelper normal/`-O` grün.
+Alle102 Ressourcen und195 Noiseamplitudenbits sind vollständig geprüft;
+Fixture-Slices sind bytegleich zur Registry, datagen/JAR-Ressourcen separat
+raw-bytegleich. Keine behauptete natürliche Chunk- oder Paper-Spielabnahme.
+Indexclaimcheck:94 Selftests und161 gescannte Dateien clean.
 
 ## Unabhängige Entityprüfung nach F1-Fix
 
@@ -173,11 +189,12 @@ Das belegt Typ-/Owneridentität und keine Verhaltensimplementation dieser Mobs.
 ## Laufende Folgearbeit
 
 - `feature_catalog`: REG-WORLDGEN001, Originaldatenproducer für60 Noiseparameter,
-  35 Densityresources und7 Noisesettings; API-/Generatorvertrag freigegeben,
-  in Umsetzung. Immutable Originaldefinitionen benötigen noch einen Worldcompiler.
+  35 Densityresources und7 Noisesettings abgeschlossen555ee2aa. Immutable
+  Originaldefinitionen benötigen noch den fertig geprüften Worldcompiler.
 - `item_transfer_primitives`: GEN-04.3 originale kubische Splines integriert;
-  read-only Design des konkreten GEN-05-Densitycompiler-/Routerconsumers.
-  Anschließend
+  freigegebene GEN-05.1-Compilerimplementierung mit separatem echten JAR-Codec-
+  und Strukturoracle. Holderhelper-/Splinepflichtfelder und kombinierte Tiefe
+  werden gegen die Originalcodecs geprüft. Anschließend
   Densityregistry/-router, NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
 - `select_world_ticket`: STORAGE-ENTITY001.1 fresh/strict UUID-Storageproducer.
   API-/Mode-/Validatorvertrag freigegeben, in Umsetzung.
