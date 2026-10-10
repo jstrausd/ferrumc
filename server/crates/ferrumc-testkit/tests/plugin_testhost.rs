@@ -411,7 +411,7 @@ fn same_source_replay_is_deterministic_across_both_packaging_modes() {
         capacity_builtin.report().state().block_state_id(PLACE_POS),
         Some(4)
     );
-    assert!(capacity_builtin.report().state().messages().is_empty());
+    assert_eq!(capacity_builtin.report().state().messages().len(), 0);
     assert!(!capacity_builtin.report().effects().iter().any(|effect| {
         matches!(
             effect,
@@ -459,7 +459,7 @@ fn same_source_replay_is_deterministic_across_both_packaging_modes() {
             .storage_value("rolled-back"),
         None
     );
-    assert!(rollback_builtin.report().state().messages().is_empty());
+    assert_eq!(rollback_builtin.report().state().messages().len(), 0);
     for failure in [&rollback_builtin, &rollback_dynamic] {
         assert!(failure
             .report()
@@ -498,7 +498,7 @@ fn same_source_replay_is_deterministic_across_both_packaging_modes() {
         panic_dynamic.report().digest()
     );
     assert_eq!(panic_builtin.report().effects().len(), 11);
-    assert!(panic_builtin.report().state().messages().is_empty());
+    assert_eq!(panic_builtin.report().state().messages().len(), 0);
     for failure in [&panic_builtin, &panic_dynamic] {
         assert!(failure
             .report()
@@ -552,7 +552,7 @@ fn same_source_replay_is_deterministic_across_both_packaging_modes() {
             denied_dynamic.report().digest()
         );
         assert_eq!(denied_builtin.report().effects().len(), 11);
-        assert!(denied_builtin.report().state().messages().is_empty());
+        assert_eq!(denied_builtin.report().state().messages().len(), 0);
     }
 
     let mut changed_host = seeded_host(64);
@@ -618,7 +618,7 @@ fn lifecycle_commits_exact_state_and_semantic_effects() {
         Some(23_u32.to_le_bytes().as_slice())
     );
     assert_eq!(state.storage_value("command"), Some(b"invoked".as_slice()));
-    assert!(state.timers().is_empty());
+    assert_eq!(state.timers().len(), 0);
     assert_eq!(
         state.subscriptions(),
         [

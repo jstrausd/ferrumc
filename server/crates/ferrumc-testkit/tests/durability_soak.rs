@@ -83,7 +83,7 @@ async fn fixed_schedule_is_bounded_deterministic_and_reaches_known_digest() {
         DurabilitySoakScenario::PlayerAcknowledgementLoss,
         DurabilitySoakScenario::Clean,
     ];
-    for (cycle, steps) in first.steps()[1..].chunks_exact(7).enumerate() {
+    for (cycle, steps) in first.steps()[1..].as_chunks::<7>().0.iter().enumerate() {
         assert_eq!(
             steps
                 .iter()

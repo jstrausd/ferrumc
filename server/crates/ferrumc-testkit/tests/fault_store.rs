@@ -85,7 +85,7 @@ fn assert_first_attempt_not_committed(case: &DurabilityCaseReport) {
                 .all(|(id, _)| case.committed().player(*id).is_none()));
         }
         DurabilitySurface::Journal => {
-            assert!(case.committed().block_mutations().is_empty());
+            assert_eq!(case.committed().block_mutations().len(), 0);
             assert!(case
                 .committed()
                 .journal_receipt(attempt.journal_batch_id().expect("journal batch id"))
@@ -191,7 +191,7 @@ async fn reusable_durability_battery_is_seeded_complete_and_deterministic() {
     );
 
     for case in first.cases() {
-        assert!(!case.attempted().operations().is_empty());
+        assert_ne!(case.attempted().operations().len(), 0);
         assert!(case
             .trace()
             .windows(2)
@@ -494,7 +494,7 @@ async fn reusable_durability_battery_is_seeded_complete_and_deterministic() {
         .journal_receipt(empty_batch_id)
         .expect("empty receipt")
         .is_empty());
-    assert!(journal_empty.committed().block_mutations().is_empty());
+    assert_eq!(journal_empty.committed().block_mutations().len(), 0);
 
     for surface in [DurabilitySurface::World, DurabilitySurface::Journal] {
         assert_eq!(
@@ -1181,11 +1181,10 @@ async fn fault_store_exposes_deterministic_commit_cutpoints() {
         .append_block_mutations(vec![mutation(1)])
         .await
         .expect_err("pre-commit failure");
-    assert!(store
-        .snapshot()
-        .expect("snapshot")
-        .block_mutations()
-        .is_empty());
+    assert_eq!(
+        store.snapshot().expect("snapshot").block_mutations().len(),
+        0
+    );
 
     store
         .return_next_commit_error()
@@ -1194,11 +1193,10 @@ async fn fault_store_exposes_deterministic_commit_cutpoints() {
         .append_block_mutations(vec![mutation(2)])
         .await
         .expect_err("commit error");
-    assert!(store
-        .snapshot()
-        .expect("snapshot")
-        .block_mutations()
-        .is_empty());
+    assert_eq!(
+        store.snapshot().expect("snapshot").block_mutations().len(),
+        0
+    );
 
     let commit_gate = store
         .hold_next_before_commit()
@@ -1208,11 +1206,10 @@ async fn fault_store_exposes_deterministic_commit_cutpoints() {
         tokio::spawn(async move { store.append_block_mutations(vec![mutation(3)]).await })
     };
     commit_gate.wait_until_reached().await;
-    assert!(store
-        .snapshot()
-        .expect("snapshot")
-        .block_mutations()
-        .is_empty());
+    assert_eq!(
+        store.snapshot().expect("snapshot").block_mutations().len(),
+        0
+    );
     assert!(!pending.is_finished());
     commit_gate.release();
     pending
@@ -1271,7 +1268,7 @@ async fn injected_and_commit_failures_never_mutate_committed_state() {
         .expect_err("commit error");
 
     let snapshot = store.snapshot().expect("snapshot");
-    assert!(snapshot.block_mutations().is_empty());
+    assert_eq!(snapshot.block_mutations().len(), 0);
     assert_eq!(snapshot.attempted_operations(), 2);
     assert_eq!(snapshot.committed_operations(), 0);
     let stages: Vec<_> = store
@@ -1297,11 +1294,14 @@ async fn closed_request_and_response_sides_have_distinct_commit_results() {
         .expect_err("closed request side");
     assert!(matches!(request_error, ServerError::InvalidState(_)));
     assert_eq!(request_closed.scheduled_faults().expect("schedule"), 1);
-    assert!(request_closed
-        .snapshot()
-        .expect("snapshot")
-        .block_mutations()
-        .is_empty());
+    assert_eq!(
+        request_closed
+            .snapshot()
+            .expect("snapshot")
+            .block_mutations()
+            .len(),
+        0
+    );
 
     let response_closed = FaultInjectingStore::new();
     response_closed.close_responses().expect("close responses");

@@ -342,8 +342,8 @@ fn panic_status_discards_fixture_mutations_and_disables_it() {
         &permissions,
     );
     assert_eq!(later.delivered(), 1);
-    assert!(later.panicked().is_empty());
-    assert!(later.native_panics().is_empty());
+    assert_eq!(later.panicked().len(), 0);
+    assert_eq!(later.native_panics().len(), 0);
     assert_messages(&sink.intents[prior..], player, &[CONTINUATION_MESSAGE]);
     assert_eq!(host.stats(&native_id).map(PluginStats::panics), Some(1));
 

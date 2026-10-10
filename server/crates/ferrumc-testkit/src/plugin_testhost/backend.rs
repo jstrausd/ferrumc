@@ -906,7 +906,7 @@ mod tests {
         FcCommandKind, FcResourceHandle, FC_CAPABILITY_DENIED, FC_COMMAND_BUFFER_FULL,
         FC_COMMAND_FLAGS_NONE, FC_DIAGNOSTIC_INFO, FC_INVALID_ARGUMENT, FC_OK,
     };
-    use ferrumc_plugin_abi_sys::{HostServices as _, OwnedCommand};
+    use ferrumc_plugin_abi_sys::OwnedCommand;
 
     use super::*;
 
@@ -977,7 +977,7 @@ mod tests {
             FC_CAPABILITY_DENIED
         );
         let (effects, _, failure) = denied.into_parts();
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 0);
         assert_eq!(
             failure,
             Some(PluginFailureKind::CapabilityDenied(
@@ -1039,7 +1039,7 @@ mod tests {
             FC_INVALID_ARGUMENT
         );
         let (effects, _, failure) = frame.into_parts();
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 0);
         assert_eq!(failure, Some(PluginFailureKind::WrongDecision));
     }
 
@@ -1064,8 +1064,8 @@ mod tests {
                 FC_INVALID_ARGUMENT
             );
             let (effects, diagnostics, failure) = diagnostic.into_parts();
-            assert!(effects.is_empty());
-            assert!(diagnostics.is_empty());
+            assert_eq!(effects.len(), 0);
+            assert_eq!(diagnostics.len(), 0);
             assert!(matches!(failure, Some(PluginFailureKind::AbiProtocol(_))));
         }
     }
@@ -1097,7 +1097,7 @@ mod tests {
         );
         assert_eq!(count.emit(command), FC_COMMAND_BUFFER_FULL);
         let (effects, _, failure) = count.into_parts();
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 0);
         assert_eq!(failure, Some(PluginFailureKind::BufferFull));
 
         let mut seed = SeedState::empty();
@@ -1131,7 +1131,7 @@ mod tests {
             "252 maximum-size keys consume 65,520 list bytes; a nine-byte key would exceed 65,532"
         );
         let (effects, _, failure) = encoded_list.into_parts();
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 0);
         assert_eq!(failure, Some(PluginFailureKind::BufferFull));
     }
 
@@ -1157,7 +1157,7 @@ mod tests {
             })
         ));
         let (effects, _, failure) = frame.into_parts();
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 0);
         assert_eq!(failure, Some(PluginFailureKind::TimerOverflow));
     }
 }
