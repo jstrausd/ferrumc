@@ -83,6 +83,9 @@ jobs:
       - name: Forbidden public claims
         run: python3 ../scripts/check-forbidden-claims.py --self-test --check-index
 
+      - name: Performance harness ownership and cleanup
+        run: python3 -m unittest discover -s ../tests/performance -p 'test_*.py'
+
       - name: Generated files are current
         run: cargo xtask generate --check
 
