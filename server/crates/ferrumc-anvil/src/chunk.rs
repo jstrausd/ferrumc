@@ -818,7 +818,7 @@ fn bits_per_block(palette_len: usize) -> u32 {
         return 0;
     }
     // `ceil(log2(len))` == bit width of `len - 1`.
-    let needed = usize::BITS - (palette_len - 1).leading_zeros();
+    let needed = (palette_len - 1).bit_width();
     needed.max(MIN_BITS_PER_BLOCK)
 }
 
