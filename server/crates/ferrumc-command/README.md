@@ -4,7 +4,7 @@ A Brigadier-lite command system: a tree of literal and argument nodes with
 parsing, tab-completion suggestions, and dispatch that delegates the actual
 permission check to the calling layer.
 
-Depends only on `ferrumc-core`. It does not know how permissions are stored or
+Depends on `ferrumc-core` and `ferrumc-codec`. It does not know how permissions are stored or
 evaluated: a node declares a required permission *level* and/or an opaque
 permission *node string*, and the caller supplies the check — a permission level
 on the `CommandSource` (compared during `dispatch`), or an `is_allowed` closure
@@ -33,6 +33,14 @@ assert!(matches!(&result, Ok(outcome) if outcome.is_success()));
 // Suggestions complete the next token.
 assert_eq!(tree.suggest("game"), vec!["gamemode".to_string()]);
 ```
+
+Argument builders can declare server-driven completion with
+`argument("args", ArgumentType::GreedyString).suggests_ask_server()`. The lowered
+Brigadier graph then sets the custom-suggestions flag and encodes the vanilla
+`minecraft:ask_server` provider after the argument properties. The application
+handles the client's completion request; this declaration does not invoke a
+provider or change parsing and dispatch. Permission filtering preserves the
+metadata only for arguments the player may reach.
 
 ## Invariants
 

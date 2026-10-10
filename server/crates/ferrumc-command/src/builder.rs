@@ -30,6 +30,7 @@ pub(crate) struct CommandNode {
     pub(crate) handler: Option<HandlerFn>,
     pub(crate) required_level: Option<u8>,
     pub(crate) required_permission: Option<String>,
+    pub(crate) asks_server_for_suggestions: bool,
 }
 
 impl CommandNode {
@@ -41,6 +42,7 @@ impl CommandNode {
             handler: None,
             required_level: None,
             required_permission: None,
+            asks_server_for_suggestions: false,
         }
     }
 
@@ -96,6 +98,20 @@ impl CommandBuilder {
     #[must_use]
     pub fn requires_permission(mut self, node: impl Into<String>) -> Self {
         self.node.required_permission = Some(node.into());
+        self
+    }
+
+    /// Declares `minecraft:ask_server` completion for an argument node.
+    ///
+    /// The client requests suggestions from the server when completing this
+    /// argument. The caller must handle those requests; this only declares the
+    /// provider in the clientbound command graph and does not change parsing,
+    /// dispatch, or [`crate::CommandTree::suggest`]. Literal nodes are unaffected.
+    #[must_use]
+    pub fn suggests_ask_server(mut self) -> Self {
+        if matches!(self.node.kind, NodeKind::Argument { .. }) {
+            self.node.asks_server_for_suggestions = true;
+        }
         self
     }
 

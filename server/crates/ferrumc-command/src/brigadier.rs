@@ -18,7 +18,7 @@
 //! flags: bit[1:0] node type (0=root, 1=literal, 2=argument)
 //!        bit[2]   has_command         (executable here)
 //!        bit[3]   has_redirect_node   (unused here)
-//!        bit[4]   has_custom_suggestions (unused here)
+//!        bit[4]   has_custom_suggestions
 //!        bit[5]   allows_restricted   (unused here)
 //! literal  extra: name: string
 //! argument extra: name: string, parser: varint, properties, [suggestionType]
@@ -39,6 +39,10 @@ const NODE_TYPE_LITERAL: u8 = 1;
 const NODE_TYPE_ARGUMENT: u8 = 2;
 /// Flags bit `[2]`: the command may be executed when parsing ends at this node.
 const FLAG_HAS_COMMAND: u8 = 0x04;
+/// Flags bit `[4]`: a suggestion-provider string follows argument properties.
+const FLAG_HAS_CUSTOM_SUGGESTIONS: u8 = 0x10;
+/// The vanilla provider that delegates argument completion to the server.
+const ASK_SERVER_SUGGESTION_TYPE: &str = "minecraft:ask_server";
 
 /// Brigadier parser id for `brigadier:integer`.
 const PARSER_INTEGER: i32 = 3;
@@ -101,7 +105,7 @@ pub struct BrigadierNode {
 
 impl BrigadierNode {
     /// The node's flags byte (node type in bits `[1:0]`, `has_command` in bit
-    /// `[2]`, and the unused redirect/suggestion/restricted bits above it).
+    /// `[2]`, custom suggestions in bit `[4]`, and unused redirect/restricted bits).
     pub fn flags(&self) -> u8 {
         self.flags
     }
@@ -114,6 +118,17 @@ impl BrigadierNode {
     /// `true` if the command may be executed when a parse ends at this node.
     pub fn has_command(&self) -> bool {
         self.flags & FLAG_HAS_COMMAND != 0
+    }
+
+    /// The argument's custom suggestion provider, or `None` for default
+    /// completion, literals, and the root.
+    pub fn suggestion_type(&self) -> Option<&str> {
+        match &self.extra {
+            BrigadierExtra::Argument {
+                suggestion_type, ..
+            } => *suggestion_type,
+            BrigadierExtra::Root | BrigadierExtra::Literal { .. } => None,
+        }
     }
 
     /// The indices, into [`BrigadierGraph::nodes`], of this node's children.
@@ -158,10 +173,14 @@ impl BrigadierNode {
                 name,
                 parser_id,
                 props,
+                suggestion_type,
             } => {
                 write_string(buf, name);
                 write_var_int(buf, *parser_id);
                 props.encode(buf);
+                if let Some(suggestion_type) = suggestion_type {
+                    write_string(buf, suggestion_type);
+                }
             }
         }
     }
@@ -186,6 +205,9 @@ pub enum BrigadierExtra {
         parser_id: i32,
         /// The parser-specific properties (bounds, string mode, ...).
         props: BrigadierProps,
+        /// A custom suggestion-provider identifier, encoded after the parser
+        /// properties. Currently only `minecraft:ask_server` is declared.
+        suggestion_type: Option<&'static str>,
     },
 }
 
@@ -360,6 +382,9 @@ fn build_node(node: &CommandNode) -> BrigadierNode {
                     name: name.clone(),
                     parser_id,
                     props,
+                    suggestion_type: node
+                        .asks_server_for_suggestions
+                        .then_some(ASK_SERVER_SUGGESTION_TYPE),
                 },
             )
         }
@@ -367,6 +392,15 @@ fn build_node(node: &CommandNode) -> BrigadierNode {
     let mut flags = type_bits;
     if node.handler.is_some() {
         flags |= FLAG_HAS_COMMAND;
+    }
+    if matches!(
+        extra,
+        BrigadierExtra::Argument {
+            suggestion_type: Some(_),
+            ..
+        }
+    ) {
+        flags |= FLAG_HAS_CUSTOM_SUGGESTIONS;
     }
     BrigadierNode {
         flags,
@@ -566,6 +600,138 @@ mod tests {
         expected.push(0x00); // root index = 0
 
         assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn ask_server_string_arguments_match_exact_wire_bytes() {
+        let cases: [(ArgumentType, &[u8]); 2] = [
+            (
+                ArgumentType::Word,
+                b"\x03\x00\x01\x01\x01\x01\x02\x03cmd\x16\x00\x03arg\x05\x00\x14minecraft:ask_server\x00",
+            ),
+            (
+                ArgumentType::GreedyString,
+                b"\x03\x00\x01\x01\x01\x01\x02\x03cmd\x16\x00\x03arg\x05\x02\x14minecraft:ask_server\x00",
+            ),
+        ];
+        for (arg_type, expected) in cases {
+            let mut tree = CommandTree::new();
+            tree.register(
+                literal("cmd").then(
+                    argument("arg", arg_type)
+                        .suggests_ask_server()
+                        .executes(|_| CommandResult::success(TextComponent::text("done"))),
+                ),
+            );
+            let graph = tree.to_brigadier(0, &|_| true);
+            assert_eq!(graph.nodes()[2].flags(), 0x16);
+            assert_eq!(
+                graph.nodes()[2].suggestion_type(),
+                Some("minecraft:ask_server")
+            );
+            assert_eq!(graph.encode(), expected, "{arg_type:?}");
+        }
+    }
+
+    #[test]
+    fn ask_server_integer_provider_follows_both_bounds() {
+        let mut tree = CommandTree::new();
+        tree.register(
+            literal("cmd").then(
+                argument("count", ArgumentType::integer(1, 9))
+                    .suggests_ask_server()
+                    .executes(|_| CommandResult::success(TextComponent::text("done"))),
+            ),
+        );
+        // The parser id, min/max flag, and both big-endian bounds precede the
+        // provider length/string. These are independent protocol bytes.
+        let expected = b"\x03\x00\x01\x01\x01\x01\x02\x03cmd\x16\x00\x05count\x03\x03\x00\x00\x00\x01\x00\x00\x00\x09\x14minecraft:ask_server\x00";
+        assert_eq!(tree.encode_commands_body(0, &|_| true), expected);
+    }
+
+    #[test]
+    fn default_and_literal_nodes_do_not_encode_suggestion_providers() {
+        let mut tree = CommandTree::new();
+        tree.register(
+            literal("cmd").suggests_ask_server().then(
+                argument("arg", ArgumentType::Word)
+                    .executes(|_| CommandResult::success(TextComponent::text("done"))),
+            ),
+        );
+        let graph = tree.to_brigadier(0, &|_| true);
+        assert!(graph
+            .nodes()
+            .iter()
+            .all(|node| node.suggestion_type().is_none()));
+        assert!(graph.nodes().iter().all(|node| node.flags() & 0x10 == 0));
+        let expected = b"\x03\x00\x01\x01\x01\x01\x02\x03cmd\x06\x00\x03arg\x05\x00\x00";
+        assert_eq!(graph.encode(), expected);
+    }
+
+    #[test]
+    fn non_executable_argument_preserves_provider_and_children() {
+        let mut tree = CommandTree::new();
+        tree.register(
+            literal("cmd").then(
+                argument("arg", ArgumentType::Word)
+                    .suggests_ask_server()
+                    .suggests_ask_server()
+                    .then(
+                        literal("done")
+                            .executes(|_| CommandResult::success(TextComponent::text("done"))),
+                    ),
+            ),
+        );
+        let graph = tree.to_brigadier(0, &|_| true);
+        assert_eq!(graph.nodes()[2].flags(), 0x12);
+        assert!(!graph.nodes()[2].has_command());
+        assert_eq!(graph.nodes()[2].children(), [3]);
+        let expected = b"\x04\x00\x01\x01\x01\x01\x02\x03cmd\x12\x01\x03\x03arg\x05\x00\x14minecraft:ask_server\x05\x00\x04done\x00";
+        assert_eq!(graph.encode(), expected);
+    }
+
+    #[test]
+    fn permission_filtering_preserves_only_surviving_provider() {
+        let mut tree = CommandTree::new();
+        tree.register(
+            literal("cmd")
+                .then(
+                    argument("hidden", ArgumentType::Word)
+                        .suggests_ask_server()
+                        .requires_level(2)
+                        .executes(|_| CommandResult::success(TextComponent::text("hidden"))),
+                )
+                .then(
+                    argument("denied", ArgumentType::Word)
+                        .suggests_ask_server()
+                        .requires_permission("plugin.denied")
+                        .executes(|_| CommandResult::success(TextComponent::text("denied"))),
+                )
+                .then(
+                    argument("arg", ArgumentType::Word)
+                        .suggests_ask_server()
+                        .requires_permission("plugin.allowed")
+                        .executes(|_| CommandResult::success(TextComponent::text("allowed"))),
+                ),
+        );
+        let graph = tree.to_brigadier(0, &|permission| permission == "plugin.allowed");
+        assert_eq!(graph.nodes().len(), 3);
+        assert_eq!(graph.nodes()[0].children(), [1]);
+        assert_eq!(graph.nodes()[1].children(), [2]);
+        assert_eq!(graph.nodes()[2].name(), Some("arg"));
+        assert_eq!(
+            graph.nodes()[2].suggestion_type(),
+            Some("minecraft:ask_server")
+        );
+        let expected = b"\x03\x00\x01\x01\x01\x01\x02\x03cmd\x16\x00\x03arg\x05\x00\x14minecraft:ask_server\x00";
+        assert_eq!(graph.encode(), expected);
+
+        // Removing the last permitted descendant also removes its dead-end
+        // parent; no provider bytes or dangling child indices survive.
+        let denied = tree.to_brigadier(0, &|_| false);
+        assert_eq!(denied.nodes().len(), 1);
+        assert_eq!(denied.nodes()[0].suggestion_type(), None);
+        assert_eq!(denied.encode(), [0x01, 0x00, 0x00, 0x00]);
     }
 
     #[test]

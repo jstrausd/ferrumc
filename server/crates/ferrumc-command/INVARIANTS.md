@@ -11,4 +11,8 @@
 
 ## Crate-Specific
 
-<!-- Add crate-specific invariants here as the code develops -->
+- Custom suggestion providers apply only to argument nodes. When present, the
+  Brigadier node sets flag `0x10` and encodes its provider string after the
+  parser-specific properties; when absent, neither the flag nor string appears.
+- Permission filtering retains suggestion metadata only on surviving nodes and
+  assigns child indices over that retained set.
