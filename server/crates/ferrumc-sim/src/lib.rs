@@ -77,6 +77,7 @@ mod loaded;
 mod message;
 mod mutation;
 mod ownership;
+mod player;
 mod region;
 #[allow(
     dead_code,
@@ -115,6 +116,7 @@ pub use ownership::{
     ShardId, ShardLifecycle, ShardLifecycleState, ShardOwnership, ShardOwnershipMap,
     ShardPartitioner, ShardRegion, MAX_SHARD_COORD, MIN_SHARD_COORD, SHARD_WIDTH_CHUNKS,
 };
+pub use player::*;
 pub use region::{RegionLimits, RegionOp};
 pub use shard::SimShard;
 pub use time::{WorldTime, DAY_LENGTH_TICKS, TIME_DAY, TIME_MIDNIGHT, TIME_NIGHT, TIME_NOON};

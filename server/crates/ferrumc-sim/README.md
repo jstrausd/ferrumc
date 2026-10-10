@@ -1,7 +1,7 @@
 # ferrumc-sim
 
 Deterministic ticks, shard ownership, player state, chunk residency and optional
-bounded non-player registrations.
+bounded non-player registrations and opt-in receipt-confirmed native inventory/item transfers.
 
 ## Invariants
 
@@ -87,6 +87,79 @@ physics/merge. Unloaded/offline items receive no automatic or wall-clock step.
 See `docs/agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md` for the pinned reference,
 native-policy deviations and acceptance evidence.
 
+## Receipt-confirmed native player/item consumer (DUR-04.1)
+
+`initialize_player_ownership(binding, limits)` explicitly selects a single
+native authority only while the shard's player/entity owners are empty. The
+actual `PlayerState` then owns all 46 indexed window-0 slots, the cursor and
+selected hotbar alongside position/look/mode. `NativePlayerSnapshot` reads and
+writes the existing FCPS3/schema3 format exactly: 41-byte header and 47 framed
+lossless FCIS stacks. It refuses unsupported schemas, invalid shapes, nonfinite
+positions/look, invalid selection, oversized frames and trailing bytes. FCPS1/2
+migration remains a separate App consumer.
+
+`OwnershipStoreBinding` retains only weak exact backend/incarnation identities.
+Off-tick `read_player`, `read_entity` and coherent `read_pair` produce sealed
+admissions from real DUR-03 ownership reads. `OwnedPlayerInput` enters a bounded
+count/byte inbox; refusal returns the entire input. The concrete
+`run_tick_with_player_ownership` applies completions first, then admitted action
+FIFO. It emits move-owned `PlayerOwnershipStorageWork` for the external driver,
+which executes the exact real CAS/pair request, receipt clarification and current
+read. Sim performs no database I/O during this boundary.
+
+Bootstrap, ordinary slot/cursor left/right clicks, autosave, selected-hand
+DropOne/All, partial/full pickup and fresh item spawn publish only after matching
+receipt/current evidence. The reservation protects the full player and one
+whole entity owner. Before confirmation the actual player source and item
+visibility remain unchanged; a definitive fresh-spawn conflict returns the
+whole original caller proposal through `ItemSpawnRefused`. Deferred movement,
+look, mode and selection apply afterwards at checked new generations.
+Disconnect keeps native state and pending work; rejoin invalidates the old
+player admission. Dirty or unresolved work prevents Stop.
+
+Each pending mutation has at most one outstanding Work/Completion buffer,
+including a refused completion retained by the caller. A weak lease tracks that
+buffer only. Losing it allows readonly reconciliation, never proof of a worker
+abort. Receipt absence retains reservations. Only a real no-start Busy/history
+refusal permits exact retry; superseded historical receipts quarantine/resync.
+Version-1 FCPQ checkpoints are checked data and cannot forge workers,
+expectations or live handles. Receipt-positive recovery uses fresh current reads;
+a pair is read coherently. Snapshot/checkpoint capture is bounded per call;
+external retention of repeated caller-owned copies is outside Sim retention caps.
+
+Limits cap players, checked native player bytes, pending count/charged bytes and
+combined input/completion count/charged bytes. Pending charge is checked before
+materializing candidate/request clones:
+`512 + 2*before_record_bytes + 5*after_record_bytes + 149`. The fixed 512 is a
+logical metadata allowance, including the one private receipt-box pointer;
+boxing moves the existing receipt and creates no second receipt. All charges
+are encoded-representation/count limits, not complete decoded heap/RSS limits.
+A maximally allowed Storage pair may exceed Sim's stricter 8 MiB pending cap and
+is refused. Owned-mode clones are inactive snapshots; legacy input, entity
+writer, container and mutable-chunk-map entry points cannot bypass authority.
+Use checked owned chunk acquire/release for residency changes.
+
+The consumer preserves exact component representations and conservatively
+resolves typed stack caps. Removed/opaque capacity components 1..3 refuse; it
+does not implement effective default-component normalization. Recipe output and
+all armor clicks refuse. Pickup considers selected matching hotbar, occupied
+matching offhand, remaining hotbar/main, then free hotbar/main; excluded recipe,
+crafting, armor, cursor and empty offhand are preserved. The current proximity
+check is a conservative envelope rather than native collision/tracking parity.
+Standing drops preserve sampled motion and start with pickup delay 40, age 0,
+health 5 and independent thrower. Synthetic RNG streams and standing pose are
+not true native constructor/player seeding or pose differential acceptance.
+
+These consumers are opt-in and **not wired into the live App**. The App currently
+uses legacy Format4 storage; fresh Format6 ownership selection and explicit
+old-data migration require DUR-05. No owned automatic item timer, movement,
+collision, merge/despawn, loaded activation, packets or Java events run here.
+Drops cannot mature their delay until SRV-02.1/DUR-04.2. Real Memory/redb consumer
+and codec tests establish this isolated authority contract, not live Survival,
+Paper plugins or a complete server replacement. The pinned reference, source
+manifest, author evidence and immediate integration plan are in
+`docs/agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md`.
+
 ## Generation binding and persistence capture
 
 Metadata consumers declare a `GenerationBinding` with an explicit storage scope
@@ -121,7 +194,7 @@ Chunk loading strictly applies overlays and refuses malformed entity contents.
 Chest exchanges stage their result and enforce the checked 16 KiB aggregate
 entity limit before committing, preserving the original cursor on refusal.
 
-The existing application remains on explicit metadata-free, format-3 legacy
+The existing application remains on explicit metadata-free, format-4 legacy
 mode until the separate App activation ticket. `new`, `with_schema_version` and
 `load_or_generate` are source-compatible aliases for the named legacy paths.
 Legacy acquire accepts only the explicit historic Minecraft 1.21.8 / `FerrumC`

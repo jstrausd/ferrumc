@@ -5,6 +5,7 @@
 //! physics, pickup, tracking and durable storage consumers remain separate.
 
 mod item;
+pub(crate) mod ownership;
 pub use item::*;
 
 use std::collections::BTreeMap;
@@ -151,6 +152,9 @@ pub enum EntityStoreError {
     /// An item payload may only move through its owner's tick capability.
     #[error("item mutation requires an entity tick context")]
     ItemMutationRequiresTickContext,
+    /// Receipt-confirmed mode disallows legacy or copied-store writers.
+    #[error("entity mutation requires the live receipt-confirmed owner")]
+    OwnershipRequired,
 }
 
 /// A validated finite entity position and normalized body rotation.
@@ -239,12 +243,12 @@ impl EntityTransform {
 /// request contains only Copy base data; it transfers no item or durable owner.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EntitySpawn {
-    world: WorldId,
-    dimension: DimensionId,
-    uuid: EntityUuid,
-    wire_id: EntityId,
-    entity_type: EntityTypeId,
-    transform: EntityTransform,
+    pub(crate) world: WorldId,
+    pub(crate) dimension: DimensionId,
+    pub(crate) uuid: EntityUuid,
+    pub(crate) wire_id: EntityId,
+    pub(crate) entity_type: EntityTypeId,
+    pub(crate) transform: EntityTransform,
 }
 
 impl EntitySpawn {
@@ -348,6 +352,7 @@ struct Slot {
     generation: u64,
     entity: Option<EntityData>,
     item: Option<ItemEntityState>,
+    ownership: Option<ferrumc_storage::OwnedEntityExpectation>,
     previous: Option<usize>,
     next: Option<usize>,
     next_free: Option<usize>,
@@ -360,6 +365,7 @@ impl Slot {
             generation: self.generation,
             entity: self.entity,
             item: self.item.as_ref().map(ItemEntityState::snapshot_admitted),
+            ownership: self.ownership.clone(),
             previous: self.previous,
             next: self.next,
             next_free: self.next_free,
@@ -398,6 +404,9 @@ pub struct EntityStore {
     by_uuid: BTreeMap<EntityUuid, usize>,
     by_wire: BTreeMap<EntityId, usize>,
     buckets: [Bucket; 64],
+    ownership_mode: bool,
+    snapshot_only: bool,
+    reservation: Option<ferrumc_storage::OwnershipTransferId>,
 }
 
 impl Clone for EntityStore {
@@ -435,6 +444,9 @@ impl EntityStore {
             by_uuid: BTreeMap::new(),
             by_wire: BTreeMap::new(),
             buckets: [Bucket::default(); 64],
+            ownership_mode: false,
+            snapshot_only: false,
+            reservation: None,
         })
     }
 
@@ -572,6 +584,7 @@ impl EntityStore {
     /// leave all records, identity and chunk indexes unchanged. Residency and
     /// process-wide UUID/wire allocation are separate consumer contracts.
     pub fn spawn(&mut self, spawn: EntitySpawn) -> Result<EntityHandle, EntityStoreError> {
+        self.require_legacy_write()?;
         let bucket = self.validate_spawn(spawn)?;
         self.reserve_spawn_slot()?;
         Ok(self.commit_spawn(spawn, None, bucket))
@@ -606,6 +619,7 @@ impl EntityStore {
             self.slots[index].next_free = None;
             self.slots[index].entity = Some(entity);
             self.slots[index].item = item;
+            self.slots[index].ownership = None;
             index
         } else {
             let index = self.slots.len();
@@ -613,6 +627,7 @@ impl EntityStore {
                 generation: 0,
                 entity: Some(entity),
                 item,
+                ownership: None,
                 previous: None,
                 next: None,
                 next_free: None,
@@ -668,6 +683,7 @@ impl EntityStore {
         handle: &EntityHandle,
         transform: EntityTransform,
     ) -> Result<(), EntityStoreError> {
+        self.require_legacy_write()?;
         let index = self.index(handle)?;
         if self.slots[index].item.is_some() {
             return Err(EntityStoreError::ItemMutationRequiresTickContext);
@@ -702,6 +718,7 @@ impl EntityStore {
     /// Generation increments before reuse; maximum generation retires the slot
     /// forever rather than wrapping. Returned base data is not a save/delete ack.
     pub fn remove(&mut self, handle: &EntityHandle) -> Result<EntityData, EntityStoreError> {
+        self.require_legacy_write()?;
         let index = self.index(handle)?;
         if self.slots[index].item.is_some() {
             return Err(EntityStoreError::PayloadRequiresOwnedRemove);
@@ -724,6 +741,7 @@ impl EntityStore {
         self.by_uuid.remove(&entity.uuid);
         self.by_wire.remove(&entity.wire_id);
         self.slots[index].entity = None;
+        self.slots[index].ownership = None;
         if let Some(generation) = self.slots[index].generation.checked_add(1) {
             self.slots[index].generation = generation;
             self.slots[index].next_free = self.free;
@@ -833,6 +851,7 @@ impl<'a> EntityTickContext<'a> {
         handle: &EntityHandle,
         transform: EntityTransform,
     ) -> Result<(), EntityStoreError> {
+        self.store.require_legacy_write()?;
         self.store.get(handle)?;
         self.store.bucket(transform.chunk())?;
         self.require_resident(transform.chunk())?;

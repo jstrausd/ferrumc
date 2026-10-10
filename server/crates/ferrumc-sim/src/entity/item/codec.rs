@@ -32,7 +32,7 @@ pub(super) fn validate_transform(transform: EntityTransform) -> Result<(), ItemE
     Ok(())
 }
 
-pub(super) fn encode_record(
+pub(in crate::entity) fn encode_record(
     base: EntityData,
     properties: ItemEntityProperties,
     stack: &[u8],

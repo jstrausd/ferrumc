@@ -21,6 +21,9 @@ use crate::ownership::{ShardId, ShardLifecycleState, ShardRegion};
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SimError {
+    /// Receipt-confirmed player mode requires its concrete bounded input API.
+    #[error("legacy input cannot mutate a receipt-confirmed player owner")]
+    OwnershipInputRequired,
     /// A [`SimShard`](crate::SimShard) inbox was at capacity and rejected an
     /// input.
     ///
@@ -307,6 +310,7 @@ pub enum SimError {
 impl From<SimError> for ServerError {
     fn from(error: SimError) -> Self {
         match error {
+            SimError::OwnershipInputRequired => ServerError::invalid_state("legacy input cannot mutate a receipt-confirmed player owner"),
             SimError::InboxFull { capacity } => {
                 ServerError::capacity(format!("simulation shard inbox full (capacity {capacity})"))
             }

@@ -1,6 +1,6 @@
 //! Concrete item payloads in the existing owner slots, never a second owner.
 
-mod codec;
+pub(super) mod codec;
 #[cfg(test)]
 mod tests;
 
@@ -273,7 +273,7 @@ impl ItemEntityProperties {
         properties.validate()?;
         Ok(properties)
     }
-    fn validate(self) -> Result<(), ItemEntityError> {
+    pub(super) fn validate(self) -> Result<(), ItemEntityError> {
         for (value, component) in [
             (self.motion.x, ItemPropertyComponent::MotionX),
             (self.motion.y, ItemPropertyComponent::MotionY),
@@ -317,9 +317,9 @@ impl ItemEntityProperties {
 /// ```
 #[derive(Debug)]
 pub struct ItemEntityState {
-    stack: ItemStack,
-    properties: ItemEntityProperties,
-    fcis_len: usize,
+    pub(super) stack: ItemStack,
+    pub(super) properties: ItemEntityProperties,
+    pub(super) fcis_len: usize,
 }
 
 impl ItemEntityState {
@@ -614,7 +614,7 @@ fn step_item_counters(mut counters: ItemEntityCounters, despawn_rate: i32) -> It
     ItemCounterStep { counters, decision }
 }
 
-fn require_item_type(entity_type: EntityTypeId) -> Result<(), ItemEntityError> {
+pub(super) fn require_item_type(entity_type: EntityTypeId) -> Result<(), ItemEntityError> {
     if entity_type.resource_location() != "minecraft:item" {
         return Err(ItemEntityError::WrongEntityType {
             actual: entity_type,
@@ -623,7 +623,7 @@ fn require_item_type(entity_type: EntityTypeId) -> Result<(), ItemEntityError> {
     Ok(())
 }
 
-fn checked_stack_bytes(stack: &ItemStack) -> Result<Vec<u8>, ItemEntityError> {
+pub(super) fn checked_stack_bytes(stack: &ItemStack) -> Result<Vec<u8>, ItemEntityError> {
     if stack.item().is_none() {
         return Err(ItemEntityError::EmptyStack);
     }
@@ -664,7 +664,7 @@ impl EntityStore {
         self.item_bytes_used
     }
 
-    fn item_index(&self, handle: &EntityHandle) -> Result<usize, ItemEntityError> {
+    pub(super) fn item_index(&self, handle: &EntityHandle) -> Result<usize, ItemEntityError> {
         let index = self.index(handle)?;
         let base = self.slots[index]
             .entity
@@ -683,7 +683,7 @@ impl EntityStore {
             .as_ref()
             .ok_or(ItemEntityError::MissingItemState)
     }
-    fn checked_item_bytes(&self, index: usize) -> Result<Vec<u8>, ItemEntityError> {
+    pub(super) fn checked_item_bytes(&self, index: usize) -> Result<Vec<u8>, ItemEntityError> {
         let base = self.slots[index]
             .entity
             .ok_or(EntityStoreError::StaleHandle)?;
@@ -757,7 +757,11 @@ impl EntityStore {
         }
         Ok(())
     }
-    fn replaced_item_bytes(&self, old: usize, new: usize) -> Result<usize, ItemEntityError> {
+    pub(super) fn replaced_item_bytes(
+        &self,
+        old: usize,
+        new: usize,
+    ) -> Result<usize, ItemEntityError> {
         let Some(remaining) = self.item_bytes_used.checked_sub(old) else {
             let actual = self.measured_item_bytes()?;
             return Err(ItemEntityError::AggregateItemBytesMismatch {
@@ -802,6 +806,9 @@ impl EntityStore {
             by_uuid: self.by_uuid.clone(),
             by_wire: self.by_wire.clone(),
             buckets: self.buckets,
+            ownership_mode: self.ownership_mode,
+            snapshot_only: self.ownership_mode || self.snapshot_only,
+            reservation: None,
         })
     }
     /// Takes a checked copy of one item, including after its chunk unloads.
@@ -843,6 +850,7 @@ impl EntityStore {
 
 impl EntityTickContext<'_> {
     fn resident_item_index(&self, handle: &EntityHandle) -> Result<usize, ItemEntityError> {
+        self.store.require_legacy_write()?;
         let index = self.store.item_index(handle)?;
         let base = self.store.slots[index]
             .entity
@@ -856,6 +864,7 @@ impl EntityTickContext<'_> {
         stack: &ItemStack,
         properties: ItemEntityProperties,
     ) -> Result<(usize, usize, usize), ItemEntityError> {
+        self.store.require_legacy_write()?;
         if base.world != self.store.owner.world() || base.dimension != self.store.owner.dimension()
         {
             return Err(EntityStoreError::ScopeMismatch {
@@ -953,6 +962,7 @@ impl EntityTickContext<'_> {
         &mut self,
         handle: &EntityHandle,
     ) -> Result<RemovedEntity, ItemEntityError> {
+        self.store.require_legacy_write()?;
         let index = self.store.index(handle)?;
         let base = self.store.slots[index]
             .entity

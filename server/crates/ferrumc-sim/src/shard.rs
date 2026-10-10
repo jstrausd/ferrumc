@@ -1,6 +1,8 @@
 //! A single simulation shard: bounded inbox in, outputs out, at tick
 //! boundaries.
 
+mod player_ownership;
+
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroUsize;
@@ -63,7 +65,7 @@ const MAX_REACH: f64 = 6.0;
 #[cfg(test)]
 const DEFAULT_PLACED_STATE: BlockStateId = BlockStateId::new(1);
 
-/// Returns `true` if the block at `block` is within [`MAX_REACH`] of an actor
+/// Returns `true` if the block at `block` is within `MAX_REACH` of an actor
 /// positioned at `actor`.
 ///
 /// Distance is measured from `actor` to the centre of the target block and
@@ -185,7 +187,7 @@ enum RegionWorkKind {
 }
 
 /// Per-player state owned exclusively by the shard.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct PlayerState {
     position: Vec3,
     /// Body yaw in degrees, seeded to `0.0` on join and updated by a
@@ -199,6 +201,7 @@ struct PlayerState {
     /// join and mutated by [`GameInput::SetGameMode`]; later milestones read it to
     /// enforce mode-specific rules (creative no-decrement, break speed, flight).
     game_mode: GameMode,
+    owned: Option<crate::player::OwnedPlayerInventory>,
 }
 
 /// A movement coalesced within one tick: the latest valid position and/or
@@ -247,7 +250,7 @@ struct PendingMove {
 /// Multiple [`GameInput::PlayerMove`]s for the same player in one tick are
 /// *coalesced*: only the latest valid position is applied at the boundary, and a
 /// single [`GameOutput::PlayerMoved`] is emitted (overload handling step one —
-/// coalesce movement). Coordinates are sanity-checked with [`is_valid_position`]:
+/// coalesce movement). Coordinates are sanity-checked with `is_valid_position`:
 /// a non-finite or out-of-range move is rejected without touching state, and if
 /// no valid move supersedes it the shard emits a
 /// [`GameOutput::PlayerPositionCorrected`] so the desynced client can snap back.
@@ -258,9 +261,9 @@ struct PendingMove {
 ///
 /// [`GameInput::BlockBreak`] and [`GameInput::BlockPlace`] mutate the resident
 /// chunk at the tick boundary. Each is validated first (see
-/// [`apply_block_edit`](SimShard::apply_block_edit)): the actor must be present,
+/// `apply_block_edit`): the actor must be present,
 /// the target chunk must be resident in this shard (which also pins the edit to
-/// the shard's dimension), and the target must be within [`MAX_REACH`]. Reach is
+/// the shard's dimension), and the target must be within `MAX_REACH`. Reach is
 /// measured against the actor's position *as of the start of the tick* — a move
 /// queued in the same tick is coalesced and applied afterwards, so it does not
 /// extend reach for an edit earlier in the same inbox. An accepted break writes
@@ -296,6 +299,7 @@ pub struct SimShard {
     players: BTreeMap<PlayerId, PlayerState>,
     chunks: LoadedChunkMap,
     entities: Option<EntityStore>,
+    player_ownership: Option<crate::player::PlayerOwnershipState>,
     /// Accepted gameplay mutations buffered for the storage journal, drained each
     /// tick by the driver. Bounded by [`MUTATION_LOG_CAP`].
     mutation_log: Vec<PendingMutation>,
@@ -400,6 +404,7 @@ impl SimShard {
             players: BTreeMap::new(),
             chunks,
             entities: None,
+            player_ownership: None,
             mutation_log: Vec::new(),
             undo_history: BTreeMap::new(),
             region_limits: RegionLimits::default(),
@@ -429,6 +434,10 @@ impl SimShard {
     /// Returns a mutable handle to the shard's chunks, used to acquire/release
     /// tickets and collect dirty chunks for saving.
     pub fn loaded_chunks_mut(&mut self) -> &mut LoadedChunkMap {
+        assert!(
+            self.player_ownership.is_none(),
+            "loaded_chunks_mut is a legacy API; use checked owned chunk lifecycle methods"
+        );
         &mut self.chunks
     }
 
@@ -502,6 +511,9 @@ impl SimShard {
         &mut self,
         work: impl FnOnce(&mut EntityTickContext<'_>) -> R,
     ) -> Result<(R, Vec<GameOutput>), EntityStoreError> {
+        if self.player_ownership.is_some() {
+            return Err(EntityStoreError::OwnershipRequired);
+        }
         let entities = self
             .entities
             .as_mut()
@@ -546,6 +558,7 @@ impl SimShard {
         self.inbox.is_empty()
             && self.pending_region_work.is_empty()
             && self.cross_shard_outbox.is_empty()
+            && self.ownership_quiescent()
     }
 
     /// Returns `true` if the inbox is at capacity and will reject new inputs.
@@ -665,6 +678,9 @@ impl SimShard {
     /// Returns [`SimError::InboxFull`] without modifying the inbox if it is
     /// already at capacity (reject backpressure — see the type docs).
     pub fn enqueue(&mut self, input: GameInput) -> Result<(), SimError> {
+        if self.player_ownership.is_some() {
+            return Err(SimError::OwnershipInputRequired);
+        }
         if self.inbox.len() >= self.inbox_capacity {
             return Err(SimError::InboxFull {
                 capacity: self.inbox_capacity,
@@ -788,6 +804,9 @@ impl SimShard {
             let Some(input) = input else {
                 break;
             };
+            if self.player_ownership.is_some() {
+                continue;
+            }
             match input {
                 GameInput::PlayerJoin { player, position } => {
                     // A duplicate join for an already-present player is ignored:
@@ -799,6 +818,7 @@ impl SimShard {
                             yaw: 0.0,
                             pitch: 0.0,
                             game_mode: GameMode::default(),
+                            owned: None,
                         });
                         outputs.push(GameOutput::PlayerSpawned { player, position });
                     }
@@ -1040,7 +1060,7 @@ impl SimShard {
     ///   which also covers another dimension, since the map is dimension-scoped) —
     ///   checked before reach so an edit aimed at an absent chunk is rejected
     ///   silently rather than healed to a fabricated air state;
-    /// - the target is beyond [`MAX_REACH`] of the actor ([`OutOfReach`](RejectionReason::OutOfReach)); or
+    /// - the target is beyond `MAX_REACH` of the actor ([`OutOfReach`](RejectionReason::OutOfReach)); or
     /// - the target `y` is outside the buildable range ([`YOutOfBounds`](RejectionReason::YOutOfBounds),
     ///   rejected by [`Chunk::set_block`](ferrumc_world::Chunk::set_block) without panic).
     ///
@@ -1180,7 +1200,7 @@ impl SimShard {
     /// water-replaceable target, and **multi-cell** doors/beds — atomically.
     ///
     /// `computed` is the [`PlacementResult`] from
-    /// [`refine_placement`](Self::refine_placement), or `None` for an unrecognised
+    /// `refine_placement`, or `None` for an unrecognised
     /// block (which falls back to writing the held `state` at `position`). The write
     /// plan is:
     ///
@@ -1514,7 +1534,7 @@ impl SimShard {
     ///
     /// Refused (silently, mutating nothing and emitting no output) when the actor
     /// is absent, the target chunk is not resident, the target is beyond
-    /// [`MAX_REACH`] of the actor, the block at `position` is not a sign, or the
+    /// `MAX_REACH` of the actor, the block at `position` is not a sign, or the
     /// sign is waxed (its text is locked). A sign block whose block-entity is
     /// missing — e.g. one reloaded after a chunk unload dropped the block-entity
     /// while the block itself persisted — gains a fresh blank one here (mirroring
@@ -1570,7 +1590,7 @@ impl SimShard {
     /// of its [`CHEST_SLOTS`](ferrumc_world::CHEST_SLOTS) item slots.
     ///
     /// Returns `None` (open refused) unless the actor is present, the target chunk
-    /// is resident, the target is within [`MAX_REACH`], and the block at
+    /// is resident, the target is within `MAX_REACH`, and the block at
     /// `position` is a chest. A chest block with no container block-entity yet
     /// (e.g. one placed before this feature, or otherwise missing) gains a fresh
     /// empty one here, so opening is robust to a missing block-entity. The chest
@@ -1632,6 +1652,9 @@ impl SimShard {
         slot: usize,
         mut cursor: ItemStack,
     ) -> Option<(ItemStack, Vec<ItemStack>)> {
+        if self.player_ownership.is_some() {
+            return Some((cursor, Vec::new()));
+        }
         let actor = self.players.get(&player).map(|state| state.position)?;
         if !self.chunks.is_loaded(position.to_chunk_pos()) {
             return None;
@@ -1720,7 +1743,7 @@ impl SimShard {
     /// state the world will hold, not the held item's bare default. An
     /// unsupported/unrecognised block falls back to the held `state` unchanged,
     /// matching the apply path. Because it shares
-    /// [`refine_placement`](Self::refine_placement) with the tick and chunks
+    /// `refine_placement` with the tick and chunks
     /// mutate only at tick boundaries, the preview equals the applied state for
     /// the common single-edit case (neighbour-dependent fences placed in the same
     /// tick are the documented exception).
@@ -1895,7 +1918,7 @@ impl NeighborQuery for ShardNeighborQuery<'_> {
     }
 }
 
-/// Maps an [`apply_block_edit`](SimShard::apply_block_edit) result into the
+/// Maps an `apply_block_edit` result into the
 /// [`GameOutput`] the session layer routes, or `None` when nothing should be
 /// sent.
 ///

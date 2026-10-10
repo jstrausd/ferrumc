@@ -265,3 +265,56 @@
   ownership only into the move-owned scheduler outcome; the simulation still
   holds no database handle and mutation-journal output remains a separate
   bounded seam.
+
+## Native player/item ownership mode (DUR-04.1)
+
+- Explicit empty-owner initialization binds the current shard, exact immutable
+  generation/scope and one weak backend allocation. Actual PlayerState owns all
+  46 native slots, cursor and selection; opaque handles bind Sim incarnation,
+  UUID and nonwrapping admission generation. Clone is inactive SnapshotOnly.
+- Legacy GameInputs (including scheduler boundary input), generic entity work,
+  legacy container clicks and raw mutable chunk-map access cannot mutate this
+  mode. The legacy infallible mutable-map accessor panics on programmer misuse;
+  checked owned acquire/release preserve scope and actual reservations.
+- FCPS3 admission validates fixed grammar, 47 complete FCIS frame extents,
+  finite/range/selection/shape and aggregate bounds before nested decoding.
+  Other schemas are not silently migrated or defaulted. Only a real never-seen
+  miss bootstraps empty Survival; a tombstone never grants bootstrap authority.
+- Queued count/encoded-byte refusal returns the whole input. Pending count,
+  exact checked `512 + 2*before + 5*after + 149` charge and all resource gates
+  precede candidate/request component clones. The fixed allowance is logical
+  metadata, including the sole receipt-box pointer, not full allocator/RSS
+  accounting. Temporary encodings and externally retained snapshots/checkpoints
+  are bounded per call, not claimed as globally bounded caller memory.
+- One player and the whole entity owner remain reserved until genuine matching
+  evidence. Every pending mutation has at most one outstanding move-owned
+  Work/Completion buffer. Its weak lease proves buffer lifetime only. Retained
+  refused completions block another dispatch. Expired buffer permits readonly
+  reconciliation; receipt None never proves worker abort or releases items.
+- Only actual no-start Busy/history-capacity evidence allows exact retry. No
+  RNG/event/item selection repeats under the same query. Commit uncertainty or
+  current-read failure retains exact pending authority. Foreign/stale/different
+  query/generation/lease completions cannot publish. Receipt scope, full identity,
+  keys, before/after stamps, native bytes, affected chunk epochs and current real
+  resources must agree; a historical superseded receipt quarantines/resyncs.
+- No database read/write runs in the ownership tick. Off-tick evidence factories
+  are concrete and sealed; caller values/booleans cannot forge completion.
+  DUR-05 must serialize the real writer/driver and atomically replace App's
+  connection inventory. Evidence is a real read boundary, not distributed
+  exclusion of arbitrary independent backend writers after that read.
+- Confirmed publication changes player/item together before native intents.
+  A refused fresh spawn refunds the entire caller-owned proposal; a refused
+  player drop retains the actual inventory and does not refund a second copy.
+  Full pickup publishes removal only after real tombstone confirmation. Partial
+  pickup preserves exact remainder components and normalizes negative delay to
+  zero in the confirmed postimage. Stats/take carry original native counts
+  separately from actual moved quantities.
+- Pending protects the full player postimage. Position/look/mode/selection
+  coalesce until completion and apply at preflighted new generations. Disconnect
+  retains data/work; rejoin invalidates old local admission. Draining admits
+  clarification/autosave, and Stop requires no dirty/pending/queued/boundary work.
+- Pickup capacity/default-component policy, collision/pose/RNG parity and all
+  armor clicks remain conservative explicit limits. Delay40 drops have no owned
+  timer in this ticket. Physics, merge/despawn, activation/tracking, packet/App
+  and Java-event consumers require immediate follow-ups; this is not live
+  Survival or complete Paper compatibility.

@@ -36,8 +36,8 @@ pub const TIME_MIDNIGHT: i64 = 18_000;
 
 /// The deterministic day-night clock for the world.
 ///
-/// See the [module docs](self) for the invariants on `world_age` (monotonic) and
-/// `time_of_day` (wrapped to `0..`[`DAY_LENGTH_TICKS`]).
+/// `world_age` is monotonic; `time_of_day` wraps into
+/// `0..`[`DAY_LENGTH_TICKS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorldTime {
     /// Monotonic total world age in ticks (never wraps or rewinds).
