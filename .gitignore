@@ -1,5 +1,7 @@
 # Build artifacts
 /server/target
+/server/java-bridge/target/
+/server/java-bridge/**/target/
 /.codex-tmp/
 **/*.rs.bk
 

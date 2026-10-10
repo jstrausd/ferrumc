@@ -1,0 +1,14 @@
+name: BridgeFixture
+version: 1.0.0
+main: example.StandardPlugin
+api-version: '1.21.8'
+description: Standard plugin with a declared builtin command collision for rollback tests
+commands:
+  bridgefixture:
+    description: Report the sender and command label
+    permission: fixture.use
+    permission-message: Missing fixture.use
+    aliases: [bfixture, spawn]
+permissions:
+  fixture.use:
+    default: op

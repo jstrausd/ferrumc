@@ -1,0 +1,15 @@
+name: BridgeFixture
+version: 1.0.0
+main: example.StandardPlugin
+api-version: '1.21.8'
+description: Ordinary Bukkit compatibility regression fixture
+commands:
+  bridgefixture:
+    description: Report the sender and command label
+    usage: /<command> [action]
+    permission: fixture.use
+    permission-message: Missing fixture.use
+    aliases: [bfixture]
+permissions:
+  fixture.use:
+    default: op
