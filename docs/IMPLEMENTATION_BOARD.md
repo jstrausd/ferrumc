@@ -175,9 +175,13 @@ Nach CLEAN folgen direkt
 [GEN-05.4 Aquifer/Ore/Material](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) und
 [DUR-04.1 Player-/Item-Entityconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md).
 GEN-05.4 ist vorbereitet; DUR-04.1 ist nach der Speicherintegration vergeben.
+Vor dem Live-Drop-/Pickupdriver ist
+[NET-04.1](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md) konkret vorbereitet:
+Metadata0x5c, Motion0x5e und TakeItem0x75 fehlen im aktuellen Protokollproducer.
+Der nach GEN-05.3-CLEAN freie Reviewslot erhält zuerst diese Wireabhängigkeit.
 Zusätzlich ist [SRV-05.2](agent-tasks/SRV-05_2_SINGLE_ITEM_RECIPES_FUEL.md)
 für alle114 Koch-/254 Steinschneiderrezepte und originale Brennstoffe vorbereitet;
-Vergabe folgt nach frei gewordenem Reviewslot. Er aktiviert noch keinen Ofen.
+Vergabe folgt nach dem Wireproducer. Er aktiviert noch keinen Ofen.
 Root hat zusätzlich49 echte Paper-Materialloops mit3.325.952 States zur
 Ressourcenplanung ausgeführt; normal/-O bytegleich. Das ist keine Rust- oder
 Spielabnahme. DUR-04.1 berücksichtigt die tatsächliche verbleibende Lücke:
