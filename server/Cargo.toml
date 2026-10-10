@@ -44,7 +44,7 @@ members = [
 [workspace.package]
 version = "0.2.0-dev"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/ferrumc-rs/ferrumc"
 homepage = "https://ferrumc.com"
