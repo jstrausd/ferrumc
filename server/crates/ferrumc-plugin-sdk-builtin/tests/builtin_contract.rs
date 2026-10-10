@@ -515,9 +515,9 @@ fn every_event_requires_exactly_its_documented_capability_before_plugin_code() {
                 "{:?} used the wrong capability gate",
                 event.kind()
             );
-            assert!(denied_host.calls.is_empty());
-            assert!(denied_host.diagnostics.is_empty());
-            assert!(denied_host.committed.is_empty());
+            assert_eq!(denied_host.calls.len(), 0);
+            assert_eq!(denied_host.diagnostics.len(), 0);
+            assert_eq!(denied_host.committed.len(), 0);
         }
     }
 }
@@ -651,8 +651,8 @@ fn backend_mismatch_is_denied_before_create_event_or_unload_code() {
             Capability::ReadWorld
         ))
     ));
-    assert!(missing.calls.is_empty());
-    assert!(missing.committed.is_empty());
+    assert_eq!(missing.calls.len(), 0);
+    assert_eq!(missing.committed.len(), 0);
 
     let factory = BuiltinPluginFactory::new::<RoutePlugin>().expect("valid factory");
     let effective = CapabilityManifest::empty()
@@ -672,8 +672,8 @@ fn backend_mismatch_is_denied_before_create_event_or_unload_code() {
             BuiltinCallbackError::CapabilityDenied(Capability::SubmitIntents)
         ))
     );
-    assert!(host.calls.is_empty());
-    assert!(host.diagnostics.is_empty());
+    assert_eq!(host.calls.len(), 0);
+    assert_eq!(host.diagnostics.len(), 0);
 
     host.reported_capabilities = effective;
     let unload_factory =
@@ -690,9 +690,9 @@ fn backend_mismatch_is_denied_before_create_event_or_unload_code() {
             Capability::ReadWorld
         ))
     );
-    assert!(unload_host.calls.is_empty());
-    assert!(unload_host.diagnostics.is_empty());
-    assert!(unload_host.committed.is_empty());
+    assert_eq!(unload_host.calls.len(), 0);
+    assert_eq!(unload_host.diagnostics.len(), 0);
+    assert_eq!(unload_host.committed.len(), 0);
 }
 
 struct FacadePlugin {
@@ -998,8 +998,8 @@ fn bounded_effect_and_decision_slots_discard_prior_staging_and_fail_closed() {
             PluginError::Facade(FacadeError::BufferFull)
         )))
     ));
-    assert!(host.committed.is_empty());
-    assert!(host.staged.is_empty());
+    assert_eq!(host.committed.len(), 0);
+    assert_eq!(host.staged.len(), 0);
     assert_eq!(
         host.diagnostics,
         vec![(DiagnosticLevel::Warn, "buffer callback observed".to_owned())]
@@ -1032,8 +1032,8 @@ fn bounded_effect_and_decision_slots_discard_prior_staging_and_fail_closed() {
     let full = dispatch(&mut decision_instance, &event, &mut decision_host);
     assert_eq!(full, Err(DispatchFailure::DecisionBufferFull));
     assert_eq!(fail_closed_block(&full), BlockDecision::Deny(None));
-    assert!(decision_host.committed.is_empty());
-    assert!(decision_host.staged.is_empty());
+    assert_eq!(decision_host.committed.len(), 0);
+    assert_eq!(decision_host.staged.len(), 0);
 
     decision_host.stage_capacity = 2;
     assert_eq!(
@@ -1055,7 +1055,7 @@ fn bounded_effect_and_decision_slots_discard_prior_staging_and_fail_closed() {
         )))
     ));
     assert_eq!(fail_closed_event(&cooperative), EventDecision::Deny(None));
-    assert!(decision_host.committed.is_empty());
+    assert_eq!(decision_host.committed.len(), 0);
 
     assert_eq!(
         dispatch(&mut decision_instance, &event, &mut decision_host),
@@ -1192,8 +1192,8 @@ fn every_callback_family_contains_unwind_discards_effects_and_poisons_instance()
             "{:?} unwind was not classified",
             event.kind()
         );
-        assert!(host.committed.is_empty());
-        assert!(host.staged.is_empty());
+        assert_eq!(host.committed.len(), 0);
+        assert_eq!(host.staged.len(), 0);
         assert_eq!(host.diagnostics.len(), 1);
 
         let calls_after_panic = host.calls.len();
@@ -1313,7 +1313,7 @@ fn create_and_load_failures_return_no_instance_and_discard_mutations() {
         ),
         Err(BuiltinCallbackError::Panicked)
     ));
-    assert!(empty_host.committed.is_empty());
+    assert_eq!(empty_host.committed.len(), 0);
 
     let storage = CapabilityManifest::empty().with(Capability::Storage);
     let mut error_host = TransactionalHost::new(storage, 8);
@@ -1322,7 +1322,7 @@ fn create_and_load_failures_return_no_instance_and_discard_mutations() {
         initialize(&error_factory, storage, &mut error_host),
         Err(BuiltinCallbackError::Cooperative(PluginError::Failed(_)))
     ));
-    assert!(error_host.committed.is_empty());
+    assert_eq!(error_host.committed.len(), 0);
     assert!(!error_host.storage.contains_key("load-error"));
     assert_eq!(error_host.diagnostics.len(), 1);
 
@@ -1332,7 +1332,7 @@ fn create_and_load_failures_return_no_instance_and_discard_mutations() {
         initialize(&panic_factory, storage, &mut panic_host),
         Err(BuiltinCallbackError::Panicked)
     ));
-    assert!(panic_host.committed.is_empty());
+    assert_eq!(panic_host.committed.len(), 0);
     assert!(!panic_host.storage.contains_key("load-panic"));
     assert_eq!(panic_host.diagnostics.len(), 1);
 
@@ -1342,7 +1342,7 @@ fn create_and_load_failures_return_no_instance_and_discard_mutations() {
         initialize(&drop_factory, CapabilityManifest::empty(), &mut drop_host),
         Err(BuiltinCallbackError::Panicked)
     ));
-    assert!(drop_host.committed.is_empty());
+    assert_eq!(drop_host.committed.len(), 0);
     assert_eq!(drop_host.diagnostics.len(), 1);
 }
 
@@ -1434,7 +1434,7 @@ fn consuming_shutdown_classifies_unload_and_drop_failures_and_implicit_drop_cont
         shutdown(error_instance, &mut error_host),
         Err(BuiltinCallbackError::Cooperative(PluginError::Failed(_)))
     ));
-    assert!(error_host.committed.is_empty());
+    assert_eq!(error_host.committed.len(), 0);
     assert!(!error_host.storage.contains_key("unload-error"));
     assert_eq!(error_host.diagnostics.len(), 1);
 
@@ -1447,7 +1447,7 @@ fn consuming_shutdown_classifies_unload_and_drop_failures_and_implicit_drop_cont
         shutdown(panic_instance, &mut panic_host),
         Err(BuiltinCallbackError::Panicked)
     );
-    assert!(panic_host.committed.is_empty());
+    assert_eq!(panic_host.committed.len(), 0);
     assert!(!panic_host.storage.contains_key("unload-panic"));
     assert_eq!(panic_host.diagnostics.len(), 1);
 
@@ -1460,7 +1460,7 @@ fn consuming_shutdown_classifies_unload_and_drop_failures_and_implicit_drop_cont
         shutdown(drop_instance, &mut drop_host),
         Err(BuiltinCallbackError::Panicked)
     );
-    assert!(drop_host.committed.is_empty());
+    assert_eq!(drop_host.committed.len(), 0);
     assert!(!drop_host.storage.contains_key("drop-panic"));
     assert_eq!(drop_host.diagnostics.len(), 1);
 
