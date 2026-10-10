@@ -378,5 +378,14 @@ BriefSHA `c286861c39ce5761d79d891559c0fa2d609f88c6571ef857eaa6983d2af184bf`.
 Tatsächliche474 Kernrecords je Backend, Endseams und84 Vanilla-Vergleichschunks
 erhalten alle Driftbefunde. `feature_catalog` prüft jetzt die neue Rustimplementation
 unabhängig; finales CLEAN setzt den noch ausstehenden Autorenfreeze voraus.
-Die Gesamt-CI für `eaedabd2` wurde ausdrücklich gestartet und läuft noch:
+Die Gesamt-CI für genau `eaedabd2` ist vollständig erfolgreich, einschließlich
+Rustworkspace, Java-Verträgen, Generatorcheck und allen sieben Client-/Restartgates:
 [38087498562](https://github.com/jstrausd/ferrumc/actions/runs/38087498562).
+
+Root hat den vollständigen konkreten DUR-04.1-Consumerentwurf mit tatsächlicher
+PlayerState-/FCPS3-/Slot-/Cursorauthority gelesen und intern zur Umsetzung
+freigegeben; EntwurfsSHA
+`a1860957ff0c9482e5bde73035830de4d1c6af9df419d951712a1469b0a2bfd3`.
+Bindende Präzisierungen umfassen sämtliche Legacy-/Tick-/Entitywriterbypässe,
+SnapshotOnly-Clone und Postimagereadfehler nach tatsächlichem Commit. Dies ist
+Designprüfung; Implementierungs-/Clientabnahme folgt getrennt.

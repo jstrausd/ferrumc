@@ -131,7 +131,7 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN und integriert `290e5343`: Debug/Release je188, drei zusätzliche unabhängige Debug-/Releaseprobes, strictchecks und29/29 Freezehashes grün. Frischer normal/-O Originalreexport bytegleich;17.213 tatsächliche JAR-Records. [Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md). Chunk-/Terrainconsumer bleiben offen. |
 | GEN-05.3 | `item_transfer_primitives`, Designreview Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Vollständiger konkreter NoiseChunkentwurf geprüft und intern freigegeben; Runtimeimplementierung begonnen. Originale Wrapperidentitäten, Arraydispatch/Interpolation, Preliminary Surface und Climate; explizite PaperBuild60-Endarithmetik im neuen Chunkpfad, bestehende .2-Vanillaverträge unverändert. Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
 | DUR-03.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Unabhängig CLEAN und integriert `eaedabd2`: Debug/Release jeweils280 Tests einschließlich zwei zusätzlicher Rootprobes, strictchecks und21/21 Freezehashes grün. Tatsächliche joint redb-Transaction, Memoryauthority, CAS/Tombstone/Receipts, Cutpoints/Uncertainty und Grenzen. [Review](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md); Onlineconsumer folgt. |
-| DUR-04.1 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener [Consumerbrief](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) | Nach DUR-03.1-CLEAN konkret vergeben; Entwurf am tatsächlichen46-Slot-/Cursor-/FCPS3-Consumer in Arbeit. Playerowner/Clone-/Rejoin-/Scopegates und Pending-/Receiptcompletion vor Drop/Pickupveröffentlichung. Appdriver folgt DUR-05. |
+| DUR-04.1 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener [Consumerbrief](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) | Vollständigen konkreten46-Slot-/Cursor-/FCPS3-Entwurf gelesen und intern freigegeben; Runtimeimplementierung beginnt. Versiegelte echte Store-/Receipt-/Currentpostimageevidence, SnapshotOnly-Clone und volle Playerreservation; Bypassguards für Legacywriter. Appdriver folgt DUR-05. |
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
@@ -143,8 +143,8 @@ hat DUR-03.1 CLEAN integriert und bearbeitet jetzt
 [GEN-05.3-Restoracle](agent-tasks/GEN-05_3_CHUNK_ORACLE.md) abgeschlossen und
 prüft jetzt die Worldruntime unabhängig, ohne deren Dateien zu verändern.
 Root hat alle117 Oraclefreezehashes und den Briefhash unabhängig geprüft.
-GEN-05.3 ist intern zur Umsetzung freigegeben; DUR-04.1 konkretisiert zuerst
-seinen Consumerentwurf. Vorhandene Format-/Scalarverträge bleiben erhalten.
+GEN-05.3 und DUR-04.1 sind nach vollständigem Entwurfsreview intern zur
+Umsetzung freigegeben. Vorhandene Format-/Scalarverträge bleiben erhalten.
 GEN-05.2 ist CLEAN auf `main`; nach .3
 folgen direkt Aquifer/Material/Ore und Biome/Surface/Bedrock bis zu echter
 Chunkgeneration. Die Vergabe überschreitet drei Childslots nicht.
@@ -163,7 +163,7 @@ Die neue Gesamt-CI für `290e5343`, einschließlich GEN-05.2, ist erfolgreich:
 Gesamt-CI für `572083d1`, einschließlich aller normalen Craftingrezepte, ist
 ebenfalls erfolgreich:
 [Lauf38085964215](https://github.com/jstrausd/ferrumc/actions/runs/38085964215).
-Gesamt-CI für `eaedabd2`, einschließlich DUR-03.1, läuft:
+Gesamt-CI für `eaedabd2`, einschließlich DUR-03.1, ist erfolgreich:
 [Lauf38087498562](https://github.com/jstrausd/ferrumc/actions/runs/38087498562).
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
