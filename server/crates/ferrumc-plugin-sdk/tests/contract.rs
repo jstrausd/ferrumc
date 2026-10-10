@@ -202,28 +202,28 @@ fn load_and_unload_accessors_require_their_exact_capability() {
         let mut context = LoadContext::new(&mut host);
         assert_capability_denied(context.events(), Capability::ReceiveEvents);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 
     let mut host = FakeHost::new(CapabilityManifest::all().without(Capability::RegisterCommands));
     {
         let mut context = LoadContext::new(&mut host);
         assert_capability_denied(context.commands(), Capability::RegisterCommands);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 
     let mut host = FakeHost::new(CapabilityManifest::all().without(Capability::Storage));
     {
         let mut context = LoadContext::new(&mut host);
         assert_capability_denied(context.storage(), Capability::Storage);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 
     let mut host = FakeHost::new(CapabilityManifest::all().without(Capability::Storage));
     {
         let mut context = UnloadContext::new(&mut host);
         assert_capability_denied(context.storage(), Capability::Storage);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 }
 
 #[test]
@@ -233,28 +233,28 @@ fn event_accessors_require_their_exact_capability_without_backend_calls() {
         let mut context = EventContext::new(Tick::new(1), &mut host);
         assert_capability_denied(context.world(), Capability::ReadWorld);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 
     let mut host = FakeHost::new(CapabilityManifest::all().without(Capability::SubmitIntents));
     {
         let mut context = EventContext::new(Tick::new(1), &mut host);
         assert_capability_denied(context.operations(), Capability::SubmitIntents);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 
     let mut host = FakeHost::new(CapabilityManifest::all().without(Capability::ReadPermissions));
     {
         let mut context = EventContext::new(Tick::new(1), &mut host);
         assert_capability_denied(context.permissions(), Capability::ReadPermissions);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 
     let mut host = FakeHost::new(CapabilityManifest::all().without(Capability::Storage));
     {
         let mut context = EventContext::new(Tick::new(1), &mut host);
         assert_capability_denied(context.storage(), Capability::Storage);
     }
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 }
 
 #[test]
@@ -844,5 +844,5 @@ fn plugin_declaration_and_every_callback_share_the_public_contract() {
     }
 
     assert_eq!(plugin.callbacks, 9);
-    assert!(host.calls.is_empty());
+    assert_eq!(host.calls.len(), 0);
 }
