@@ -19,6 +19,13 @@ Containerartefakte werden separat ausgewiesen.
 
 ## Implementierter Stand
 
+Der [Survival-Lieferplan](SURVIVAL_DELIVERY_PLAN.md) erfasst die gemeldeten
+Spielprobleme und fehlenden Systeme. Der aktuelle Stand ist kein vollständig
+spielbarer Survival-Server. Der reale Torch-Item-Pfad enthält einen statisch
+gefundenen Mapping-/Klassifikationswiderspruch, den bisherige direkte Blockstate-
+Tests nicht abdecken; Live-Reproduktion und Behebung sind offen. Die
+folgenden Bestandsergebnisse bleiben auf ihren jeweiligen Testumfang begrenzt.
+
 - Play-Keep-alive mit exakten IDs, absoluten Fristen, fairer Bearbeitung und
   cancellation-sicherer Socket-/Chunk-Übergabe.
 - Absolute Pre-Play-Phasenfristen und eine First-Byte-Teilframefrist von

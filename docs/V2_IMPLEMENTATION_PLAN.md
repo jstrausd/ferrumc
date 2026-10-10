@@ -13,6 +13,12 @@ Die unten genannten Testdateien belegen vorhandene Abdeckung; der aktuelle
 Prüfbericht und verbleibende Fehler stehen in
 [V2_VALIDATION.md](V2_VALIDATION.md).
 
+Die aktuelle Reihenfolge für Spielbarkeit, die vom Betreiber gemeldeten Fehler
+und die grobe Aufwandsschätzung stehen im
+[Survival-Lieferplan](SURVIVAL_DELIVERY_PLAN.md). Seine Pakete D0–D10 priorisieren
+die untenstehenden technischen Aufgaben; die bisherige Kapitelnummerierung
+ist keine Vorgabe, erst Minigame-Plugins und später Survival zu implementieren.
+
 ## Ziel und Reihenfolge
 
 Das Betreiberziel ist ein speicherschonender, performanter Rust-Spielserver
