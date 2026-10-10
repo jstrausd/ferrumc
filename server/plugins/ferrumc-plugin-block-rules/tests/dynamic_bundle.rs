@@ -106,8 +106,8 @@ fn strict_bundle_loads_and_dynamic_decisions_match_the_compiled_policy() {
             },
         ]
     );
-    assert!(run.diagnostics().is_empty());
-    assert!(run.state().messages().is_empty());
+    assert_eq!(run.diagnostics().len(), 0);
+    assert_eq!(run.state().messages().len(), 0);
 
     cleanup_loaded_scratch(&scratch);
 }
