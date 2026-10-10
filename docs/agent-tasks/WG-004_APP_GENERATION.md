@@ -1,6 +1,6 @@
 # WG-004 / GEN-12.1 — Generatorbindung im produktiven Apppfad
 
-Status: **vergeben an `select_world_ticket`, Umsetzung beginnt**.
+Status: **implementiert und zur unabhängigen Abnahme eingefroren; noch nicht von Root integriert**.
 Produktions-Crate: `ferrumc-app`. Producer sind unabhängig geprüft und
 integriert: Migration `b299a5fc` (177 Tests auch unabhängig grün), Sim
 `da61c638` (204 Tests, Review CLEAN nach unabhängiger Await-RED/GREEN-Probe),
@@ -100,3 +100,92 @@ End, Entitysimulation und vollständiges Survival bleiben nach diesem Ticket
 offen. Die Quellen-/Event-/Ownershipmatrix folgt dem gepinnten
 [Papervertrag](../PAPER_REFERENCE.md); kein Quellenreview wird als bestandener
 Live-Papervergleich ausgegeben.
+
+
+## Konkretes Appdesign und Quellen-/Fehlermatrix
+
+| Pfad | Quelle und beobachteter Vertrag | Appownership, Fehler und Abweichung |
+| --- | --- | --- |
+| Startup / persistierte Basis | Vollständiger gepinnter `MinecraftServer.loadLevel/loadWorld0`: existierende WorldGenSettings vor Levelkonstruktion, fresh Einstellungen nur ohne Worlddaten; vollständiges `initWorld/setInitialSpawn/prepareLevels`. Passende Sourcepatch-Hunks vollständig gelesen, Moonrise-Featurehunks zur Levelvorbereitung gelesen. | App `spawn_blocking` öffnet genau einen Format4-Backendarc; Scope0:0 wird vor Import/Spawn bestätigt, expliziter Seedmismatch abgelehnt. Omission behält gespeicherten Seed; frische Omission wählt ausdrücklich0/flat-v1. FerrumC nutzt eigenen unveränderlichen Descriptor, festen konfigurierten Spawn und keinen Vanilla-/Paper-Generator. |
+| Clientseed | Vollständiger originaler und angewandter `BiomeManager`; vollständiges `ServerPlayer.createCommonSpawnInfo`; vollständiges `PlayerList.placeNewPlayer` samt Sourcepatchkontext. | SpawnInfo erhält die Obfuscation des gespeicherten Seeds. Die tatsächliche Mojang-JAR-Methode `dnz.a(long)` liefert acht unabhängige Goldens inklusive Endian-/i64-Grenzen. Kein seed0-Platzhalter. |
+| Tickcapture / Writer | Paperquellen begründen nicht FerrumCs Arc-, Codec- oder Transaktionsvertrag. Vollständiges `MinecraftServer.saveAllChunks/saveEverything/stopServer`, Moonrise-Save-/Close-/RegionIO-Hunks und vollständiger Incremental-saving Featurepatch gelesen. | App-opaque `PersistenceTarget` besitzt privaten Storearc und WG003-Token. `try_reserve` vor purem verified Capture; volle Queue deferiert ohne Journal-/ID-/Dirtytransfer. Worker prüft erwarteten Descriptor auch bei leerem Ack, vor jedem Write und Retry; Receiptpayloads und LostReply-Tokens bleiben erhalten. Finaler Driverstop gibt begrenzt ab, Workerclose drained und Fehler bleibt im Taskjoin sichtbar. Unload behält sämtliche Tickets bis allen Batchacks. Keine gemeinsame Player-/Worldtransaction. |
+| Offline format3→4 | Vollständige Storagequellen, Lock-/Backup-/Save-/Restore-Callees und Dataconverter-Patch laut WG002MIG separat geprüft. | Eigenes explizites `migrate-generation` vor normaler Configinitialisierung und Netzwerkbind. Prepare-only oder neu/exklusiv verifiziertes Backup; Wiederverwendung nur mit vorher bekanntem SHA256. Keine Sourceerzeugung, Seedvermutung, Überschreibung, Reparatur oder Startupmigration. Vollständig kompatibles Format4 wird erneut komplett validiert. |
+| Events / Java | `initWorld` sendet WorldInitEvent vor initialer Spawnchunkgeneration; `loadWorld0` sendet WorldLoadEvent nach Levelvorbereitung und ServerLoadEvent vor acceptConnections; `stopServer` deaktiviert Plugins vor Playersave/Worldsave. | Diese World-/Generator-/Saveevents werden mit diesem Ticket nicht neu in die Java-Brücke eingebunden; bestehende App-Java-Start-/Quit-/Shutdownverträge bleiben erhalten. Kein behaupteter Paper-Lifecyclegleichstand oder vollständiger Pluginvertrag. |
+
+Produktions-API: `PersistenceTarget::verify(Arc<dyn WorldStore>, GenerationBinding)`
+verifiziert off-tick und kapselt `VerifiedGenerationBinding`; `capture(&mut
+SimShard, tick, NonZeroUsize)` ist synchron ohne I/O; `validate_write()` prüft
+Writer-/Retryadmission. Keine unchecked Produktionskonstruktion. Öffnen,
+Anvildirectoryscan/-decode und Offline-Typestatearbeit laufen in Blockingtasks;
+DBtraitaufrufe verwenden den Storageproducer mit eigenem Blockingtransactionpfad.
+Die vorhandene produktive Single-Shard-App bleibt auf ihrem bisherigen Tokiodriver;
+dieses Ticket stellt keinen neuen Simthreadpool her.
+
+Vorläufige Nachweise: `cargo check --offline --locked -j2 -p ferrumc-app`
+besteht im separaten `.codex-tmp/wg004-target`; vorhandene279 Appunittests
+bestanden nach Umstellung ihrer Persistence-Fixtures auf deklarierte Format4.
+Weitere neue Contract- und Restartchecks sind in Arbeit. Quellenlektüre und
+dieser Zwischenstand sind keine Live-Paper-Differenzialabnahme.
+
+
+## Implementierte Abnahme und Freeze
+
+- Gesamte bestehende App-Suite:374 bestandene Tests, inklusive2 Rustdoc- und2
+  Binaryunittests; ein Java-Akzeptanztest war im Normallauf ausdrücklich ignored.
+  Nach dem zusätzlichen Wrong-Arc-Regressionstest bestehen alle287 Appunittests
+  und alle8 neuen Generation-Startup-/CLItests erneut auf finalem Runtimecode.
+  Damit umfasst der final geprüfte normale Vertragsbestand375 Tests.
+- Java-Akzeptanz wurde zusätzlich ausdrücklich mit echtem Java21 und kopierten,
+  SHA256-erfassten Bridge-/gewöhnlichen Bukkit-Fixture-JARs ausgeführt:1 Test
+  bestanden. Die Fixture umfasst Commands, Events, Permissions, Restart und
+  Startuprollback; erwartete Unsupported-Schedulerzweige bleiben ausdrücklich
+  unimplementiert. Bestehende Adapterfähigkeit ist damit erhalten, kein neuer
+  vollständiger Paper-World-/Schedulervertrag entstanden.
+- Neue Snapshotabnahme vergleicht sämtliche vorhandenen Tabellen, Katalog und
+  rohe Schlüssel-/Recordbytes vor/nach Seed-, fremdem Scope-, Version-,
+  Generatorkind-, Revision- und malformed Descriptorreject. Format3 normaler
+  Start bleibt unverändert und nennt die Offlineanweisung. Prepare-only,
+  exclusive Backup, echte Backupbytegleichheit im logischen Snapshot, Format4-
+  Commit, vollständiger idempotenter Retry und anschließender Serverstart bestehen.
+- CLIbinarydispatch wurde mit einem fehlenden normalen Configpfad ausgeführt:
+  Offlineprepare schreibt keine Config und erzeugt kein default-world-Verzeichnis.
+  Aktiv gehaltener Sourcehandle und existierendes Backup refuseieren unverändert;
+  bestehendes Backup braucht den korrekten vorher erfassten SHA256. Falscher Hash
+  verändert weder Source-Records noch Backupdatei.
+- Reuse von stored nonzero bei Configomission, explizite fresh0-Option, original-
+  JAR-Seedoracle, pure Capture ohne Metadatenread und Wrong-Arcallocation vor
+  Dirty-/Journal-/IDtransfer bestehen. Volle/geschlossene Queue, late Codecfehler,
+  bounded Tailcapture, Unloadacks, finaler Stop und LostReply-Receiptretry waren
+  schon konkrete Appverträge und bestehen mit checked Target erneut.
+- Writerdescriptorreject verweigert auch eine leere Ackbarriere. Die erste
+  fehlgeschlagene Journaltransaktion und danach geänderte Descriptorfault haben
+  genau1 Datenwriteversuch: der Retryvalidierer scheitert vor dem zweiten Write.
+  Tests nutzen deterministische Gates bzw. pausierte Tokiodauer, keine Sleeps.
+- Striktes `cargo clippy --offline --locked -j2 -p ferrumc-app --all-targets --
+  -D warnings` besteht. Owned-rustfmt und scoped `git diff --check` bestehen.
+  Keine Lock-/Storage-/Sim-/World-/Config-/Coreänderung dieses Tickets.
+
+Alle eigenen Rustbuilds benutzen `.codex-tmp/wg004-target`, maximal2 Buildjobs;
+der bestehende Native-Fixturetest baut seine dynamische Testbibliothek mit1 Job
+in einem eigenen Repo-Disk-Verzeichnis. Das vorhandene Standardtarget bleibt
+unberührt. `sha2` wurde von App-Devdependency zu Runtimeabhängigkeit verschoben,
+weil originaler Biomehash es benötigt; dieselbe bereits gelockte Version,
+keine Änderung von Cargo.lock.
+
+Logs und Artefakte, relativ zum FerrumC-Repo:
+
+- `.codex-tmp/wg004-app-tests.log` — vollständige normale Suite.
+- `.codex-tmp/wg004-final-contract-tests.log` — final287 Unit +8 Startup/CLI.
+- `.codex-tmp/wg004-java-tests.log` — ausdrücklich aktivierte echte Javaakzeptanz.
+- `.codex-tmp/wg004-java-artifacts.sha256` — drei kopierte Runtime-/Fixture-JARs.
+- `.codex-tmp/wg004-clippy.log` — striktes Alltargetclippy.
+- `.codex-tmp/wg004-fmt.log` — Owned-Rustfmt.
+- `.codex-tmp/wg004-freeze.sha256` — vollständiges Owned-Dateimanifest.
+- `.codex-tmp/wg004-freeze/ferrumc` — unveränderliche Kopie des geprüften Binarys,
+  SHA256 in `.codex-tmp/wg004-freeze/binary.sha256`.
+
+Paper1.21.8 Build60 wurde für diese Appabnahme nicht als laufender Server
+verglichen. Die echte Original-JAR-Prüfung betrifft ausschließlich die
+Biomeobfuscation. Root führt die unabhängige Consumer-/Restartabnahme und
+Integration durch; bis dahin bleiben Ticketstatus und Runtimefreeze getrennt
+von vollständigem Survival-/Naturgeneratorfortschritt.

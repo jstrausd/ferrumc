@@ -50,6 +50,7 @@ use ferrumc_storage::{
 };
 use ferrumc_world::{BlockEntity, Chunk, FlatWorldGenerator};
 
+use crate::persistence::PersistenceTarget;
 use crate::plugins::BlockEventDispatcher;
 use crate::storage_worker::StorageFlushRequest;
 use crate::world::chunk_packet;
@@ -689,7 +690,7 @@ fn chunk_block_entity_packets(chunk: &Chunk) -> Vec<ClientboundPlayPacket> {
 pub(crate) async fn run(
     mut router: SessionRouter,
     mut shard: SimShard,
-    store: Arc<dyn WorldStore>,
+    target: PersistenceTarget,
     generator: FlatWorldGenerator,
     mut shard_rx: mpsc::Receiver<GameInput>,
     mut commands: mpsc::Receiver<SimCommand>,
@@ -743,7 +744,7 @@ pub(crate) async fn run(
                 // End-of-tick flush: hand the tick's player edits to the storage
                 // worker without ever blocking the tick (see the helper).
                 if let Err(error) =
-                    try_flush_persist_dirty(&mut shard, &storage_tx, tick, &mut next_mutation_id)
+                    try_flush_persist_dirty(&mut shard, &target, &storage_tx, tick, &mut next_mutation_id)
                 {
                     let _ = fatal_shutdown.send(true);
                     return Err(error);
@@ -754,7 +755,7 @@ pub(crate) async fn run(
                     if let Err(error) = handle_command(
                         &mut router,
                         &mut shard,
-                        &*store,
+                        &target,
                         &generator,
                         &storage_tx,
                         tick,
@@ -777,8 +778,14 @@ pub(crate) async fn run(
     // The last connection may drop the command sender before the server task
     // signals the driver. Both stop causes must hand off off-tick edits before
     // dropping `storage_tx`, whose closure lets the worker drain and exit.
-    if let Err(error) =
-        flush_pending_before_stop(&mut shard, &storage_tx, tick, &mut next_mutation_id).await
+    if let Err(error) = flush_pending_before_stop(
+        &mut shard,
+        &target,
+        &storage_tx,
+        tick,
+        &mut next_mutation_id,
+    )
+    .await
     {
         let _ = fatal_shutdown.send(true);
         return Err(error);
@@ -790,6 +797,7 @@ pub(crate) async fn run(
 /// Reserve before draining so a closed worker retains the recoverable shard copy.
 async fn flush_pending_before_stop(
     shard: &mut SimShard,
+    target: &PersistenceTarget,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
     next_mutation_id: &mut u64,
@@ -799,7 +807,7 @@ async fn flush_pending_before_stop(
             .reserve()
             .await
             .map_err(|_| storage_worker_closed("final shutdown flush"))?;
-        if let Some(request) = build_flush_request(shard, tick, next_mutation_id)? {
+        if let Some(request) = build_flush_request(shard, target, tick, next_mutation_id)? {
             permit.send(request);
         }
     }
@@ -827,6 +835,7 @@ fn storage_worker_closed(operation: &str) -> ServerError {
 /// so the caller is committed to delivering the returned request.
 fn build_flush_request(
     shard: &mut SimShard,
+    target: &PersistenceTarget,
     tick: Tick,
     next_mutation_id: &mut u64,
 ) -> ServerResult<Option<StorageFlushRequest>> {
@@ -837,9 +846,7 @@ fn build_flush_request(
     // Capture every selected record before draining the journal or assigning
     // ids. An invalid late entity retains the entire selected dirty batch.
     let capacity = NonZeroUsize::new(PERSIST_FLUSH_CHUNK_LIMIT).unwrap_or(NonZeroUsize::MIN);
-    let overlays = shard
-        .loaded_chunks_mut()
-        .try_take_persist_dirty_bounded(tick_n, capacity)?;
+    let overlays = target.capture(shard, tick_n, capacity)?;
     let mutations = shard
         .take_mutations()
         .into_iter()
@@ -888,6 +895,7 @@ fn build_mutation_record(id: u64, tick: u64, mutation: &PendingMutation) -> Bloc
 /// or lose an edit.
 fn try_flush_persist_dirty(
     shard: &mut SimShard,
+    target: &PersistenceTarget,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
     next_mutation_id: &mut u64,
@@ -897,7 +905,7 @@ fn try_flush_persist_dirty(
     }
     match storage_tx.try_reserve() {
         Ok(permit) => {
-            if let Some(request) = build_flush_request(shard, tick, next_mutation_id)? {
+            if let Some(request) = build_flush_request(shard, target, tick, next_mutation_id)? {
                 permit.send(request);
             }
             Ok(())
@@ -1006,7 +1014,7 @@ fn route_teleport_command(
 async fn handle_command(
     router: &mut SessionRouter,
     shard: &mut SimShard,
-    store: &dyn WorldStore,
+    target: &PersistenceTarget,
     generator: &FlatWorldGenerator,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
@@ -1061,15 +1069,31 @@ async fn handle_command(
         } => {
             // Release first (frees tickets the new view no longer needs) before
             // acquiring, so a chunk that both left and re-entered nets out cleanly.
-            release_chunks(shard, storage_tx, tick, next_mutation_id, &unload).await?;
-            let packets = load_chunks(shard, store, generator, &load).await;
-            deliver_streamed_chunks(reply, packets, shard, storage_tx, tick, next_mutation_id)
-                .await?;
+            release_chunks(shard, target, storage_tx, tick, next_mutation_id, &unload).await?;
+            let packets = load_chunks(shard, target.store(), generator, &load).await;
+            deliver_streamed_chunks(
+                reply,
+                packets,
+                shard,
+                target,
+                storage_tx,
+                tick,
+                next_mutation_id,
+            )
+            .await?;
         }
         SimCommand::ReleaseChunks { positions } => {
             // Disconnect path: await the worker's commit before releasing tickets so
             // a fast rejoin cannot read a stale baseline (Bug A barrier).
-            release_chunks_acked(shard, storage_tx, tick, next_mutation_id, &positions).await?;
+            release_chunks_acked(
+                shard,
+                target,
+                storage_tx,
+                tick,
+                next_mutation_id,
+                &positions,
+            )
+            .await?;
         }
         SimCommand::BroadcastSystemChat { content, overlay } => {
             router.broadcast_system_chat(&content, overlay);
@@ -1430,6 +1454,7 @@ async fn deliver_streamed_chunks(
     reply: oneshot::Sender<Vec<StreamedChunk>>,
     packets: Vec<StreamedChunk>,
     shard: &mut SimShard,
+    target: &PersistenceTarget,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
     next_mutation_id: &mut u64,
@@ -1439,7 +1464,15 @@ async fn deliver_streamed_chunks(
             .iter()
             .map(|packet| ChunkPos::new(packet.chunk.x(), packet.chunk.z()))
             .collect::<Vec<_>>();
-        release_chunks_acked(shard, storage_tx, tick, next_mutation_id, &positions).await?;
+        release_chunks_acked(
+            shard,
+            target,
+            storage_tx,
+            tick,
+            next_mutation_id,
+            &positions,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -1452,12 +1485,13 @@ async fn deliver_streamed_chunks(
 /// if that accepted write then failed.
 async fn release_chunks(
     shard: &mut SimShard,
+    target: &PersistenceTarget,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
     next_mutation_id: &mut u64,
     positions: &[ChunkPos],
 ) -> ServerResult<()> {
-    release_chunks_acked(shard, storage_tx, tick, next_mutation_id, positions).await
+    release_chunks_acked(shard, target, storage_tx, tick, next_mutation_id, positions).await
 }
 
 /// Releases the player ticket on each chunk in `positions`, but **only after** the
@@ -1476,6 +1510,7 @@ async fn release_chunks(
 /// [`handle_command`], never inside [`run_tick`].
 async fn release_chunks_acked(
     shard: &mut SimShard,
+    target: &PersistenceTarget,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
     next_mutation_id: &mut u64,
@@ -1490,7 +1525,7 @@ async fn release_chunks_acked(
         let (ack_tx, ack_rx) = oneshot::channel();
         // The first request is always acked, even if earlier tick output moved
         // everything into the worker. A bounded tail needs its own commit proof.
-        let mut request = build_flush_request(shard, tick, next_mutation_id)?
+        let mut request = build_flush_request(shard, target, tick, next_mutation_id)?
             .unwrap_or_else(|| StorageFlushRequest::new(Vec::new(), Vec::new()));
         request.ack = Some(ack_tx);
         permit.send(request);
@@ -1806,6 +1841,31 @@ mod tests {
     use tokio::sync::{mpsc, oneshot, watch};
 
     use crate::plugins::BlockEventDispatcher;
+    use ferrumc_storage::WorldStore;
+    async fn test_store() -> InMemoryStore {
+        let store = InMemoryStore::with_generation_metadata();
+        let binding = crate::persistence::fixtures::binding();
+        store
+            .ensure_generation_identity(binding.key(), binding.identity())
+            .await
+            .expect("fixture generation identity");
+        store
+    }
+
+    async fn test_target() -> crate::persistence::PersistenceTarget {
+        let store: Arc<dyn ferrumc_storage::WorldStore> = Arc::new(test_store().await);
+        crate::persistence::PersistenceTarget::verify(
+            store,
+            crate::persistence::fixtures::binding(),
+        )
+        .await
+        .expect("fixture target")
+    }
+
+    fn test_shard() -> SimShard {
+        SimShard::with_generation(ShardPos::new(0, 0), crate::persistence::fixtures::binding())
+    }
+
     use crate::storage_worker::StorageFlushRequest;
 
     use super::{
@@ -1864,8 +1924,7 @@ mod tests {
         roster: &mut BTreeMap<PlayerId, String>,
         command: SimCommand,
     ) -> Result<(), ServerError> {
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -1873,7 +1932,7 @@ mod tests {
         handle_command(
             router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -1946,8 +2005,8 @@ mod tests {
 
     /// Builds one edited chunk held by exactly one player ticket.
     async fn dirty_player_chunk() -> (SimShard, ChunkPos) {
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
+        let store = test_store().await;
         let generator = FlatWorldGenerator::new();
         let pos = ChunkPos::new(0, 0);
         let ticket = ChunkTicket::of(TicketReason::Player);
@@ -1975,7 +2034,7 @@ mod tests {
     async fn dirty_player_batch() -> (SimShard, Vec<ChunkPos>) {
         let (mut shard, first) = dirty_player_chunk().await;
         let mut positions = vec![first];
-        let store = InMemoryStore::new();
+        let store = test_store().await;
         for x in 1..=4 {
             let pos = ChunkPos::new(x, 0);
             shard
@@ -2027,7 +2086,13 @@ mod tests {
             .set_block_entity(bad_position, BlockEntity::Sign(sign))
             .expect("inside chunk");
         let mut next_id = 71;
-        assert!(super::build_flush_request(&mut shard, Tick::ZERO, &mut next_id).is_err());
+        assert!(super::build_flush_request(
+            &mut shard,
+            &test_target().await,
+            Tick::ZERO,
+            &mut next_id
+        )
+        .is_err());
         assert_eq!(next_id, 71);
         assert!(shard.has_pending_mutations());
         for pos in positions {
@@ -2059,9 +2124,16 @@ mod tests {
                     .expect("waiting driver");
             }
         });
-        release_chunks_acked(&mut shard, &storage_tx, Tick::ZERO, &mut 0, &positions)
-            .await
-            .expect_err("tail failure refuses the complete release");
+        release_chunks_acked(
+            &mut shard,
+            &test_target().await,
+            &storage_tx,
+            Tick::ZERO,
+            &mut 0,
+            &positions,
+        )
+        .await
+        .expect_err("tail failure refuses the complete release");
         worker.await.expect("worker");
         for pos in positions {
             assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
@@ -2081,9 +2153,15 @@ mod tests {
             }
             captured
         });
-        super::flush_pending_before_stop(&mut shard, &storage_tx, Tick::ZERO, &mut 0)
-            .await
-            .expect("complete bounded drain");
+        super::flush_pending_before_stop(
+            &mut shard,
+            &test_target().await,
+            &storage_tx,
+            Tick::ZERO,
+            &mut 0,
+        )
+        .await
+        .expect("complete bounded drain");
         assert!(!shard.loaded_chunks().has_persist_dirty());
         drop(storage_tx);
         assert_eq!(worker.await.expect("worker"), positions);
@@ -2092,7 +2170,7 @@ mod tests {
     /// Installs an initially clean chest so only the later off-tick click can
     /// produce a persistence request in the real driver-loop regression.
     async fn clean_chest_shard(store: &InMemoryStore, position: BlockPos) -> SimShard {
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
+        let mut shard = test_shard();
         shard
             .loaded_chunks_mut()
             .acquire(
@@ -2127,7 +2205,7 @@ mod tests {
     async fn driver_normal_stop_flushes_off_tick_chest_edits_before_the_next_tick() {
         for explicit_shutdown in [false, true] {
             let position = BlockPos::new(8, 65, 8);
-            let store = Arc::new(InMemoryStore::new());
+            let store = Arc::new(test_store().await);
             let shard = clean_chest_shard(&store, position).await;
             let mut router = SessionRouter::new();
             let shard_rx = router.register_shard(ShardPos::new(0, 0));
@@ -2146,7 +2224,12 @@ mod tests {
             let driver = tokio::spawn(super::run(
                 router,
                 shard,
-                store,
+                crate::persistence::PersistenceTarget::verify(
+                    store,
+                    crate::persistence::fixtures::binding(),
+                )
+                .await
+                .expect("driver target"),
                 FlatWorldGenerator::new(),
                 shard_rx,
                 commands_rx,
@@ -2229,6 +2312,7 @@ mod tests {
 
         let error = super::flush_pending_before_stop(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::new(1),
             &mut next_mutation_id,
@@ -2248,7 +2332,7 @@ mod tests {
             let (mut shard, pos) = dirty_player_chunk().await;
             let packets = load_chunks(
                 &mut shard,
-                &InMemoryStore::new(),
+                &test_store().await,
                 &FlatWorldGenerator::new(),
                 &[pos],
             )
@@ -2279,6 +2363,7 @@ mod tests {
                 reply,
                 packets,
                 &mut shard,
+                &test_target().await,
                 &storage_tx,
                 Tick::ZERO,
                 &mut 0,
@@ -2308,15 +2393,26 @@ mod tests {
             .expect("fill the sole storage slot");
         let mut next_mutation_id = 0;
 
-        try_flush_persist_dirty(&mut shard, &full_tx, Tick::ZERO, &mut next_mutation_id)
-            .expect("a full queue is lossless backpressure, not worker failure");
+        try_flush_persist_dirty(
+            &mut shard,
+            &test_target().await,
+            &full_tx,
+            Tick::ZERO,
+            &mut next_mutation_id,
+        )
+        .expect("a full queue is lossless backpressure, not worker failure");
         assert!(shard.loaded_chunks().has_persist_dirty());
 
         let (closed_tx, closed_rx) = mpsc::channel::<StorageFlushRequest>(1);
         drop(closed_rx);
-        let error =
-            try_flush_persist_dirty(&mut shard, &closed_tx, Tick::ZERO, &mut next_mutation_id)
-                .expect_err("a closed queue means the worker is unavailable");
+        let error = try_flush_persist_dirty(
+            &mut shard,
+            &test_target().await,
+            &closed_tx,
+            Tick::ZERO,
+            &mut next_mutation_id,
+        )
+        .expect_err("a closed queue means the worker is unavailable");
 
         assert!(matches!(error, ServerError::InvalidState(_)));
         assert!(shard.loaded_chunks().has_persist_dirty());
@@ -2331,6 +2427,7 @@ mod tests {
 
         let error = release_chunks(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::ZERO,
             &mut next_mutation_id,
@@ -2365,6 +2462,7 @@ mod tests {
 
         let error = release_chunks(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::ZERO,
             &mut next_mutation_id,
@@ -2388,6 +2486,7 @@ mod tests {
 
         let error = release_chunks_acked(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::ZERO,
             &mut next_mutation_id,
@@ -2422,6 +2521,7 @@ mod tests {
 
         let error = release_chunks_acked(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::ZERO,
             &mut next_mutation_id,
@@ -2454,6 +2554,7 @@ mod tests {
 
         let error = release_chunks_acked(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::ZERO,
             &mut next_mutation_id,
@@ -2488,6 +2589,7 @@ mod tests {
 
         release_chunks_acked(
             &mut shard,
+            &test_target().await,
             &storage_tx,
             Tick::ZERO,
             &mut next_mutation_id,
@@ -2791,8 +2893,7 @@ mod tests {
             inbox.try_recv(),
             Ok(GameInput::PlayerJoin { player: joined, .. }) if joined == player
         ));
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -2803,7 +2904,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -2850,8 +2951,7 @@ mod tests {
         drain(&mut a);
         drain(&mut b);
 
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -2861,7 +2961,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -2891,8 +2991,7 @@ mod tests {
         drain(&mut a);
         drain(&mut b);
 
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -2902,7 +3001,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -2929,8 +3028,7 @@ mod tests {
         let mut router = SessionRouter::new();
         let _inbox = router.register_shard(ShardPos::new(0, 0));
 
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -2944,7 +3042,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -2979,8 +3077,7 @@ mod tests {
             .expect("join asker");
         drain(&mut handle);
 
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -2991,7 +3088,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -3024,8 +3121,7 @@ mod tests {
         // Discard the PlayerJoin inputs so the inbox below only holds the command.
         while inbox.try_recv().is_ok() {}
 
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -3037,7 +3133,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -3137,8 +3233,7 @@ mod tests {
             .expect("join joe");
         drain(&mut op);
 
-        let mut shard = SimShard::new(ShardPos::new(0, 0));
-        let store = InMemoryStore::new();
+        let mut shard = test_shard();
         let generator = FlatWorldGenerator::new();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
@@ -3149,7 +3244,7 @@ mod tests {
         handle_command(
             &mut router,
             &mut shard,
-            &store,
+            &test_target().await,
             &generator,
             &storage_tx,
             Tick::ZERO,
@@ -3173,5 +3268,36 @@ mod tests {
             panic!("expected a SynchronizePlayerPosition");
         };
         assert_eq!((sync.x(), sync.y(), sync.z()), (20.0, 70.0, 40.0));
+    }
+    #[tokio::test]
+    async fn wrong_capture_allocation_preserves_dirty_journal_and_ids_after_reservation() {
+        let (mut shard, pos) = dirty_player_chunk().await;
+        let edited = BlockPos::new(1, 66, 1);
+        shard
+            .enqueue(GameInput::RegionEdit {
+                player: PlayerId::offline("wrong-capture-store"),
+                region: Cuboid::new(edited, edited),
+                op: RegionOp::Fill {
+                    state: BlockStateId::new(3),
+                },
+            })
+            .expect("journaled edit");
+        let _ = shard.run_tick();
+        let target = test_target().await;
+        let wrong = crate::persistence::fixtures::wrong_allocation(&target, test_target().await);
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut next_id = 91;
+        try_flush_persist_dirty(&mut shard, &wrong, &tx, Tick::new(3), &mut next_id)
+            .expect_err("wrong allocation refuses capture");
+        assert_eq!(next_id, 91);
+        assert!(shard.has_pending_mutations());
+        assert!(shard.loaded_chunks().has_persist_dirty());
+        assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
+        assert!(rx.try_recv().is_err());
+        assert_eq!(tx.capacity(), 1, "failed capture returns the reserved slot");
+        try_flush_persist_dirty(&mut shard, &target, &tx, Tick::new(3), &mut next_id)
+            .expect("same allocation captures");
+        assert_eq!(next_id, 92);
+        assert_eq!(rx.try_recv().expect("accepted batch").overlays.len(), 1);
     }
 }

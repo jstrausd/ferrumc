@@ -546,7 +546,8 @@ fn invalid_username_table_has_no_identity_or_downstream_side_effects() {
     });
     drop(runtime);
 
-    let store = RedbStore::open(database_path(world.path())).expect("reopen durable world store");
+    let store = RedbStore::open_with_generation_metadata(database_path(world.path()))
+        .expect("reopen durable world store");
     assert!(
         runtime_free_load(&store, PlayerId::offline(OBSERVER)).is_some(),
         "valid observer must persist so the negative persistence oracle is live",

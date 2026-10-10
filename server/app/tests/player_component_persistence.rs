@@ -151,8 +151,8 @@ fn complete_slot_and_carried_components_survive_two_server_restarts() {
         .expect("bounded seed")
         .expect("seed and save");
     for _ in 0..2 {
-        let store =
-            RedbStore::open(temp.path().join("world.redb")).expect("reopen durable player store");
+        let store = RedbStore::open_with_generation_metadata(temp.path().join("world.redb"))
+            .expect("reopen durable player store");
         let record = runtime
             .block_on(store.load_player(PlayerId::offline(NAME)))
             .expect("load")

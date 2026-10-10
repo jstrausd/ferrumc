@@ -152,8 +152,8 @@ async fn one_username_has_one_canonical_identity_everywhere() {
         .expect("whitelist server shuts down within the guard")
         .expect("whitelist server shuts down cleanly");
 
-    let store =
-        RedbStore::open(temp.path().join("world.redb")).expect("reopen durable world store");
+    let store = RedbStore::open_with_generation_metadata(temp.path().join("world.redb"))
+        .expect("reopen durable world store");
     assert!(
         store
             .load_player(target)

@@ -57,8 +57,15 @@ async fn main() -> anyhow::Result<()> {
     // `clap` handles --help and --version (printing and exiting 0) before this
     // returns; anything else surfaces as a usage error.
     let cli = Cli::parse();
+    if let Some(report) = cli.run_offline().await? {
+        print!("{report}");
+        return Ok(());
+    }
     let config_path = cli.config_path();
-    let config = load_or_init_config(&config_path, cli.port, cli.bind)?;
+    let config =
+        tokio::task::spawn_blocking(move || load_or_init_config(&config_path, cli.port, cli.bind))
+            .await
+            .map_err(|error| anyhow::anyhow!("config bootstrap task failed: {error}"))??;
 
     let server = ferrumc_app::run(&config).await?;
     log_startup_banner(&config, &server);

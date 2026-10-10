@@ -16,6 +16,7 @@ use tokio::time::timeout;
 
 use ferrumc_core::{GameMode, PlayerId, ServerError};
 use ferrumc_proto::generated::play::ClientboundPlayPacket;
+use ferrumc_storage::WorldStore;
 use ferrumc_storage::{PlayerRecord, PlayerStore, RedbStore, SchemaVersion};
 
 use ferrumc_app::AppConfig;
@@ -119,7 +120,16 @@ async fn attempt_login_and_shutdown(config: &AppConfig, name: &str) -> bool {
 
 /// Seeds one typed record without starting the app.
 fn seed_player(runtime: &Runtime, path: &Path, player: PlayerId, record: PlayerRecord) {
-    let store = RedbStore::open(path).expect("open player store");
+    let store = RedbStore::open_with_generation_metadata(path).expect("open player store");
+    runtime
+        .block_on(store.ensure_generation_identity(
+            ferrumc_storage::GenerationKey::new(
+                ferrumc_core::WorldId::new(0),
+                ferrumc_core::DimensionId::new(0),
+            ),
+            ferrumc_world::GenerationIdentity::flat_overworld(ferrumc_world::WorldSeed::new(0)),
+        ))
+        .expect("initialize fixture identity");
     runtime
         .block_on(store.save_player(player, record))
         .expect("seed player record");
@@ -127,7 +137,7 @@ fn seed_player(runtime: &Runtime, path: &Path, player: PlayerId, record: PlayerR
 
 /// Loads one typed record after the app has fully released the database.
 fn load_player(runtime: &Runtime, path: &Path, player: PlayerId) -> PlayerRecord {
-    let store = RedbStore::open(path).expect("reopen player store");
+    let store = RedbStore::open_with_generation_metadata(path).expect("reopen player store");
     runtime
         .block_on(store.load_player(player))
         .expect("load player record")
@@ -214,11 +224,21 @@ fn backend_load_failure_does_not_overwrite_the_original_record() {
     // Initialize the store format/tables through the shipping backend, then
     // replace this player's value with a truncated envelope. `RedbStore` returns
     // a classified backend error because even schema + game mode cannot be read.
-    drop(RedbStore::open(&path).expect("initialize player store"));
+    let store = RedbStore::open_with_generation_metadata(&path).expect("initialize player store");
+    runtime
+        .block_on(store.ensure_generation_identity(
+            ferrumc_storage::GenerationKey::new(
+                ferrumc_core::WorldId::new(0),
+                ferrumc_core::DimensionId::new(0),
+            ),
+            ferrumc_world::GenerationIdentity::flat_overworld(ferrumc_world::WorldSeed::new(0)),
+        ))
+        .expect("initialize fixture identity");
+    drop(store);
     let original = vec![0x00, 0x00, 0x00, 0x01];
     insert_raw_player(&path, player, &original);
 
-    let store = RedbStore::open(&path).expect("reopen typed player store");
+    let store = RedbStore::open_with_generation_metadata(&path).expect("reopen typed player store");
     let error = runtime
         .block_on(store.load_player(player))
         .expect_err("the malformed envelope must fail typed loading");

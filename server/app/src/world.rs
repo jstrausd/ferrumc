@@ -27,16 +27,20 @@ use ferrumc_proto::generated::play::{ChunkDataAndLight, Heightmap, JoinGame, Spa
 use ferrumc_proto::types::BlockPosition;
 use ferrumc_registry::dimension;
 
-use ferrumc_sim::{RegionLimits, SimShard, SpawnChunkTickets};
+use ferrumc_sim::{GenerationBinding, RegionLimits, SimShard, SpawnChunkTickets};
 use ferrumc_storage::{
-    ChunkKey, ChunkRecord, InMemoryStore, PlayerStore, RedbStore, SchemaVersion, WorldStore,
+    ChunkKey, ChunkRecord, GenerationKey, InMemoryStore, PlayerStore, RedbStore, SchemaVersion,
+    WorldStore,
 };
 use ferrumc_world::{
     encode_chunk_section_data, pack_motion_blocking_heightmap, Chunk, ChunkLightData,
-    FlatWorldGenerator,
+    FlatWorldGenerator, GenerationIdentity, WorldSeed,
 };
 
 use crate::config::AppConfig;
+use crate::persistence::PersistenceTarget;
+use ferrumc_config::WorldGenerationPreset;
+use sha2::{Digest, Sha256};
 
 /// Placeholder protocol entity id assigned to a joining player in `JoinGame`.
 ///
@@ -136,7 +140,7 @@ impl JoinKit {
 /// The simulation pieces produced by [`build_world`], ready to drive.
 ///
 /// The shard already owns the resident spawn chunks; `join_kit` is the shared
-/// clientbound payload derived from them. The `store` and `generator` are handed
+/// clientbound payload derived from them. The verified target and generator are handed
 /// to the driver so it can run the load-or-generate flow for chunks streamed in
 /// around a moving player (the same store the spawn area was loaded from, so
 /// chunk persistence stays consistent).
@@ -148,8 +152,8 @@ pub(crate) struct WorldSetup {
     /// The chunk store the driver and storage worker share, behind the
     /// [`WorldStore`] trait so the backend (durable redb or in-memory) is chosen
     /// once at startup and the rest of the app stays backend-agnostic.
-    pub(crate) store: Arc<dyn WorldStore>,
-    /// The per-player record store, the *same* backend object as [`store`] viewed
+    pub(crate) persistence: PersistenceTarget,
+    /// The player-record view of the same backend allocation, accessed
     /// through the [`PlayerStore`] trait. Connection tasks load a player's saved
     /// state on join and save it on leave/shutdown through this handle.
     pub(crate) player_store: Arc<dyn PlayerStore>,
@@ -183,11 +187,15 @@ pub(crate) async fn build_world(
     let OpenedStore {
         store,
         player_store,
-    } = open_store(config)?;
-    let generator = FlatWorldGenerator::new();
+    } = open_store(config).await?;
+    let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+    let identity = reconcile_generation(&*store, key, config).await?;
+    let generator = FlatWorldGenerator::with_seed(identity.seed());
+    let binding = GenerationBinding::new(key, identity);
+    let persistence = PersistenceTarget::verify(Arc::clone(&store), binding).await?;
     let spawn = SpawnChunkTickets::new(spawn_center_chunk(config), config.spawn_chunk_radius());
 
-    let mut shard = SimShard::new(shard_pos);
+    let mut shard = SimShard::with_generation(shard_pos, binding);
     // Bound the region build commands (/fill, /replace, /undo) with the operator's
     // configured caps; the shard re-checks these defensively on every region edit.
     shard.set_region_limits(RegionLimits {
@@ -227,11 +235,11 @@ pub(crate) async fn build_world(
         .acquire_spawn(&*store, &generator, &spawn)
         .await?;
 
-    let join_kit = std::sync::Arc::new(build_join_kit(config, &spawn)?);
+    let join_kit = std::sync::Arc::new(build_join_kit(config, &spawn, identity)?);
     Ok(WorldSetup {
         shard,
         join_kit,
-        store,
+        persistence,
         player_store,
         generator,
     })
@@ -262,17 +270,57 @@ struct OpenedStore {
 ///
 /// Returns an error if the world directory cannot be created or the redb file
 /// cannot be opened.
-fn open_store(config: &AppConfig) -> anyhow::Result<OpenedStore> {
-    if let Some(dir) = config.world_dir() {
+async fn open_store(config: &AppConfig) -> anyhow::Result<OpenedStore> {
+    let world_dir = config.world_dir().map(Path::to_path_buf);
+    tokio::task::spawn_blocking(move || open_store_blocking(world_dir.as_deref()))
+        .await
+        .map_err(|error| anyhow::anyhow!("world store opening task failed: {error}"))?
+}
+
+fn open_store_blocking(world_dir: Option<&Path>) -> anyhow::Result<OpenedStore> {
+    if let Some(dir) = world_dir {
         std::fs::create_dir_all(dir)
             .map_err(|err| anyhow::anyhow!("creating world directory {}: {err}", dir.display()))?;
         let path = dir.join("world.redb");
-        let store = RedbStore::open(&path)
-            .map_err(|err| anyhow::anyhow!("opening world store {}: {err}", path.display()))?;
+        let store = RedbStore::open_with_generation_metadata(&path).map_err(|err| {
+            anyhow::anyhow!(
+                "opening format-4 world store {}: {err}; legacy format 3 requires an explicit offline migration: ferrumc migrate-generation --source <world.redb> --backup <new-backup.redb> --scope 0:0 --declare-legacy-flat-v1-seed-zero (stop the server first)",
+                path.display()
+            )
+        })?;
         Ok(opened_store(Arc::new(store)))
     } else {
-        Ok(opened_store(Arc::new(InMemoryStore::new())))
+        Ok(opened_store(Arc::new(
+            InMemoryStore::with_generation_metadata(),
+        )))
     }
+}
+
+/// Keeps persisted seed/preset authoritative; omissions only choose defaults on fresh stores.
+async fn reconcile_generation(
+    store: &dyn WorldStore,
+    key: GenerationKey,
+    config: &AppConfig,
+) -> anyhow::Result<GenerationIdentity> {
+    let configured = config.world();
+    if let Some(preset) = configured.preset() {
+        match preset {
+            WorldGenerationPreset::FerrumcFlat => {}
+            _ => anyhow::bail!("unsupported world generation preset {preset:?}"),
+        }
+    }
+    let stored = store.load_generation_identity(key).await?;
+    let seed = configured
+        .seed()
+        .unwrap_or_else(|| stored.map_or(0, |identity| identity.seed().value()));
+    let expected = GenerationIdentity::flat_overworld(WorldSeed::new(seed));
+    if let Some(stored) = stored {
+        expected.ensure_compatible(stored)?;
+    }
+    // This is the first world-bearing startup write. A fresh omission explicitly
+    // selects FerrumC-flat-v1 seed zero, never a recovered historical seed.
+    store.ensure_generation_identity(key, expected).await?;
+    Ok(expected)
 }
 
 /// Erases one concrete backend `Arc` into the [`WorldStore`] and [`PlayerStore`]
@@ -313,11 +361,15 @@ async fn import_anvil_world(
     dimension: DimensionId,
     schema_version: SchemaVersion,
 ) -> anyhow::Result<usize> {
-    let region_paths = collect_region_paths(region_dir)?;
+    let import_path = region_dir.to_path_buf();
+    let region_dir = import_path.clone();
+    let region_paths = tokio::task::spawn_blocking(move || collect_region_paths(&region_dir))
+        .await
+        .map_err(|error| anyhow::anyhow!("anvil directory task failed: {error}"))??;
     if region_paths.is_empty() {
         anyhow::bail!(
             "anvil import directory {} contains no r.<x>.<z>.mca region files",
-            region_dir.display()
+            import_path.display()
         );
     }
 
@@ -399,7 +451,11 @@ fn collect_region_paths(region_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 /// Records only the spawn chunk *positions*; the connection fetches each column's
 /// live blob from the resident shard chunks at join time, so the kit never holds a
 /// stale snapshot of a spawn chunk.
-fn build_join_kit(config: &AppConfig, spawn: &SpawnChunkTickets) -> anyhow::Result<JoinKit> {
+fn build_join_kit(
+    config: &AppConfig,
+    spawn: &SpawnChunkTickets,
+    identity: GenerationIdentity,
+) -> anyhow::Result<JoinKit> {
     let spawn_position = config.spawn();
     let spawn_block = BlockPosition::new(
         spawn_position.x.floor() as i32,
@@ -407,7 +463,7 @@ fn build_join_kit(config: &AppConfig, spawn: &SpawnChunkTickets) -> anyhow::Resu
         spawn_position.z.floor() as i32,
     );
     Ok(JoinKit {
-        join_game: build_join_game(config)?,
+        join_game: build_join_game(config, identity)?,
         spawn_position,
         spawn_chunk: spawn_center_chunk(config),
         spawn_block,
@@ -416,13 +472,13 @@ fn build_join_kit(config: &AppConfig, spawn: &SpawnChunkTickets) -> anyhow::Resu
 }
 
 /// Builds the `JoinGame` packet for the flat overworld.
-fn build_join_game(config: &AppConfig) -> anyhow::Result<JoinGame> {
+fn build_join_game(config: &AppConfig, identity: GenerationIdentity) -> anyhow::Result<JoinGame> {
     let overworld = BoundedString::<32_767>::new(dimension::OVERWORLD.to_string())
         .map_err(|err| anyhow::anyhow!("overworld dimension name invalid: {err}"))?;
     let spawn_info = SpawnInfo::new(
         OVERWORLD_DIMENSION_TYPE,
         overworld.clone(),
-        0,
+        obfuscate_seed(identity.seed()),
         GAMEMODE_CREATIVE,
         NO_PREVIOUS_GAMEMODE,
         false,
@@ -444,6 +500,12 @@ fn build_join_game(config: &AppConfig) -> anyhow::Result<JoinGame> {
         spawn_info,
         false,
     ))
+}
+
+/// Matches the original `BiomeManager`'s Guava `hashLong`/`asLong` byte order.
+fn obfuscate_seed(seed: WorldSeed) -> i64 {
+    let digest = Sha256::digest(seed.value().to_le_bytes());
+    i64::from_le_bytes(std::array::from_fn(|index| digest[index]))
 }
 
 /// Builds the `ChunkDataAndLight` packet for one resident chunk.
@@ -693,5 +755,121 @@ mod tests {
                 assert_eq!(section.as_slice().len(), 2048);
             }
         }
+    }
+    #[test]
+    fn biome_seed_obfuscation_matches_original_server_jar_goldens() {
+        // Oracle invoked original Mojang 1.21.8 dnz.a(long), not a recreated
+        // formula. Provenance and runner are beside the committed fixture.
+        for line in include_str!("../tests/fixtures/biome_seed_goldens.tsv").lines() {
+            let (seed, expected) = line.split_once(' ').expect("golden seed/output");
+            let seed = seed.parse::<i64>().expect("numeric original seed");
+            let expected = expected.parse::<i64>().expect("numeric original hash");
+            assert_eq!(
+                obfuscate_seed(WorldSeed::new(seed)),
+                expected,
+                "seed {seed}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fresh_world_stores_chosen_seed_and_omission_reuses_it_after_restart() {
+        let temp = tempfile::tempdir().expect("world directory");
+        let config =
+            AppConfig::from_toml_str("[world]\nseed = -123456789\npreset = \"ferrumc_flat\"\n")
+                .expect("seed config")
+                .with_world_dir(Some(temp.path().to_path_buf()))
+                .expect("directory");
+        let setup = build_world(&config, ShardPos::new(0, 0))
+            .await
+            .expect("fresh seed world");
+        let identity = setup.persistence.binding().identity();
+        assert_eq!(identity.seed().value(), -123_456_789);
+        assert_eq!(setup.generator.identity(), identity);
+        assert_eq!(
+            setup.join_kit.join_game().world_state().hashed_seed(),
+            -3_252_562_806_299_980_166
+        );
+        let key = setup.persistence.binding().key();
+        assert_eq!(
+            setup
+                .persistence
+                .store()
+                .load_generation_identity(key)
+                .await
+                .expect("stored seed"),
+            Some(identity)
+        );
+        drop(setup);
+        let omitted = AppConfig::default()
+            .with_world_dir(Some(temp.path().to_path_buf()))
+            .expect("directory");
+        let restarted = build_world(&omitted, ShardPos::new(0, 0))
+            .await
+            .expect("omitted seed restart");
+        assert_eq!(restarted.persistence.binding().identity(), identity);
+        assert_eq!(
+            restarted.join_kit.join_game().world_state().hashed_seed(),
+            -3_252_562_806_299_980_166
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_seed_mismatch_refuses_before_import_and_keeps_identity() {
+        let store = InMemoryStore::with_generation_metadata();
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let original = GenerationIdentity::flat_overworld(WorldSeed::new(41));
+        store
+            .ensure_generation_identity(key, original)
+            .await
+            .expect("original identity");
+        let key_chunk = ChunkKey::new(key.world(), key.dimension(), ChunkPos::new(0, 0));
+        let record = ChunkRecord::new(
+            ferrumc_sim::CHUNK_SCHEMA_VERSION,
+            FlatWorldGenerator::with_seed(original.seed()).generate(key_chunk.pos()),
+        );
+        store
+            .save_chunk(key_chunk, record.clone())
+            .await
+            .expect("original chunk");
+        let config = AppConfig::from_toml_str(
+            "[world]\nseed = 42\nanvil_import_dir = \"/missing-before-mismatch\"\n",
+        )
+        .expect("mismatch config");
+        let error = reconcile_generation(&store, key, &config)
+            .await
+            .expect_err("explicit mismatch");
+        assert!(error
+            .to_string()
+            .contains("incompatible generation identity"));
+        assert_eq!(
+            store
+                .load_generation_identity(key)
+                .await
+                .expect("original identity retained"),
+            Some(original)
+        );
+        assert_eq!(
+            store
+                .load_chunk(key_chunk)
+                .await
+                .expect("original chunk retained"),
+            Some(record)
+        );
+    }
+
+    #[tokio::test]
+    async fn fresh_omission_explicitly_selects_flat_seed_zero() {
+        let setup = build_world(&AppConfig::default(), ShardPos::new(0, 0))
+            .await
+            .expect("fresh omitted world");
+        assert_eq!(
+            setup.persistence.binding().identity(),
+            GenerationIdentity::flat_overworld(WorldSeed::new(0))
+        );
+        assert_eq!(
+            setup.join_kit.join_game().world_state().hashed_seed(),
+            8_794_265_229_978_523_055
+        );
     }
 }

@@ -179,7 +179,8 @@ async fn edits_to_two_sections_on_separate_ticks_both_survive_a_restart() {
     // 2. Reopen the SAME store and reconstruct the chunk over a regenerated baseline.
     //    The overlay must carry BOTH edited sections (7 and 8) — the regression is a
     //    later flush overwriting the overlay with only section 8.
-    let store = RedbStore::open(temp.path().join("world.redb")).expect("reopen store");
+    let store = RedbStore::open_with_generation_metadata(temp.path().join("world.redb"))
+        .expect("reopen store");
     let key = ChunkKey::new(WORLD, DIMENSION, EDITED_CHUNK);
     let overlay = store
         .load_chunk_overlay(key)

@@ -132,7 +132,8 @@ async fn placed_block_survives_a_restart() {
 
     // 2. Reopen the SAME store directly and assert the placed block persisted as a
     //    chunk overlay (schema v3), reconstructed over a regenerated flat baseline.
-    let store = RedbStore::open(temp.path().join("world.redb")).expect("reopen store");
+    let store = RedbStore::open_with_generation_metadata(temp.path().join("world.redb"))
+        .expect("reopen store");
     let placed_chunk = ChunkPos::new(0, 0);
     let key = ChunkKey::new(WORLD, DIMENSION, placed_chunk);
     let overlay = store
@@ -188,7 +189,8 @@ async fn untouched_generated_chunks_persist_nothing() {
 
     // Every chunk in the (radius-1) spawn square was generated; none was edited,
     // so the overlay store must hold nothing for any of them.
-    let store = RedbStore::open(temp.path().join("world.redb")).expect("reopen store");
+    let store = RedbStore::open_with_generation_metadata(temp.path().join("world.redb"))
+        .expect("reopen store");
     for z in -1..=1 {
         for x in -1..=1 {
             let key = ChunkKey::new(WORLD, DIMENSION, ChunkPos::new(x, z));

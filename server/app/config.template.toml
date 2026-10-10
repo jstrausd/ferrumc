@@ -133,6 +133,14 @@
 # is the save/persistence location; `[world]` selects the initial content.
 [world]
 
+# Numeric signed64 seed and the currently implemented fixed flat preset.
+# Fresh omission explicitly selects seed0/ferrumc_flat; restart omission reuses
+# the stored identity. A different explicit seed refuses startup. This is not
+# natural Vanilla generation. Existing format3 worlds require the separate
+# offline `ferrumc migrate-generation --help` command; startup never migrates.
+# seed = 0
+# preset = "ferrumc_flat"
+
 # Optional path to a vanilla Anvil `region/` directory (the folder holding the
 # r.<x>.<z>.mca files). When set, every region file in it is imported into the
 # world store at startup, BEFORE the server accepts connections, so a prebuilt map

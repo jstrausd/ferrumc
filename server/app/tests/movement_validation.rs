@@ -570,7 +570,8 @@ fn hostile_movement_cannot_mutate_stream_sim_router_or_saved_state() {
         })
         .expect("hostile movement has no connection-side effect");
 
-    let store = RedbStore::open(&database_path).expect("open player store");
+    let store =
+        RedbStore::open_with_generation_metadata(&database_path).expect("open player store");
     let record = runtime
         .block_on(store.load_player(player))
         .expect("load player record")

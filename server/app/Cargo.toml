@@ -89,6 +89,8 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+# Original Minecraft biome-seed obfuscation uses SHA-256, not the raw world seed.
+sha2 = "0.10"
 # CLI arg parsing (--config/--port/--bind/--version/--help) for the ferrumc
 # binary, replacing the old argv[1]-as-config-path footgun.
 clap = { workspace = true }
@@ -123,9 +125,6 @@ ferrumc-testkit = { workspace = true }
 # Opens the test-local player table directly to preserve and inspect a malformed
 # backend record that the typed storage API correctly refuses to decode.
 redb = { workspace = true }
-# Hash the exact dynamic-library bytes copied into the strict plugin bundle used
-# by the production-socket trusted-native regression.
-sha2 = "0.10"
 
 [lints]
 workspace = true

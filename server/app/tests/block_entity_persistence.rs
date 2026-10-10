@@ -250,7 +250,8 @@ async fn sign_text_survives_a_restart() {
 
     // 2. Reopen the SAME store and assert the sign block-entity persisted into the
     //    chunk overlay (now schema v3) with its text, reconstructed over a baseline.
-    let store = RedbStore::open(temp.path().join("world.redb")).expect("reopen store");
+    let store = RedbStore::open_with_generation_metadata(temp.path().join("world.redb"))
+        .expect("reopen store");
     let key = ChunkKey::new(WORLD, DIMENSION, SIGN_CHUNK);
     let overlay = store
         .load_chunk_overlay(key)

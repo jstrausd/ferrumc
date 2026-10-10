@@ -12,7 +12,13 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
+use ferrumc_core::{DimensionId, WorldId};
+use ferrumc_storage::{
+    GenerationKey, GenerationMigrationPreparation, GenerationMigrationReport,
+    GenerationMigrationTable, LegacyGenerationDeclaration, RedbStore,
+};
+use std::fmt::Write as _;
 
 use crate::config::AppConfig;
 
@@ -46,9 +52,12 @@ const CONFIG_TEMPLATE: &str = include_str!("../config.template.toml");
     long_about = "FerrumC: a high-performance Minecraft Java 1.21.8 (protocol 772) server.\n\n\
                   Runs in offline mode by default. With no config file present, a commented \
                   config.toml is written next to it on first run and the server starts with \
-                  defaults — edit it and restart to customise. Set RUST_LOG=debug for verbose logs."
+                  defaults — edit it and restart to customise. Fresh worlds explicitly choose seed0 and ferrumc_flat; omitted settings reuse the stored identity on restart. Legacy format3 requires the explicit offline migrate-generation command. Set RUST_LOG=debug for verbose logs."
 )]
 pub struct Cli {
+    /// Explicit offline operations, dispatched before config bootstrap or networking.
+    #[command(subcommand)]
+    command: Option<OfflineCommand>,
     /// Path to the TOML config file. Falls back to `$FERRUMC_CONFIG`, then
     /// `./config.toml`. Written with commented defaults on first run if missing.
     #[arg(long, value_name = "PATH")]
@@ -63,7 +72,164 @@ pub struct Cli {
     pub bind: Option<SocketAddr>,
 }
 
+#[derive(Debug, Clone, Subcommand)]
+enum OfflineCommand {
+    /// Validate and explicitly migrate legacy `FerrumC` format 3 to format 4.
+    MigrateGeneration(GenerationMigrationArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+struct GenerationMigrationArgs {
+    /// Existing closed source world.redb; missing files are never created.
+    #[arg(long, value_name = "PATH")]
+    source: PathBuf,
+    /// New exclusive backup destination, or a hash-bound existing backup.
+    #[arg(long, value_name = "PATH", required_unless_present = "prepare_only")]
+    backup: Option<PathBuf>,
+    /// Complete legacy world:dimension scopes (numeric u32:u32), repeatable.
+    #[arg(long, value_name = "WORLD:DIMENSION", required = true, value_parser = parse_scope)]
+    scope: Vec<GenerationKey>,
+    /// Explicitly assigns Minecraft1.21.8 / `FerrumC` flat-v1 / Overworld / seed0.
+    #[arg(long, required = true)]
+    declare_legacy_flat_v1_seed_zero: bool,
+    /// Validate/report only; does not create a backup or migrate.
+    #[arg(long, conflicts_with_all = ["backup", "backup_sha256"])]
+    prepare_only: bool,
+    /// SHA256 recorded after the original backup close, required for reuse.
+    #[arg(long, value_name = "HEX", requires = "backup", value_parser = parse_sha256)]
+    backup_sha256: Option<[u8; 32]>,
+}
+
+fn parse_scope(value: &str) -> Result<GenerationKey, String> {
+    let (world, dimension) = value
+        .split_once(':')
+        .ok_or_else(|| "scope must be WORLD:DIMENSION".to_owned())?;
+    let world = world
+        .parse::<u32>()
+        .map_err(|_| "world must be an unsigned u32".to_owned())?;
+    let dimension = dimension
+        .parse::<u32>()
+        .map_err(|_| "dimension must be an unsigned u32".to_owned())?;
+    Ok(GenerationKey::new(
+        WorldId::new(world),
+        DimensionId::new(dimension),
+    ))
+}
+
+fn parse_sha256(value: &str) -> Result<[u8; 32], String> {
+    if value.len() != 64 || !value.is_ascii() {
+        return Err("SHA256 must contain exactly 64 hexadecimal ASCII digits".to_owned());
+    }
+    let mut result = [0; 32];
+    for (index, byte) in result.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .map_err(|_| "SHA256 contains a non-hexadecimal digit".to_owned())?;
+    }
+    Ok(result)
+}
+
+fn hex_sha256(bytes: &[u8; 32]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            let _ = write!(output, "{byte:02x}");
+            output
+        })
+}
+
+fn migration_report(report: &GenerationMigrationReport) -> String {
+    let mut output = format!(
+        "source={} format={} target={} file_bytes={} logical_bytes={} snapshot_sha256={}\nlegacy declaration: Minecraft1.21.8 FerrumC-flat-v1 Overworld seed0 (explicit assignment)\n",
+        report.source_path().display(), report.source_format(), report.target_format(),
+        report.source_file_len(), report.logical_bytes(), hex_sha256(report.snapshot_sha256()),
+    );
+    for scope in report.declaration().scopes() {
+        let _ = writeln!(
+            output,
+            "scope={}:{}",
+            scope.world().get(),
+            scope.dimension().get()
+        );
+    }
+    for table in [
+        GenerationMigrationTable::Metadata,
+        GenerationMigrationTable::Chunks,
+        GenerationMigrationTable::ChunkOverlays,
+        GenerationMigrationTable::Entities,
+        GenerationMigrationTable::Players,
+        GenerationMigrationTable::PluginValues,
+        GenerationMigrationTable::JournalRecords,
+        GenerationMigrationTable::JournalReceipts,
+        GenerationMigrationTable::GenerationIdentities,
+    ] {
+        let _ = writeln!(output, "{table:?}={}", report.records(table));
+    }
+    output
+}
+
+impl GenerationMigrationArgs {
+    fn run(self) -> anyhow::Result<String> {
+        let declaration = LegacyGenerationDeclaration::ferrumc_flat_v1_seed_zero(self.scope)?;
+        let preparation = RedbStore::prepare_generation_migration(&self.source, declaration)?;
+        match preparation {
+            GenerationMigrationPreparation::AlreadyCompatible(report) => Ok(format!(
+                "{}already compatible: complete format4 validated; no migration needed\n",
+                migration_report(&report)
+            )),
+            GenerationMigrationPreparation::Required(prepared) => {
+                let mut output = migration_report(prepared.report());
+                if self.prepare_only {
+                    output.push_str("prepare-only: validated; source remains format3\n");
+                    return Ok(output);
+                }
+                let backup_path = self
+                    .backup
+                    .ok_or_else(|| anyhow::anyhow!("migration requires an explicit backup path"))?;
+                let backed_up = match self.backup_sha256 {
+                    Some(expected) => prepared.verify_existing_backup(&backup_path, expected)?,
+                    None => prepared.create_backup(&backup_path)?,
+                };
+                let backup = backed_up.backup();
+                let _ = writeln!(
+                    output,
+                    "verified backup={} file_bytes={} file_sha256={} snapshot_sha256={}",
+                    backup.path().display(),
+                    backup.file_len(),
+                    hex_sha256(backup.file_sha256()),
+                    hex_sha256(backup.snapshot_sha256())
+                );
+                let outcome = backed_up.migrate().map_err(|error| {
+                    // If commit fails after a new backup was created, preserve
+                    // its verified hash in stderr so an explicit retry can use
+                    // --backup-sha256 rather than guessing or overwriting it.
+                    anyhow::anyhow!("{output}migration failed after verified backup: {error}")
+                })?;
+                let _ = writeln!(
+                    output,
+                    "migration committed: format{}; backup_sha256={}",
+                    outcome.report().target_format(),
+                    hex_sha256(outcome.backup().file_sha256())
+                );
+                Ok(output)
+            }
+        }
+    }
+}
+
 impl Cli {
+    /// Runs a requested offline operation on a blocking worker, without reading
+    /// or writing normal server configuration and without binding networking.
+    /// Returns `None` for normal server startup.
+    pub async fn run_offline(&self) -> anyhow::Result<Option<String>> {
+        let Some(OfflineCommand::MigrateGeneration(args)) = self.command.clone() else {
+            return Ok(None);
+        };
+        tokio::task::spawn_blocking(move || args.run())
+            .await
+            .map_err(|error| anyhow::anyhow!("offline migration task failed: {error}"))?
+            .map(Some)
+    }
+
     /// Resolves which config file to use.
     ///
     /// Precedence: the `--config` flag, then the `FERRUMC_CONFIG` environment

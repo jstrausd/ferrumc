@@ -11,6 +11,26 @@
 
 ## Crate-Specific
 
+- Production startup explicitly uses storage format4. One blocking opening task
+  constructs the shared backend; persisted generation identity is reconciled
+  and confirmed before Anvil import, spawn, player loading and client admission.
+  An omitted seed keeps the stored seed; a fresh omission explicitly chooses
+  FerrumC-flat-v1/Overworld/1.21.8/seed0. Explicit mismatch and malformed metadata
+  refuse startup without any world-bearing record change.
+- An App-opaque PersistenceTarget couples its private exact store Arc with the
+  immutable GenerationBinding and opaque verified token. Tick capture uses no
+  database read and starts only after bounded queue reservation; capture errors
+  retain dirty facts, journal and unassigned mutation IDs. Unload and final stop
+  use the same target. Worker validates metadata before every write/retry and
+  before empty durability acknowledgments; foreign overlay scope is refused.
+- JoinGame's biome hash uses the stored numeric seed and original Minecraft
+  SHA256/hashLong/asLong byte order, covered by actual original-JAR goldens.
+- Legacy format3 requires the explicit offline migrate-generation operation,
+  dispatched before config bootstrap or socket binding. Prepare/backup/migrate
+  run on a blocking worker. New backups are exclusive; reuse requires the
+  remembered physical SHA256 and full snapshot validation. No automatic seed
+  inference, repair, startup migration or backup overwrite is permitted.
+
 - Built-in demo plugins default to disabled, including when the TOML toggle is
   omitted. Explicit `builtin_plugins=true` enables their sample behavior
   (glass-to-tinted-glass replacement, bedrock denial, greeting/chat filter).

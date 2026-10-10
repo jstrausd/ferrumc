@@ -25,11 +25,13 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::MissedTickBehavior;
 
+use crate::persistence::PersistenceTarget;
 use ferrumc_core::{Result as ServerResult, ServerError};
 use ferrumc_observability::CounterRegistry;
+
 use ferrumc_storage::{
     BlockMutationLogRecord, ChunkKey, ChunkOverlayRecord, JournalAppendReceipt, JournalBatchId,
-    WorldStore, MAX_SAVE_BATCH,
+    MAX_SAVE_BATCH,
 };
 
 /// One unit of persistence work emitted by the driver at a flush point.
@@ -186,14 +188,14 @@ impl PendingStorage {
 /// flush timer.
 pub(crate) async fn run_storage_worker(
     mut rx: mpsc::Receiver<StorageFlushRequest>,
-    store: Arc<dyn WorldStore>,
+    target: PersistenceTarget,
     metrics: Arc<CounterRegistry>,
     tick_period: Duration,
     shutdown: watch::Sender<bool>,
 ) -> ServerResult<()> {
     run_storage_worker_with_policy(
         &mut rx,
-        store.as_ref(),
+        &target,
         metrics.as_ref(),
         tick_period,
         &shutdown,
@@ -204,7 +206,7 @@ pub(crate) async fn run_storage_worker(
 
 async fn run_storage_worker_with_policy(
     rx: &mut mpsc::Receiver<StorageFlushRequest>,
-    store: &dyn WorldStore,
+    target: &PersistenceTarget,
     metrics: &CounterRegistry,
     tick_period: Duration,
     shutdown: &watch::Sender<bool>,
@@ -234,7 +236,7 @@ async fn run_storage_worker_with_policy(
                     // everything still pending here.
                     if force_flush || pending.reached_threshold() {
                         if let Err(error) = flush_with_recovery(
-                            store,
+                            target,
                             metrics,
                             &mut pending,
                             ack,
@@ -250,7 +252,7 @@ async fn run_storage_worker_with_policy(
                     // The driver dropped its sender on shutdown: drain everything
                     // still pending so a graceful stop persists every edit, then exit.
                     let result = flush_with_recovery(
-                        store,
+                        target,
                         metrics,
                         &mut pending,
                         None,
@@ -265,7 +267,7 @@ async fn run_storage_worker_with_policy(
             }
             _ = flush_timer.tick() => {
                 if let Err(error) = flush_with_recovery(
-                    store,
+                    target,
                     metrics,
                     &mut pending,
                     None,
@@ -282,13 +284,13 @@ async fn run_storage_worker_with_policy(
 }
 
 async fn flush_with_recovery(
-    store: &dyn WorldStore,
+    target: &PersistenceTarget,
     metrics: &CounterRegistry,
     pending: &mut PendingStorage,
     ack: Option<oneshot::Sender<ServerResult<()>>>,
     retry_policy: RetryPolicy,
 ) -> ServerResult<()> {
-    let first_result = flush_once(store, metrics, pending).await;
+    let first_result = flush_once(target, metrics, pending).await;
     if let Some(ack) = ack {
         let _ = ack.send(first_result.clone());
     }
@@ -303,11 +305,11 @@ async fn flush_with_recovery(
         max_attempts = retry_policy.max_attempts,
         "storage flush failed; retaining batch for bounded retry"
     );
-    retry_pending(store, metrics, pending, first_error, retry_policy).await
+    retry_pending(target, metrics, pending, first_error, retry_policy).await
 }
 
 async fn retry_pending(
-    store: &dyn WorldStore,
+    target: &PersistenceTarget,
     metrics: &CounterRegistry,
     pending: &mut PendingStorage,
     mut last_error: ServerError,
@@ -322,7 +324,7 @@ async fn retry_pending(
             tokio::time::sleep(delay).await;
         }
         attempts = attempts.saturating_add(1);
-        match flush_once(store, metrics, pending).await {
+        match flush_once(target, metrics, pending).await {
             Ok(()) => return Ok(()),
             Err(error) => {
                 tracing::warn!(
@@ -342,16 +344,17 @@ async fn retry_pending(
 /// everything after it. Successful prefixes are removed only after the store
 /// confirms them.
 async fn flush_once(
-    store: &dyn WorldStore,
+    target: &PersistenceTarget,
     metrics: &CounterRegistry,
     pending: &mut PendingStorage,
 ) -> ServerResult<()> {
+    target.validate_write().await?;
     if pending.is_empty() {
         return Ok(());
     }
 
     let start = Instant::now();
-    let result = flush_inner(store, pending).await;
+    let result = flush_inner(target, pending).await;
 
     // `as u64`: a flush taking longer than ~584 million years would be required to
     // overflow, so the millisecond cast is effectively lossless.
@@ -359,7 +362,7 @@ async fn flush_once(
     result
 }
 
-async fn flush_inner(store: &dyn WorldStore, pending: &mut PendingStorage) -> ServerResult<()> {
+async fn flush_inner(target: &PersistenceTarget, pending: &mut PendingStorage) -> ServerResult<()> {
     while !pending.overlays.is_empty() {
         let take = pending.overlays.len().min(MAX_SAVE_BATCH);
         let committed_bytes = pending.overlays[..take]
@@ -367,8 +370,18 @@ async fn flush_inner(store: &dyn WorldStore, pending: &mut PendingStorage) -> Se
             .fold(0_usize, |bytes, (_, record)| {
                 bytes.saturating_add(record.encoded_len())
             });
+        for (key, _) in &pending.overlays[..take] {
+            if ferrumc_storage::GenerationKey::new(key.world(), key.dimension())
+                != target.binding().key()
+            {
+                return Err(ServerError::invalid_state(
+                    "storage overlay scope differs from the expected generation binding",
+                ));
+            }
+        }
         let batch = pending.overlays[..take].to_vec();
-        store.save_chunk_overlays(batch).await?;
+        target.validate_write().await?;
+        target.store().save_chunk_overlays(batch).await?;
         pending.overlay_bytes = pending
             .overlay_bytes
             .checked_sub(committed_bytes)
@@ -379,7 +392,9 @@ async fn flush_inner(store: &dyn WorldStore, pending: &mut PendingStorage) -> Se
     }
 
     while let Some(batch) = pending.mutation_batches.front().cloned() {
-        let receipt = store
+        target.validate_write().await?;
+        let receipt = target
+            .store()
             .append_block_mutation_batch(batch.batch_id, batch.records.clone())
             .await?;
         validate_receipt(&batch, receipt)?;
@@ -446,7 +461,7 @@ mod tests {
             .expect("test block is inside the chunk");
         chunk.mark_persist_dirty(block);
         (
-            ChunkKey::new(WorldId::new(1), DimensionId::new(2), pos),
+            ChunkKey::new(WorldId::new(0), DimensionId::new(0), pos),
             ChunkOverlayRecord::from_chunk(SchemaVersion::new(3), pos, &chunk, 7),
         )
     }
@@ -464,7 +479,7 @@ mod tests {
             chunk.mark_persist_dirty(block);
         }
         (
-            ChunkKey::new(WorldId::new(1), DimensionId::new(2), pos),
+            ChunkKey::new(WorldId::new(0), DimensionId::new(0), pos),
             ChunkOverlayRecord::try_from_chunk(SchemaVersion::new(3), pos, &chunk, 7)
                 .expect("bounded dense record"),
         )
@@ -485,16 +500,18 @@ mod tests {
         assert!(pending.reached_threshold());
         let bytes_before = pending.overlay_bytes;
         let count_before = pending.overlays.len();
-        let store = FaultInjectingStore::new();
+        let store = Arc::new(FaultInjectingStore::new());
+        let (target, _metadata) =
+            crate::persistence::fixtures::fault_target(Arc::clone(&store)).await;
         store
             .fail_next_before_commit()
             .expect("inject commit failure");
-        flush_inner(&store, &mut pending)
+        flush_inner(&target, &mut pending)
             .await
             .expect_err("failed write");
         assert_eq!(pending.overlay_bytes, bytes_before);
         assert_eq!(pending.overlays.len(), count_before);
-        flush_inner(&store, &mut pending)
+        flush_inner(&target, &mut pending)
             .await
             .expect("retry exact batch");
         assert!(pending.is_empty());
@@ -543,11 +560,12 @@ mod tests {
         shutdown: watch::Sender<bool>,
     ) -> tokio::task::JoinHandle<ServerResult<()>> {
         tokio::spawn(async move {
+            let (target, _metadata) = crate::persistence::fixtures::fault_target(store).await;
             let mut rx = rx;
             let metrics = CounterRegistry::new();
             run_storage_worker_with_policy(
                 &mut rx,
-                store.as_ref(),
+                &target,
                 &metrics,
                 Duration::from_secs(1),
                 &shutdown,
@@ -1060,5 +1078,100 @@ mod tests {
             Duration::from_millis(50)
         );
         assert_eq!(RetryPolicy::PRODUCTION.max_attempts, 3);
+    }
+    #[tokio::test]
+    async fn changed_descriptor_refuses_writes_and_empty_ack_barriers() {
+        use std::sync::atomic::Ordering;
+        for with_data in [false, true] {
+            let inner = Arc::new(FaultInjectingStore::new());
+            let (target, metadata) =
+                crate::persistence::fixtures::fault_target(Arc::clone(&inner)).await;
+            metadata.reject.store(true, Ordering::SeqCst);
+            let (tx, mut rx) = mpsc::channel(1);
+            let (shutdown, shutdown_rx) = watch::channel(false);
+            let worker = tokio::spawn(async move {
+                run_storage_worker_with_policy(
+                    &mut rx,
+                    &target,
+                    &CounterRegistry::new(),
+                    Duration::from_secs(1),
+                    &shutdown,
+                    TEST_RETRY_POLICY,
+                )
+                .await
+            });
+            let (ack, result) = oneshot::channel();
+            let mut request = StorageFlushRequest::new(
+                Vec::new(),
+                if with_data {
+                    vec![mutation(Tick::new(2))]
+                } else {
+                    Vec::new()
+                },
+            );
+            request.ack = Some(ack);
+            tx.send(request).await.expect("barrier accepted");
+            let error = result
+                .await
+                .expect("barrier answers")
+                .expect_err("changed descriptor refuses durability");
+            assert!(error.to_string().contains("generation binding rejected"));
+            worker
+                .await
+                .expect("worker task")
+                .expect_err("bounded metadata rejection is terminal");
+            assert!(*shutdown_rx.borrow());
+            assert_eq!(inner.attempted_state().expect("attempts").operations(), []);
+            assert_eq!(inner.snapshot().expect("snapshot").block_mutations(), []);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retained_retry_revalidates_binding_before_another_store_write() {
+        use std::sync::atomic::Ordering;
+        let inner = Arc::new(FaultInjectingStore::new());
+        inner.fail_next_before_commit().expect("first write fails");
+        let (target, metadata) =
+            crate::persistence::fixtures::fault_target(Arc::clone(&inner)).await;
+        let (tx, mut rx) = mpsc::channel(1);
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let policy = RetryPolicy {
+            max_attempts: 2,
+            base_delay: Duration::from_secs(10),
+        };
+        let worker = tokio::spawn(async move {
+            run_storage_worker_with_policy(
+                &mut rx,
+                &target,
+                &CounterRegistry::new(),
+                Duration::from_secs(60),
+                &shutdown,
+                policy,
+            )
+            .await
+        });
+        let (request, result) = acked_request(
+            JournalBatchId::from_bytes([0x91; 16]),
+            vec![mutation(Tick::new(2))],
+        );
+        tx.send(request).await.expect("request");
+        result
+            .await
+            .expect("first result")
+            .expect_err("first commit failed");
+        metadata.reject.store(true, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(10)).await;
+        let error = worker
+            .await
+            .expect("worker")
+            .expect_err("retry rejects changed descriptor");
+        assert!(error.to_string().contains("generation binding rejected"));
+        assert!(*shutdown_rx.borrow());
+        assert_eq!(
+            tokenized_attempts(&inner).len(),
+            1,
+            "retry must check metadata before a second write"
+        );
+        assert_eq!(inner.snapshot().expect("snapshot").block_mutations(), []);
     }
 }

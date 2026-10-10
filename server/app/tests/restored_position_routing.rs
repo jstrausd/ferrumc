@@ -21,6 +21,7 @@ use ferrumc_core::{GameMode, PlayerId};
 use ferrumc_math::Vec3;
 use ferrumc_observability::SnapshotPublisher;
 use ferrumc_proto::generated::play::{ClientboundPlayPacket, SetPlayerPositionAndRotation};
+use ferrumc_storage::WorldStore;
 use ferrumc_storage::{PlayerRecord, PlayerStore, RedbStore, SchemaVersion};
 
 use ferrumc_app::{AppConfig, RunningServer};
@@ -502,7 +503,7 @@ async fn restore_and_leave(
 
 /// Loads one durable player record after the app has released the database.
 fn load_player(runtime: &Runtime, database_path: &Path, player: PlayerId) -> PlayerRecord {
-    let store = RedbStore::open(database_path).expect("open player store");
+    let store = RedbStore::open_with_generation_metadata(database_path).expect("open player store");
     runtime
         .block_on(store.load_player(player))
         .expect("load player record")
@@ -594,7 +595,17 @@ fn out_of_range_record_recovers_at_spawn_and_stays_healed_after_restart() {
         serde_json::to_vec(&original_payload).expect("encode invalid-position fixture"),
     )
     .expect("bounded invalid-position fixture");
-    let store = RedbStore::open(&database_path).expect("open player store");
+    let store =
+        RedbStore::open_with_generation_metadata(&database_path).expect("open player store");
+    runtime
+        .block_on(store.ensure_generation_identity(
+            ferrumc_storage::GenerationKey::new(
+                ferrumc_core::WorldId::new(0),
+                ferrumc_core::DimensionId::new(0),
+            ),
+            ferrumc_world::GenerationIdentity::flat_overworld(ferrumc_world::WorldSeed::new(0)),
+        ))
+        .expect("initialize fixture identity");
     runtime
         .block_on(store.save_player(player, original))
         .expect("seed invalid-position record");

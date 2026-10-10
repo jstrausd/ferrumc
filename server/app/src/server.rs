@@ -349,7 +349,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     // The driver emits persistence work onto this bounded channel; the storage
     // worker owns the world store and commits it off the tick. The store is shared
     // (the driver also reads it on the chunk load-or-generate path).
-    let store = setup.store;
+    let persistence = setup.persistence;
     // The per-player record store (same backend as `store`), handed to every
     // connection task so it can load a joiner's saved state and save it on leave.
     let player_store = setup.player_store;
@@ -357,7 +357,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         mpsc::channel::<StorageFlushRequest>(STORAGE_FLUSH_CHANNEL_CAPACITY);
     let storage_worker_task = tokio::spawn(run_storage_worker(
         storage_rx,
-        Arc::clone(&store),
+        persistence.clone(),
         Arc::clone(&metrics),
         config.tick_period(),
         shutdown_tx.clone(),
@@ -366,7 +366,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     let driver_task = tokio::spawn(driver::run(
         router,
         setup.shard,
-        store,
+        persistence,
         setup.generator,
         shard_rx,
         commands_rx,
