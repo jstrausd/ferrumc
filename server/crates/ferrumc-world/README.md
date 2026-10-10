@@ -38,10 +38,16 @@ on any failure. Sign fields are likewise bounded without truncating UTF-8.
 `decode_block_entity` also reads the old unversioned grammar explicitly. Legacy
 chest records migrate to componentless stacks with their original item/count;
 old records cannot recover components that their writer never stored.
-`encode_block_entity` retains that legacy, lossy writer for existing storage
-callers. Adopting the new fallible codec in overlay capture and making overlay
-application atomic remain separate `ferrumc-storage` work; this world change
-alone does not activate chest component persistence in the running server.
+The production App/Sim/Storage path now uses the checked writer and checked
+overlay capture/application. A failed capture retains the selected dirty
+batch; a failed apply leaves its target unchanged. Storage also bounds the
+combined encoded entity tail to 2 MiB and each full-chunk/overlay record to
+3 MiB. These are encoded-byte caps, not decoded-heap or RSS guarantees.
+
+`encode_block_entity` retains the legacy, lossy writer for existing callers.
+The experimental multi-shard scheduler still uses that legacy capture path;
+it is not the production App path. Crash-atomic updates across player,
+overlay and journal records remain separate work.
 
 ## Invariants
 

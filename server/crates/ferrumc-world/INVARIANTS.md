@@ -63,10 +63,13 @@
   slots retain their item and count with an empty patch because no components
   were present on disk. Unknown schemas/types, invalid booleans, invalid legacy
   counts, truncation, and trailing bytes fail rather than being normalized.
-- `encode_block_entity` remains an explicitly lossy legacy compatibility seam
-  until the separate storage consumer adopts the checked writer. The new
-  world codec alone does not switch overlay capture or make its existing
-  skip-on-error application atomic; those are storage-owned integration work.
+- Production App/Sim/Storage capture uses the checked writer; storage owns
+  the 2 MiB aggregate encoded entity-tail and 3 MiB whole-record limits and
+  stages checked overlay application before replacing its target. A malformed
+  entity rejects the whole load rather than creating an empty container.
+- `encode_block_entity` remains an explicitly lossy writer for legacy callers.
+  The experimental scheduler still uses legacy capture; switching that path
+  and crash-atomic updates across player/overlay/journal records remain open.
 - Sign lines and colors have matching encode/decode caps. Checked encoding
   rejects oversized UTF-8 fields without splitting characters or truncating
   content.
