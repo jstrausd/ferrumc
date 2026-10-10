@@ -131,14 +131,14 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN und integriert `290e5343`: Debug/Release je188, drei zusätzliche unabhängige Debug-/Releaseprobes, strictchecks und29/29 Freezehashes grün. Frischer normal/-O Originalreexport bytegleich;17.213 tatsächliche JAR-Records. [Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md). Chunk-/Terrainconsumer bleiben offen. |
 | GEN-05.3 | `item_transfer_primitives`, Designreview Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Vollständiger konkreter NoiseChunkentwurf geprüft und intern freigegeben; Runtimeimplementierung begonnen. Originale Wrapperidentitäten, Arraydispatch/Interpolation, Preliminary Surface und Climate; explizite PaperBuild60-Endarithmetik im neuen Chunkpfad, bestehende .2-Vanillaverträge unverändert. Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
 | DUR-03.1 | `select_world_ticket`, Designreview Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Vollständiger Format6-/CAS-/Receiptentwurf geprüft und intern zur Runtimeimplementierung freigegeben. Scoped Player, monotone Revisionen/Tombstones, bounded Retryreceipts, ein echter joint redb-Commit und vereinheitlichte Memoryauthority; kein Onlineconsumer aktiviert. |
-| SRV-05.1 | `feature_catalog`, Designreview Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Konkreter Daten-/APIentwurf in Arbeit: alle968 normalen Rezepte, echte Builtin-Tags, komponententragende Resultate und Craftingreste. Nach Rootreview Runtimeimplementierung; Specials und Onlinecrafting folgen separat. |
+| SRV-05.1 | `feature_catalog`, Designreview Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Vollständiger Daten-/APIentwurf intern zur Runtimeimplementierung freigegeben: alle968 normalen Rezepte, echte Builtin-Tags, komponententragende Resultate und Craftingreste. Implementierung begonnen; Specials und Onlinecrafting folgen separat. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
 Aktuell arbeiten neben Root drei Agents parallel: `item_transfer_primitives`
 implementiert GEN-05.3 NoiseChunk/Interpolation, `select_world_ticket`
 implementiert [DUR-03.1](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md),
-`feature_catalog` konkretisiert die normale Rezeptimplementierung SRV-05.1.
-Die beiden Runtimeentwürfe sind vollständig durch Root geprüft und intern
+`feature_catalog` implementiert die normalen Rezepte SRV-05.1.
+Die drei Runtimeentwürfe sind vollständig durch Root geprüft und intern
 freigegeben; vorhandene Format-/Scalarverträge bleiben erhalten. Der
 Original-JAR-Oracleagent ist fertig. GEN-05.2 ist CLEAN auf `main`; nach .3
 folgen direkt Aquifer/Material/Ore und Biome/Surface/Bedrock bis zu echter
@@ -153,7 +153,7 @@ Der neuere Gesamtstand `83ea2c6d` mit SIM-03.3 ist ebenfalls vollständig grün:
 [Lauf38081893560](https://github.com/jstrausd/ferrumc/actions/runs/38081893560).
 Gesamt-CI für `34acc8e9`, einschließlich STORAGE-ENTITY001.2, ist erfolgreich:
 [Lauf38082651584](https://github.com/jstrausd/ferrumc/actions/runs/38082651584).
-Die neue Gesamt-CI für `290e5343`, einschließlich GEN-05.2, läuft:
+Die neue Gesamt-CI für `290e5343`, einschließlich GEN-05.2, ist erfolgreich:
 [Lauf38083747393](https://github.com/jstrausd/ferrumc/actions/runs/38083747393).
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein

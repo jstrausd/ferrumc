@@ -272,7 +272,7 @@ zusätzliche eigene Debug-/Releaseprobes grün; strict Clippy/Fmt grün.
 Root hat alle29 Main-/Snapshot-Freezehashes bestätigt und den vollständigen
 Originalcorpus frisch normal und unter Python `-O` reproduziert: Fixture und
 Manifest bytegleich,17.213 echte JAR-Records mit27 Original-Class-CodeSources.
-Die neue Gesamt-CI läuft als
+Die neue Gesamt-CI ist erfolgreich:
 [Lauf38083747393](https://github.com/jstrausd/ferrumc/actions/runs/38083747393).
 Diese Numericalabnahme erzeugt noch keine aktive natürliche Welt.
 
@@ -283,11 +283,14 @@ ProposalSHA `b8ffca1ceff5c84e9626e983ea70047f70d785805fb4f5d25a38ed8699a68794`)
 innerhalb der bestehenden Nutzerautorisierung intern zur Runtimeimplementierung
 freigegeben. Das ist keine Abnahme des noch ausstehenden Codes. Bestehende
 .2-Vanillaverträge und Format3/4/5-Migrationsverträge bleiben verbindlich.
+Auch der vollständige SRV-05.1-Rezeptentwurf wurde intern zur Umsetzung
+freigegeben, ProposalSHA
+`efa83f86ce89d74df143370210fd6ed88559efc581b3c4cd0eae0ba852b401fa`.
 
 ## Laufende Folgearbeit
 
 - `feature_catalog`: GEN-05.2-Codereview CLEAN abgeschlossen;
-  jetzt SRV-05.1 Daten-/APIentwurf für alle968 normalen Craftingrezepte,
+  jetzt freigegebene SRV-05.1-Runtime für alle968 normalen Craftingrezepte,
   Originaltags, komponententragende Resultate und Craftingreste.
 - `item_transfer_primitives`: GEN-05.3 NoiseChunk/Interpolation intern
   freigegeben, Runtimeimplementierung begonnen. Danach direkt Aquifers,
