@@ -23,6 +23,8 @@ Brigadier `Commands` packet); this crate produces and consumes those bytes.
   bounded storage codec that preserves the supported authoritative model.
 - `plan_split` / `plan_transfer` — checked pure separation and non-swapping
   partial transfer plans, preserving exact supported component representation.
+- `persisted_stack_size` / `same_stack_representation` — lossless borrowed
+  size/identity probes without encoding, allocating, or cloning components.
 
 ## Trusted vs untrusted slots
 
@@ -110,6 +112,23 @@ ceiling. The codec preserves the current model's signed damage values and
 present-air representation without adding gameplay normalization.
 
 ## Checked split and transfer plans
+
+`persisted_stack_size(&stack)` returns the exact whole schema-1 FCIS record
+size using persistence's existing allocation-free validation. Empty has seven
+bytes. Present counts occupy one fixed byte, so any valid present count has the
+same size for the same item and patch. This is an encoded size, not a slot
+payload size, decoded heap budget, or aggregate reservation.
+
+`same_stack_representation(&source, &destination)` validates source first and
+destination second before returning a boolean, even for incompatible/empty
+inputs. It ignores valid counts and compares item identity plus the transfer's
+exact ordered patch representation, including typed/opaque variants, removal
+order, NBT duplicates/order, and float bits. Two canonical empty stacks match;
+empty/present differ and present-air remains present. Invalid source/destination
+retain their existing `StackTransferError` classification; source error wins
+when both fail. Neither probe changes input representation or clones a tree.
+They do not resolve gameplay stackability, Paper component defaults, slot
+capacity, or permission to publish a durable change.
 
 `plan_split(source, requested)` returns a `StackTransferPlan` with the source
 remainder, a separated destination stack, and `moved()`. `plan_transfer(source,

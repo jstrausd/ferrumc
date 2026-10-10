@@ -170,6 +170,34 @@ pub fn plan_transfer(
     })
 }
 
+/// Compares two validated stack representations without allocation or encoding.
+///
+/// Both inputs pass the lossless persistence preflight before any equality
+/// decision, including for empty or incompatible stacks. Valid counts are then
+/// ignored: identity is the item id and exact ordered component representation,
+/// including typed/opaque variants, removals, NBT duplicates/order, and float
+/// bits. Identical NaN bits match; different payloads and signed zeros do not.
+/// Two canonical empty stacks match; empty versus present does not. Present
+/// air remains present. Inputs are neither normalized nor cloned.
+///
+/// This checks model representation, not Paper's resolved component equality,
+/// gameplay stackability, slot capacity, or permission to commit a transfer.
+///
+/// # Errors
+///
+/// Returns [`StackTransferError::InvalidSource`] or
+/// [`StackTransferError::InvalidDestination`] for the corresponding preflight
+/// failure. Source is checked first, so its error wins when both are invalid.
+pub fn same_stack_representation(
+    source: &ItemStack,
+    destination: &ItemStack,
+) -> Result<bool, StackTransferError> {
+    validate_authoritative_stack(source).map_err(StackTransferError::InvalidSource)?;
+    validate_authoritative_stack(destination).map_err(StackTransferError::InvalidDestination)?;
+    Ok(source.item() == destination.item()
+        && same_patch_representation(source.components(), destination.components()))
+}
+
 pub(crate) fn copy_at_count(
     stack: &ItemStack,
     count: u8,

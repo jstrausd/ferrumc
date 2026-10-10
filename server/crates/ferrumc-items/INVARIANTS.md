@@ -36,6 +36,16 @@
   including no-op and incompatible transfers. It shares persistence's
   allocation-free structural/count/encoded-byte preflight; preflight scratch
   uses a fixed 64-entry size array and a fixed 96-id set.
+- `persisted_stack_size` returns the exact complete schema-1 FCIS record size
+  through the existing lossless preflight, without encoding or allocation.
+  Empty has seven bytes; the present count has fixed width. This is not a
+  decoded heap allowance, slot size, or aggregate budget reservation.
+- `same_stack_representation` preflights source then destination before any
+  boolean decision, even for incompatible or empty inputs. It reuses the
+  transfer's exact ordered representation comparison without encoding,
+  allocation, normalization, or cloning. Valid counts are ignored only after
+  checking; two canonical empty match, empty/present differ, and present-air
+  remains present. Source failure wins when both inputs are invalid.
 - A transfer never swaps/overwrites incompatible stacks. Item id plus exact
   ordered model representation defines merge compatibility: variant tags,
   opaque bytes, removals, NBT compound duplicates/order and float bits survive.

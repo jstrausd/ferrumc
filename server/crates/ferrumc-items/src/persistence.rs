@@ -163,6 +163,24 @@ pub fn encode_persisted_stack(stack: &ItemStack) -> Result<Vec<u8>, ItemPersiste
     Ok(out)
 }
 
+/// Returns the exact complete schema-1 FCIS record size without allocating.
+///
+/// Uses the same lossless count, patch, encoded-byte, and NBT preflight as
+/// [`encode_persisted_stack`], without encoding or cloning component trees.
+/// Empty has seven bytes; a present stack's valid count occupies one fixed
+/// byte, so changing that count does not change its size. This is an encoded
+/// record size, not a slot size, decoded heap allowance, or aggregate reservation.
+/// Inputs and their representation remain unchanged.
+///
+/// # Errors
+///
+/// Returns the existing persistence preflight error for an invalid registry
+/// count, patch id/count/value, component byte budget, or NBT structure/limit.
+/// No count is clamped and no component is normalized or stripped.
+pub fn persisted_stack_size(stack: &ItemStack) -> Result<usize, ItemPersistenceError> {
+    authoritative_encoded_size(stack)
+}
+
 /// Validates the authoritative model without encoding, allocation, or changes.
 ///
 /// Transfer and persistence share these limits so neither clones an unchecked

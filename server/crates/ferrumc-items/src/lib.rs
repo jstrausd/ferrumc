@@ -28,10 +28,13 @@ pub use component::{ComponentPatch, ComponentTypeId, ComponentValue, OpaqueCompo
 pub use crafting::{CraftingError, CraftingGrid, NormalRecipe, NormalRecipes, SingleCraftPlan};
 pub use item_id::ItemId;
 pub use persistence::{
-    decode_persisted_stack, encode_persisted_stack, ItemPersistenceError, MAX_PERSISTED_STACK_BYTES,
+    decode_persisted_stack, encode_persisted_stack, persisted_stack_size, ItemPersistenceError,
+    MAX_PERSISTED_STACK_BYTES,
 };
 pub use stack::{left_click_exchange, ItemStack};
-pub use transfer::{plan_split, plan_transfer, StackTransferError, StackTransferPlan};
+pub use transfer::{
+    plan_split, plan_transfer, same_stack_representation, StackTransferError, StackTransferPlan,
+};
 pub use untrusted::{ItemValidationError, UntrustedItemStack};
 pub use wire::{
     encode_container_content_payload, MAX_COMPONENTS, MAX_COMPONENTS_TOTAL_BYTES,
