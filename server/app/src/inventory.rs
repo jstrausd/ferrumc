@@ -215,6 +215,59 @@ impl PlayerInventory {
         }
     }
 
+    /// Applies a normal left/right click to window 0 using only server state.
+    ///
+    /// The crafting result is read-only until recipes are implemented. Armor
+    /// removal is allowed, but armor insertion is refused until equippable and
+    /// binding rules are modeled. Main storage, hotbar, crafting inputs and
+    /// offhand accept ordinary exchanges. Spectators cannot mutate any slot.
+    /// Returns whether either stack changed, advancing the state ID once.
+    pub(crate) fn normal_click(
+        &mut self,
+        index: usize,
+        button: i8,
+    ) -> Result<bool, ItemValidationError> {
+        if self.game_mode == GameMode::Spectator
+            || index == 0
+            || !matches!(button, 0 | 1)
+            || (HELMET_SLOT..=BOOTS_SLOT).contains(&index) && self.carried.item().is_some()
+        {
+            return Ok(false);
+        }
+        let Some(slot) = self.slots.get_mut(index) else {
+            return Ok(false);
+        };
+        let changed = match (slot.item(), self.carried.item()) {
+            (None, None) => false,
+            (Some(slot_item), Some(cursor_item))
+                if slot_item == cursor_item && slot.components() == self.carried.components() =>
+            {
+                slot.count() < slot_item.max_stack()
+            }
+            _ => true,
+        };
+        if !changed {
+            return Ok(false);
+        }
+        if button == 0 {
+            left_click_exchange(slot, &mut self.carried);
+        } else {
+            right_click_exchange(slot, &mut self.carried)?;
+        }
+        self.bump_state_id();
+        Ok(true)
+    }
+
+    /// Returns unfinished crafting inputs to storage, retaining overflow in its
+    /// original input slot because ground-item drops are not implemented yet.
+    /// The result slot is never deposited: it has no authoritative recipe.
+    pub(crate) fn return_crafting_inputs(&mut self) {
+        for index in 1..=4 {
+            let input = std::mem::replace(&mut self.slots[index], ItemStack::empty());
+            self.slots[index] = self.deposit(input);
+        }
+    }
+
     /// Returns carried items to storage slots when possible, retaining overflow.
     /// Repeated attempts cannot create or discard a stack, including components.
     pub(crate) fn return_carried(&mut self) {
@@ -387,6 +440,55 @@ impl PlayerInventory {
     }
 }
 
+/// Copies a bounded stack count without discarding its component patch.
+fn with_count(stack: &ItemStack, count: u8) -> Result<ItemStack, ItemValidationError> {
+    let Some(item) = stack.item().filter(|_| count > 0) else {
+        return Ok(ItemStack::empty());
+    };
+    ItemStack::try_new(item, count, stack.components().clone())
+}
+
+/// Normal right-click: pick up the larger half, place one, or swap unlike items.
+/// Both new stacks are built before assigning so even a validation error cannot
+/// partially consume an item. Stack caps follow the existing registry contract.
+fn right_click_exchange(
+    slot: &mut ItemStack,
+    cursor: &mut ItemStack,
+) -> Result<(), ItemValidationError> {
+    let (next_slot, next_cursor) = match (slot.item(), cursor.item()) {
+        (Some(_), None) => {
+            let picked = slot.count().div_ceil(2);
+            (
+                with_count(slot, slot.count() - picked)?,
+                with_count(slot, picked)?,
+            )
+        }
+        (None, Some(_)) => (
+            with_count(cursor, 1)?,
+            with_count(cursor, cursor.count() - 1)?,
+        ),
+        (Some(slot_item), Some(cursor_item))
+            if slot_item == cursor_item && slot.components() == cursor.components() =>
+        {
+            if slot.count() >= slot_item.max_stack() {
+                return Ok(());
+            }
+            (
+                with_count(slot, slot.count() + 1)?,
+                with_count(cursor, cursor.count() - 1)?,
+            )
+        }
+        (None, None) => return Ok(()),
+        _ => {
+            std::mem::swap(slot, cursor);
+            return Ok(());
+        }
+    };
+    *slot = next_slot;
+    *cursor = next_cursor;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +500,139 @@ mod tests {
 
     fn item_id_at(inv: &PlayerInventory, slot: usize) -> Option<i32> {
         inv.slot(slot).and_then(ItemStack::item).map(ItemId::id)
+    }
+
+    fn named_stack(count: u8, name: &str) -> ItemStack {
+        let mut text = ferrumc_nbt::NbtCompound::new();
+        text.push("text", ferrumc_nbt::NbtTag::String(name.to_string()));
+        ItemStack::try_new(
+            ItemId::from_name("stone").expect("stone"),
+            count,
+            ComponentPatch::new(
+                vec![ferrumc_items::ComponentValue::CustomName(
+                    ferrumc_nbt::NbtTag::Compound(text),
+                )],
+                Vec::new(),
+            ),
+        )
+        .expect("valid stack")
+    }
+
+    #[test]
+    fn right_click_splits_every_stack_count_and_preserves_components() {
+        for count in 1..=64 {
+            let original = named_stack(count, "source");
+            let mut slot = original.clone();
+            let mut cursor = ItemStack::empty();
+            right_click_exchange(&mut slot, &mut cursor).expect("split");
+            assert_eq!(slot.count(), count / 2);
+            assert_eq!(cursor.count(), count.div_ceil(2));
+            assert_eq!(cursor.components(), original.components());
+            if slot.item().is_some() {
+                assert_eq!(slot.components(), original.components());
+            }
+            left_click_exchange(&mut slot, &mut cursor);
+            assert_eq!(slot, original);
+            assert_eq!(cursor, ItemStack::empty());
+        }
+    }
+
+    #[test]
+    fn right_click_places_one_and_caps_merges_without_losing_the_cursor() {
+        let original = named_stack(64, "source");
+        let mut cursor = original.clone();
+        let mut slot = ItemStack::empty();
+        for placed in 1..=64 {
+            right_click_exchange(&mut slot, &mut cursor).expect("place one");
+            assert_eq!(slot.count(), placed);
+            assert_eq!(cursor.count(), 64 - placed);
+            assert_eq!(slot.components(), original.components());
+            assert!(slot.is_valid() && cursor.is_valid());
+        }
+        let extra = named_stack(7, "source");
+        cursor = extra.clone();
+        right_click_exchange(&mut slot, &mut cursor).expect("full merge");
+        assert_eq!(slot, original);
+        assert_eq!(cursor, extra);
+    }
+
+    #[test]
+    fn both_buttons_swap_differing_components_instead_of_merging_them() {
+        for button in [0, 1] {
+            let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+            let first = named_stack(4, "first");
+            let second = named_stack(7, "second");
+            inventory.slots[9] = first.clone();
+            inventory.carried = second.clone();
+            let state = inventory.state_id();
+            assert!(inventory.normal_click(9, button).expect("swap"));
+            assert_eq!(inventory.slot(9), Some(&second));
+            assert_eq!(inventory.carried(), &first);
+            assert_eq!(inventory.state_id(), state + 1);
+        }
+    }
+
+    #[test]
+    fn normal_click_slot_roles_and_spectator_gate_are_conservative() {
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        let item = named_stack(3, "carried");
+        inventory.carried = item.clone();
+        for index in [
+            0,
+            HELMET_SLOT,
+            CHESTPLATE_SLOT,
+            LEGGINGS_SLOT,
+            BOOTS_SLOT,
+            SLOT_COUNT,
+        ] {
+            for button in [0, 1, -1, 2] {
+                assert!(!inventory.normal_click(index, button).expect("refusal"));
+                assert_eq!(inventory.carried(), &item);
+                assert_eq!(inventory.state_id(), INITIAL_STATE_ID);
+            }
+        }
+        assert!(inventory.normal_click(OFFHAND_SLOT, 1).expect("offhand"));
+        assert_eq!(inventory.slot(OFFHAND_SLOT).expect("offhand").count(), 1);
+        assert_eq!(inventory.carried().count(), 2);
+        inventory.carried = ItemStack::empty();
+        inventory.slots[HELMET_SLOT] = item.clone();
+        assert!(inventory
+            .normal_click(HELMET_SLOT, 0)
+            .expect("armor removal"));
+        assert_eq!(inventory.carried(), &item);
+        inventory.set_game_mode(GameMode::Spectator);
+        let before = inventory.slots.clone();
+        let state = inventory.state_id();
+        for index in 0..SLOT_COUNT {
+            for button in [0, 1] {
+                assert!(!inventory.normal_click(index, button).expect("spectator"));
+            }
+        }
+        assert_eq!(inventory.slots, before);
+        assert_eq!(inventory.carried(), &item);
+        assert_eq!(inventory.state_id(), state);
+    }
+
+    #[test]
+    fn crafting_inputs_return_once_and_full_bag_retains_every_component() {
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        let input = named_stack(7, "crafting");
+        inventory.slots[1] = input.clone();
+        inventory.return_crafting_inputs();
+        assert_eq!(inventory.slot(1), Some(&ItemStack::empty()));
+        assert_eq!(inventory.slot(MAIN_START), Some(&input));
+        let before = inventory.slots.clone();
+        inventory.return_crafting_inputs();
+        assert_eq!(inventory.slots, before);
+        for index in MAIN_START..PLAYER_WINDOW_END {
+            inventory.slots[index] = named_stack(64, "full");
+        }
+        inventory.slots[2] = input.clone();
+        let before = inventory.slots.clone();
+        for _ in 0..3 {
+            inventory.return_crafting_inputs();
+            assert_eq!(inventory.slots, before);
+        }
     }
 
     #[test]

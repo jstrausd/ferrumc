@@ -1480,7 +1480,9 @@ async fn handle_set_held_item(
 /// section can mutate. Stale
 /// IDs refresh the chest snapshot and resync the current window; clicks for an
 /// unknown window without an open chest resync the player inventory. The client's
-/// claimed result is never trusted. If the chest becomes inaccessible, exchanges
+/// claimed result is never trusted. With no chest open, window 0 accepts normal
+/// left/right clicks in writable player slots; result and armor insertion remain
+/// unavailable, and unsupported actions resync. If the chest becomes inaccessible, exchanges
 /// are refused and the last snapshot/cursor are retained; server-driven closure
 /// of that screen is not yet modelled.
 #[allow(clippy::too_many_arguments)] // one click step: identity + window state + I/O + trace
@@ -1497,15 +1499,28 @@ async fn handle_window_click(
     // Validate both IDs before parsing or mutating either chest or player slots.
     // Even window 0 is stale while a chest is the active container screen.
     if let Some(open) = window_state.open() {
-        if packet.window_id() == open.window_id() && packet.state_id() == open.state_id() {
+        if inventory.game_mode() != GameMode::Spectator
+            && packet.window_id() == open.window_id()
+            && packet.state_id() == open.state_id()
+        {
             apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
         } else {
             refresh_chest_window(ctx, player, window_state).await?;
         }
         return resync_chest_window(ctx, writer, inventory, window_state, debug, compression);
     }
-    // With no chest open, window 0 is the only authoritative window to resync.
-    inventory.bump_state_id();
+    // Window 0 exchanges use server-owned slots/cursor, never client hashes.
+    let changed_slot = apply_player_window_click(inventory, packet)?;
+    if changed_slot.is_none() {
+        inventory.bump_state_id();
+    }
+    if changed_slot.is_some_and(|index| inventory.is_equipment_slot(index)) {
+        let equipment = inventory.equipment_body()?;
+        ctx.commands
+            .send(SimCommand::SetEquipment { player, equipment })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+    }
     let payload = match inventory.container_content_payload() {
         Ok(payload) => payload,
         Err(err) => {
@@ -1524,6 +1539,25 @@ async fn handle_window_click(
             payload,
         )),
     )
+}
+
+/// Validates window/state and supports only ordinary left/right player clicks.
+/// A malformed prefix, unsupported mode, result/armor insertion, outside slot or
+/// spectator action leaves all items untouched for the caller's full resync.
+fn apply_player_window_click(
+    inventory: &mut PlayerInventory,
+    packet: &WindowClick,
+) -> Result<Option<usize>, ferrumc_items::ItemValidationError> {
+    if packet.window_id() != WINDOW_ID || packet.state_id() != inventory.state_id() {
+        return Ok(None);
+    }
+    let Some((slot, button, 0)) = decode_click_prefix(packet.rest()) else {
+        return Ok(None);
+    };
+    let Ok(index) = usize::try_from(slot) else {
+        return Ok(None);
+    };
+    Ok(inventory.normal_click(index, button)?.then_some(index))
 }
 
 /// Applies the SAFE subset of a click on the open chest window to the
@@ -1742,11 +1776,10 @@ async fn handle_close_container(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    if window_state
-        .open()
-        .is_none_or(|open| open.window_id() != packet.window_id())
-    {
-        return Ok(());
+    match window_state.open() {
+        Some(open) if open.window_id() == packet.window_id() => {}
+        None if packet.window_id() == WINDOW_ID => {}
+        _ => return Ok(()),
     }
     close_open_container(
         ctx,
@@ -1771,12 +1804,11 @@ async fn close_open_container(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    if window_state.take().is_none() {
-        return Ok(());
-    }
+    window_state.take();
     // The inventory owns the cursor independently of this retired screen. A full
     // bag retains its remainder for the next screen or durable leave snapshot.
     inventory.return_carried();
+    inventory.return_crafting_inputs();
     // Resync window 0 so the client sees both the returned cursor and any inventory
     // changes the session's player-slot clicks made.
     inventory.bump_state_id();
@@ -2353,6 +2385,124 @@ mod tests {
         };
         assert_eq!(reader.remaining(), 0);
         content
+    }
+
+    #[tokio::test]
+    async fn player_click_rejections_resync_without_mutating_or_broadcasting() {
+        let (commands, mut inbox) = mpsc::channel(1); // rejects send no simulation work
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        inventory.set_carried(container_probe_stack(5));
+        let mut windows = WindowState::new();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let claims = [
+            (99, 0, 9, 0, 0),   // wrong window
+            (0, -1, 9, 0, 0),   // stale state
+            (0, 0, -999, 0, 0), // outside drop unsupported
+            (0, 0, 46, 0, 0),   // outside player window
+            (0, 0, 9, 2, 0),    // unsupported middle button
+            (0, 0, 9, 0, 1),    // shift
+            (0, 0, 9, 0, 2),    // number key
+            (0, 0, 9, 0, 5),    // drag
+            (0, 0, 9, 0, 6),    // double click
+            (0, 0, 0, 0, 0),    // crafting result read-only
+            (0, 0, 5, 1, 0),    // armor insertion unsupported
+        ];
+        for (window, offset, slot, button, mode) in claims {
+            let before = inventory.container_content_payload().expect("before");
+            let state = inventory.state_id();
+            let mut rest = i16::try_from(slot)
+                .expect("slot fits")
+                .to_be_bytes()
+                .to_vec();
+            rest.push(u8::try_from(button).expect("button fits"));
+            write_var_int(&mut rest, mode);
+            // Fabricated claimed items are deliberately ignored.
+            rest.extend_from_slice(&[0xFF, 0x01, 0x7F]);
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::WindowClick(WindowClick::new(window, state + offset, rest)),
+            )
+            .await
+            .expect("reject resync");
+            assert_eq!(
+                inventory.container_content_payload().expect("after"),
+                before
+            );
+            let content = drain_container_resync(&mut writer);
+            assert_eq!(content.window_id(), 0);
+            assert_eq!(content.state_id(), state + 1);
+            assert_eq!(content.payload(), before);
+            assert!(inbox.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn player_equipment_click_broadcasts_the_new_authoritative_stack() {
+        let (commands, mut inbox) = mpsc::channel(1); // one equipment update per click
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        let mut windows = WindowState::new();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let state = inventory.state_id();
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            container_probe_click(0, state, 36),
+        )
+        .await
+        .expect("pickup held");
+        assert!(inventory.held().item().is_none());
+        assert_eq!(inventory.carried().count(), 64);
+        assert_eq!(drain_container_resync(&mut writer).state_id(), state + 1);
+        match inbox.try_recv().expect("equipment update") {
+            SimCommand::SetEquipment { equipment, .. } => {
+                assert_eq!(equipment, inventory.equipment_body().expect("equipment"));
+                assert_eq!(equipment[1], 0, "main hand cleared");
+            }
+            _ => panic!("unexpected command"),
+        }
+    }
+
+    #[tokio::test]
+    async fn window_zero_close_returns_cursor_and_unfinished_inputs_once() {
+        let (commands, mut inbox) = mpsc::channel(1); // one equipment refresh per close
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        inventory.set_creative_slot(1, container_probe_stack(7));
+        inventory.set_carried(container_probe_stack(5));
+        let mut windows = WindowState::new();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let mut after_first = None;
+        for _ in 0..2 {
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::CloseContainer(CloseContainer::new(0)),
+            )
+            .await
+            .expect("close player window");
+            let content = drain_container_resync(&mut writer);
+            if let Some(previous) = &after_first {
+                assert_eq!(content.payload(), previous);
+            } else {
+                after_first = Some(content.payload().to_vec());
+            }
+            assert!(inventory.carried().item().is_none());
+            assert!(inventory.slot(1).expect("crafting input").item().is_none());
+            assert_eq!(inventory.slot(9).expect("deposit").count(), 12);
+            assert!(matches!(
+                inbox.try_recv(),
+                Ok(SimCommand::SetEquipment { .. })
+            ));
+        }
     }
 
     #[tokio::test]

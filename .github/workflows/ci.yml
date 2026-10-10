@@ -119,3 +119,9 @@ jobs:
         env:
           MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
         run: node inventory-cursor.mjs
+
+      - name: Player inventory left and right clicks
+        working-directory: tests/blackbox
+        env:
+          MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
+        run: node player-inventory.mjs

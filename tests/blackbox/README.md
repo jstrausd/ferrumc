@@ -200,3 +200,12 @@ the current persistence codec stores componentless stacks. This gate exercises
 normal left-click exchanges only; it does not imply shift/drag/right-click or
 full vanilla inventory support. External-server mode is intentionally absent,
 because both process restarts are required assertions.
+
+## Player inventory normal clicks (I03)
+
+`MC_SERVER_BIN=/path/to/ferrumc node player-inventory.mjs` manages a fresh server
+with independent PrismarineJS clients. It checks named-stack split/merge/swap,
+place-one, offhand equipment broadcast, stale/unsupported actions, spectator
+refusal and conservative close behavior with full storage and crafting inputs.
+The client-supplied slot deltas are ignored in favor of server-owned state.
+This gate does not establish recipes, armor insertion or other click modes.

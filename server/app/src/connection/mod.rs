@@ -20,14 +20,15 @@ use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, watch};
-use tokio::time::timeout;
+use tokio::time::{sleep_until, timeout, Instant};
 
 use ferrumc_codec::BoundedString;
 use ferrumc_core::PlayerId;
 use ferrumc_math::Vec3;
 use ferrumc_net::{
-    CompressionState, ConnectionState, DecodeError, FrameDecodeError, InboundDecoder,
-    InboundPacket, OutboundEncoder, OutboundPacket,
+    CompressionState, ConnectionLiveness, ConnectionState, DecodeError, FrameDecodeError,
+    InboundDecoder, InboundPacket, LivenessConfig, LivenessTimeout, OutboundEncoder,
+    OutboundPacket, DEFAULT_FRAME_COMPLETION_TIMEOUT, DEFAULT_KEEP_ALIVE_TIMEOUT,
 };
 use ferrumc_observability::SessionDebug;
 use ferrumc_proto::generated::configuration::{
@@ -124,6 +125,8 @@ enum LoginPhase {
     /// Status branch (`next_state == 1`): awaiting the Status Request and Ping
     /// Request that drive the server-list exchange.
     Status,
+    /// Status response sent; only the terminal Ping Request may advance now.
+    AwaitingStatusPing,
     /// Awaiting Login Start.
     Login,
     /// Awaiting Login Acknowledged (Login Success already sent).
@@ -140,10 +143,95 @@ impl LoginPhase {
     fn connection_state(self) -> ConnectionState {
         match self {
             Self::Handshaking => ConnectionState::Handshaking,
-            Self::Status => ConnectionState::Status,
+            Self::Status | Self::AwaitingStatusPing => ConnectionState::Status,
             Self::Login | Self::AwaitingLoginAck => ConnectionState::Login,
             Self::AwaitingKnownPacks | Self::AwaitingFinishAck => ConnectionState::Configuration,
         }
+    }
+}
+
+/// Phase progress and frame completion have independent absolute clocks. The
+/// frame clock also covers ignored frames, whose completion cannot refresh the
+/// phase clock. The network policy owns the meaningful-progress contract.
+struct LoginLiveness {
+    progress: ConnectionLiveness,
+    frame_window: Duration,
+    partial_since: Option<Instant>,
+}
+
+impl LoginLiveness {
+    fn new(now: Instant, window: Duration) -> Self {
+        Self {
+            progress: ConnectionLiveness::new(
+                now,
+                LivenessConfig::new(window, window, DEFAULT_KEEP_ALIVE_TIMEOUT),
+            ),
+            frame_window: window.min(DEFAULT_FRAME_COMPLETION_TIMEOUT),
+            partial_since: None,
+        }
+    }
+
+    fn deadline(&self) -> anyhow::Result<(Instant, LivenessTimeout)> {
+        let progress = self
+            .progress
+            .next_deadline()
+            .ok_or_else(|| anyhow::anyhow!("login liveness is closed"))?;
+        if let Some(first_bytes) = self.partial_since {
+            let frame_at = first_bytes
+                .checked_add(self.frame_window)
+                .unwrap_or(first_bytes);
+            if frame_at < progress.at() {
+                return Ok((
+                    frame_at,
+                    LivenessTimeout::FrameCompletion {
+                        state: self.progress.state(),
+                    },
+                ));
+            }
+        }
+        Ok((progress.at(), progress.timeout()))
+    }
+
+    fn ensure_live(&self, now: Instant) -> anyhow::Result<()> {
+        let (at, reason) = self.deadline()?;
+        if now >= at {
+            return Err(reason.into());
+        }
+        Ok(())
+    }
+
+    fn partial_frame(&mut self, first_bytes: Instant) {
+        self.partial_since.get_or_insert(first_bytes);
+    }
+
+    fn complete_frame(&mut self) {
+        self.partial_since = None;
+    }
+
+    fn phase_advanced(&mut self, state: ConnectionState, now: Instant) -> anyhow::Result<()> {
+        self.progress.enter_state(state, now)?;
+        Ok(())
+    }
+}
+
+/// Only pre-Play work is canceled here: no player/world transaction has begun.
+/// Ready work and raw traffic never defeat shutdown or an expired deadline.
+async fn guard_login_work<T>(
+    deadline: (Instant, LivenessTimeout),
+    shutdown: &mut watch::Receiver<bool>,
+    work: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<Option<T>> {
+    if *shutdown.borrow() {
+        return Ok(None);
+    }
+    if Instant::now() >= deadline.0 {
+        return Err(deadline.1.into());
+    }
+    tokio::select! {
+        biased;
+        _ = shutdown.changed() => Ok(None),
+        () = sleep_until(deadline.0) => Err(deadline.1.into()),
+        result = work => result.map(Some),
     }
 }
 
@@ -389,8 +477,16 @@ async fn run_login(
     let mut phase = LoginPhase::Handshaking;
     let mut identity: Option<LoginIdentity> = None;
     let mut read_buf = [0u8; READ_CHUNK];
+    let mut liveness = LoginLiveness::new(Instant::now(), conn.ctx.io_timeout);
+    // A pipelined tail may have arrived before a slow server response. Retain
+    // that read timestamp instead of starting its partial-frame clock later.
+    let mut latest_read_at = Instant::now();
 
     loop {
+        if *shutdown.borrow() {
+            return Ok(None);
+        }
+        liveness.ensure_live(Instant::now())?;
         let state = phase.connection_state();
         // Drain everything buffered before blocking on another read so pipelined
         // frames progress without an extra round trip.
@@ -399,14 +495,34 @@ async fn run_login(
             .next_packet_compressed(state, &conn.compression)
         {
             Ok(Some(packet)) => {
+                // A bounded synchronous decode still consumes time; it cannot
+                // retire a partial-frame clock that expired while decoding.
+                liveness.ensure_live(Instant::now())?;
+                liveness.complete_frame();
                 // Record the inbound trace before dispatch. The login-phase
                 // decoder does not surface the body length, so size is `0`
                 // (documented); play-phase inbound records an exact size.
                 let trace =
                     observe::trace_inbound_login(&packet, &conn.compression, &conn.ctx.clock);
                 conn.debug.record_inbound(trace);
-                match advance(conn, &mut phase, &mut identity, &packet).await? {
-                    LoginProgress::Continue => continue,
+                let old_phase = phase;
+                let Some(progress) = guard_login_work(
+                    liveness.deadline()?,
+                    shutdown,
+                    advance(conn, &mut phase, &mut identity, &packet),
+                )
+                .await?
+                else {
+                    return Ok(None);
+                };
+                liveness.ensure_live(Instant::now())?;
+                match progress {
+                    LoginProgress::Continue => {
+                        if phase != old_phase {
+                            liveness.phase_advanced(phase.connection_state(), Instant::now())?;
+                        }
+                        continue;
+                    }
                     LoginProgress::Close => return Ok(None),
                     LoginProgress::Play => {
                         return identity.take().map(Some).ok_or_else(|| {
@@ -416,7 +532,11 @@ async fn run_login(
                 }
             }
             // Buffer holds no complete frame yet: fall through and read more.
-            Ok(None) => {}
+            Ok(None) => {
+                if conn.decoder.buffered_len() > 0 {
+                    liveness.partial_frame(latest_read_at);
+                }
+            }
             // A well-framed frame carrying an unmodelled packet id in login or
             // configuration is ignored, not fatal: the vanilla client sends
             // several configuration packets the slice does not react to (cookie
@@ -430,6 +550,8 @@ async fn run_login(
             Err(err) if is_ignorable_unknown_packet(state, &err) => {
                 tracing::debug!(?state, %err, "ignoring unmodelled serverbound packet");
                 conn.decoder.skip_frame(state)?;
+                liveness.ensure_live(Instant::now())?;
+                liveness.complete_frame();
                 continue;
             }
             Err(err) => {
@@ -444,17 +566,16 @@ async fn run_login(
             }
         }
 
-        let io_timeout = conn.ctx.io_timeout;
         match read_more(
             &mut conn.stream,
             &mut conn.decoder,
             &mut read_buf,
-            io_timeout,
+            liveness.deadline()?,
             shutdown,
         )
         .await?
         {
-            ReadOutcome::Data => {}
+            ReadOutcome::Data => latest_read_at = Instant::now(),
             ReadOutcome::Eof | ReadOutcome::Shutdown => return Ok(None),
         }
     }
@@ -514,9 +635,13 @@ async fn advance(
             // does not collide with the `&mut self` `send` needs.
             let ctx = conn.ctx;
             conn.send(&ctx.status_response).await?;
+            *phase = LoginPhase::AwaitingStatusPing;
             Ok(LoginProgress::Continue)
         }
-        (LoginPhase::Status, InboundPacket::Status(ServerboundStatusPacket::PingRequest(req))) => {
+        (
+            LoginPhase::AwaitingStatusPing,
+            InboundPacket::Status(ServerboundStatusPacket::PingRequest(req)),
+        ) => {
             // Echo the client's payload, then close: the status exchange ends here.
             let reply = OutboundPacket::Status(ClientboundStatusPacket::PongResponse(
                 PongResponse::new(req.payload()),
@@ -599,20 +724,22 @@ enum ReadOutcome {
     Shutdown,
 }
 
-/// Reads one chunk of bytes into the decoder, honouring shutdown and the timeout.
+/// Reads one chunk with the existing absolute phase/frame deadline. Partial
+/// bytes do not create another I/O window.
 async fn read_more(
     stream: &mut TcpStream,
     decoder: &mut InboundDecoder,
     read_buf: &mut [u8],
-    io_timeout: Duration,
+    deadline: (Instant, LivenessTimeout),
     shutdown: &mut watch::Receiver<bool>,
 ) -> anyhow::Result<ReadOutcome> {
-    let read = tokio::select! {
-        biased;
-        _ = shutdown.changed() => return Ok(ReadOutcome::Shutdown),
-        result = timeout(io_timeout, stream.read(read_buf)) => result,
+    let Some(n) = guard_login_work(deadline, shutdown, async {
+        stream.read(read_buf).await.map_err(Into::into)
+    })
+    .await?
+    else {
+        return Ok(ReadOutcome::Shutdown);
     };
-    let n = read.map_err(|_| anyhow::anyhow!("login socket read timed out"))??;
     if n == 0 {
         return Ok(ReadOutcome::Eof);
     }
@@ -639,6 +766,156 @@ async fn write_all(
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[tokio::test(start_paused = true)]
+    async fn partial_login_drips_keep_the_first_byte_deadline() {
+        let began = Instant::now();
+        let mut live = LoginLiveness::new(began, Duration::from_secs(30));
+        tokio::time::advance(Duration::from_secs(2)).await;
+        live.partial_frame(Instant::now());
+        for _ in 0..9 {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            live.partial_frame(Instant::now());
+            live.ensure_live(Instant::now())
+                .expect("before first frame expiry");
+        }
+        assert_eq!(
+            live.deadline().expect("active").0,
+            began + Duration::from_secs(12)
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let error = live.ensure_live(Instant::now()).expect_err("exact expiry");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&LivenessTimeout::FrameCompletion {
+                state: ConnectionState::Handshaking,
+            })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ignored_login_frames_clear_partial_work_without_extending_phase_progress() {
+        let began = Instant::now();
+        let mut live = LoginLiveness::new(began, Duration::from_secs(30));
+        live.phase_advanced(ConnectionState::Configuration, began)
+            .expect("configuration");
+        for _ in 0..29 {
+            tokio::time::advance(Duration::from_secs(1)).await;
+            live.partial_frame(Instant::now());
+            live.complete_frame();
+            live.ensure_live(Instant::now())
+                .expect("still before phase expiry");
+        }
+        assert_eq!(
+            live.deadline().expect("active").0,
+            began + Duration::from_secs(30)
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(
+            live.ensure_live(Instant::now())
+                .expect_err("unknown traffic is not progress")
+                .downcast_ref(),
+            Some(&LivenessTimeout::StateProgress {
+                state: ConnectionState::Configuration
+            }),
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn proper_login_phase_transition_grants_one_new_window() {
+        let began = Instant::now();
+        let mut live = LoginLiveness::new(began, Duration::from_secs(30));
+        tokio::time::advance(Duration::from_secs(29)).await;
+        live.complete_frame();
+        live.phase_advanced(ConnectionState::Login, Instant::now())
+            .expect("handshake completed");
+        assert_eq!(
+            live.deadline().expect("login").0,
+            began + Duration::from_secs(59)
+        );
+        tokio::time::advance(Duration::from_secs(30)).await;
+        assert!(live
+            .phase_advanced(ConnectionState::Configuration, Instant::now())
+            .is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pipelined_partial_tail_uses_arrival_time_before_server_response() {
+        let read_at = Instant::now();
+        let mut live = LoginLiveness::new(read_at, Duration::from_secs(30));
+        tokio::time::advance(Duration::from_secs(9)).await;
+        live.complete_frame();
+        live.phase_advanced(ConnectionState::Login, Instant::now())
+            .expect("response completed");
+        live.partial_frame(read_at);
+        assert_eq!(
+            live.deadline().expect("tail").0,
+            read_at + Duration::from_secs(10)
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(live.ensure_live(Instant::now()).is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn login_guard_prioritizes_exact_expiry_and_shutdown_over_ready_work() {
+        let began = Instant::now();
+        let live = LoginLiveness::new(began, Duration::from_secs(1));
+        let (stop, mut shutdown) = watch::channel(false);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let called = Cell::new(false);
+        let error = guard_login_work(live.deadline().expect("deadline"), &mut shutdown, async {
+            called.set(true);
+            Ok(())
+        })
+        .await
+        .expect_err("already expired");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&LivenessTimeout::StateProgress {
+                state: ConnectionState::Handshaking,
+            })
+        );
+        assert!(!called.get());
+        stop.send(true).expect("stop");
+        assert!(
+            guard_login_work(live.deadline().expect("deadline"), &mut shutdown, async {
+                panic!("stopped work must never run");
+                #[allow(unreachable_code)]
+                Ok(())
+            })
+            .await
+            .expect("clean shutdown")
+            .is_none()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_pre_play_output_is_canceled_at_the_phase_deadline() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        struct Dropped(Arc<AtomicBool>);
+        impl Drop for Dropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+        let live = LoginLiveness::new(Instant::now(), Duration::from_secs(1));
+        let (_stop, mut shutdown) = watch::channel(false);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = Dropped(Arc::clone(&dropped));
+        let deadline = live.deadline().expect("deadline");
+        let task = tokio::spawn(async move {
+            guard_login_work(deadline, &mut shutdown, async move {
+                let _marker = marker;
+                std::future::pending::<anyhow::Result<()>>().await
+            })
+            .await
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(task.await.expect("join").is_err());
+        assert!(dropped.load(Ordering::Relaxed));
+    }
 
     #[test]
     fn login_identity_is_derived_once() {

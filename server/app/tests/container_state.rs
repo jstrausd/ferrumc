@@ -9,10 +9,10 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use ferrumc_app::AppConfig;
-use ferrumc_codec::{write_var_int, BoundedReader};
+use ferrumc_codec::{write_var_int, BoundedReader, BoundedString};
 use ferrumc_items::ItemId;
 use ferrumc_proto::generated::play::{
-    ClientboundPlayPacket, CloseContainer, SetCreativeSlot, UseItemOn, WindowClick,
+    ChatCommand, ClientboundPlayPacket, CloseContainer, SetCreativeSlot, UseItemOn, WindowClick,
 };
 use ferrumc_proto::types::BlockPosition;
 use tokio::time::timeout;
@@ -243,7 +243,48 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
         );
     }
 
-    verify_close_ids(&mut viewer, viewer_view, stone).await
+    verify_close_ids(&mut viewer, viewer_view, stone).await?;
+    verify_spectator_chest(&mut actor, actor_view).await
+}
+
+async fn verify_spectator_chest(actor: &mut TestClient, mut view: Contents) -> anyhow::Result<()> {
+    // Refresh the screen, then place the remaining glass in its chest section.
+    actor
+        .send_frame(&click_body(view.window, view.state, 0, 1))
+        .await?;
+    view = next_contents(actor).await?;
+    view = click(actor, view.window, view.state, 28).await?;
+    view = click(actor, view.window, view.state, 0).await?;
+    anyhow::ensure!(
+        view.slots[0].is_some() && view.cursor.is_none(),
+        "seeded chest"
+    );
+    actor
+        .send_frame(&encode(|out| {
+            ChatCommand::new(BoundedString::new("gamemode 3".to_owned())?).encode(out)
+        }))
+        .await?;
+    loop {
+        if let ClientboundPlayPacket::GameEvent(event) = actor.next_play().await? {
+            if event.reason() == 3 {
+                anyhow::ensure!(
+                    event.value().to_bits() == 3.0_f32.to_bits(),
+                    "spectator mode"
+                );
+                break;
+            }
+        }
+    }
+    // Changing mode while a chest is open must protect both mutation branches.
+    for slot in [0, 54] {
+        let before = view;
+        view = click(actor, before.window, before.state, slot).await?;
+        anyhow::ensure!(
+            view.slots == before.slots && view.cursor == before.cursor,
+            "spectator exchanged an item in chest slot {slot}"
+        );
+    }
+    Ok(())
 }
 
 async fn verify_close_ids(
@@ -293,7 +334,7 @@ async fn verify_close_ids(
 #[tokio::test]
 async fn stale_clicks_and_closes_cannot_exchange_items_between_two_chest_viewers() {
     let config = AppConfig::from_toml_str(
-        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\n",
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\nops = [\"ChestActor\"]\n",
     )
     .expect("small deterministic server config");
     let server = ferrumc_app::run(&config).await.expect("server starts");

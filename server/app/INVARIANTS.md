@@ -11,6 +11,12 @@
 
 ## Crate-Specific
 
+- Pre-Play phase progress has an absolute configured I/O window. Only the
+  expected semantic phase transition renews it; raw bytes, ignored IDs and
+  repeated settings do not. Partial frames have a separate first-byte window
+  capped at 10 seconds and never renew on drips. Pipelined tails retain their
+  original read timestamp; pre-Play output and shutdown observe these deadlines.
+
 - Play has absolute inbound-progress and Keep Alive response deadlines. Chunk,
   output, and Keep Alive timer wakeups never extend them.
 - Each Play connection has at most one unanswered Keep Alive. Its exact ID must
@@ -34,6 +40,11 @@
   before a chest-slot exchange; conflicting views return the unchanged cursor
   and fresh contents. Resyncs include both slot sections and the cursor.
 - A Close Container packet may close only the window whose exact ID it carries.
+- Normal window-0 clicks derive changes exclusively from authoritative slots and
+  cursor. Spectators cannot exchange items in either section of an open chest
+  or in window 0. Crafting results remain read-only until recipes exist; armor
+  insertion waits for equippable rules. Full-bag crafting input overflow remains
+  in its input slot until ground-item handling exists.
 - The player inventory is the sole owner of the carried stack across every
   screen. Closing or disconnecting attempts a deposit and retains its overflow;
   window 0 and chest resyncs always encode that same stack.
