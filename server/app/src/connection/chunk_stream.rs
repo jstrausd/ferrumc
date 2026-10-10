@@ -52,9 +52,9 @@ pub(super) const STREAM_VIEW_DISTANCE_MAX: i32 = 32;
 /// Per-connection chunk-streaming state: which chunk the client is centred on and
 /// which chunk columns it currently holds.
 ///
-/// This is connection/session bookkeeping, not world state: it records what has
-/// been *sent to this client* so the stream never re-sends a chunk and knows what
-/// to unload. The authoritative chunk data still lives in the simulation shard;
+/// This is connection/session bookkeeping, not world state: it records owned
+/// player tickets before their packets are sent, so any later encoding or socket
+/// failure still releases exactly those tickets. The authoritative chunk data still lives in the simulation shard;
 /// the connection only ever asks the driver (via [`SimCommand::StreamChunks`]) to
 /// load-or-generate and never touches the chunk map itself.
 pub(super) struct ChunkStream {
@@ -62,9 +62,12 @@ pub(super) struct ChunkStream {
     center: ChunkPos,
     /// The square radius, in chunks, of the streamed view (already clamped).
     view_distance: i32,
-    /// The chunk columns the client currently holds (spawn batch + streamed in),
-    /// bounded by `(2 * view_distance + 1)^2`.
+    /// Actual acquired player tickets, recorded before packet encoding/flush.
+    /// Tail-dropped or unsent packets still require this owned ticket release.
     pub(super) loaded: BTreeSet<ChunkPos>,
+    /// A join request was admitted but its exact acquired batch is unconfirmed.
+    /// Failed handoff quarantines the UUID; guessed ticket releases are unsafe.
+    pub(super) ticket_handoff_pending: bool,
     /// The latest accepted client position or authoritative server teleport since
     /// the last fixed-cadence evaluation. Replacing this slot coalesces every
     /// superseded target into one streaming pass.
@@ -83,17 +86,25 @@ pub(super) struct ChunkStream {
 }
 
 impl ChunkStream {
-    /// Seeds the stream from the join kit: centred on the spawn chunk and already
-    /// holding the spawn-batch columns the client received at join.
-    pub(super) fn new(ctx: &ConnContext) -> Self {
+    /// Starts before join-kit acquisition with no owned player tickets.
+    pub(super) fn before_join(ctx: &ConnContext) -> Self {
         Self {
             center: ctx.join_kit.spawn_chunk(),
             view_distance: ctx.view_distance.clamp(0, STREAM_VIEW_DISTANCE_MAX),
-            loaded: ctx.join_kit.chunk_positions().collect(),
+            loaded: BTreeSet::new(),
+            ticket_handoff_pending: false,
             pending_position: None,
             last_position: None,
             last_move_block: None,
         }
+    }
+
+    /// Test fixture representing a client that has received the whole spawn kit.
+    #[cfg(test)]
+    pub(super) fn new(ctx: &ConnContext) -> Self {
+        let mut stream = Self::before_join(ctx);
+        stream.loaded = ctx.join_kit.chunk_positions().collect();
+        stream
     }
 
     /// Records the client's latest validated and admitted position.
@@ -719,6 +730,7 @@ mod tests {
         use ferrumc_math::ChunkPos;
 
         super::ChunkStream {
+            ticket_handoff_pending: false,
             center: ChunkPos::ORIGIN,
             view_distance: 0,
             loaded: BTreeSet::new(),

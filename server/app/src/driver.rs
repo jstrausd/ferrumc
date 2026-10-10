@@ -723,27 +723,7 @@ pub(crate) async fn run(
     loop {
         tokio::select! {
             biased;
-            _ = shutdown.changed() => {
-                // Reserve capacity before taking dirty state. If the worker has
-                // failed and closed the channel, the shard keeps its last
-                // recoverable copy and shutdown reports failure.
-                if has_pending_persistence(&shard) {
-                    if let Ok(permit) = storage_tx.reserve().await {
-                        if let Some(request) =
-                            build_flush_request(&mut shard, tick, &mut next_mutation_id)
-                        {
-                            permit.send(request);
-                        }
-                    } else {
-                        let error = storage_worker_closed("final shutdown flush");
-                        let _ = fatal_shutdown.send(true);
-                        return Err(error);
-                    }
-                }
-                // Dropping `storage_tx` (on return) closes the channel, which the
-                // storage worker observes to drain and exit.
-                break;
-            }
+            _ = shutdown.changed() => break,
             _ = ticker.tick() => {
                 run_tick(
                     &mut router,
@@ -789,6 +769,35 @@ pub(crate) async fn run(
         }
     }
 
+    // The last connection may drop the command sender before the server task
+    // signals the driver. Both stop causes must hand off off-tick edits before
+    // dropping `storage_tx`, whose closure lets the worker drain and exit.
+    if let Err(error) =
+        flush_pending_before_stop(&mut shard, &storage_tx, tick, &mut next_mutation_id).await
+    {
+        let _ = fatal_shutdown.send(true);
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Hands pending persistence to the bounded worker queue on either normal stop.
+/// Reserve before draining so a closed worker retains the recoverable shard copy.
+async fn flush_pending_before_stop(
+    shard: &mut SimShard,
+    storage_tx: &mpsc::Sender<StorageFlushRequest>,
+    tick: Tick,
+    next_mutation_id: &mut u64,
+) -> ServerResult<()> {
+    if has_pending_persistence(shard) {
+        let permit = storage_tx
+            .reserve()
+            .await
+            .map_err(|_| storage_worker_closed("final shutdown flush"))?;
+        if let Some(request) = build_flush_request(shard, tick, next_mutation_id) {
+            permit.send(request);
+        }
+    }
     Ok(())
 }
 
@@ -1746,10 +1755,15 @@ mod tests {
 
     use std::collections::BTreeMap;
     use std::num::NonZeroUsize;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use ferrumc_core::{GameMode, PlayerId, ServerError, Tick};
+    use ferrumc_items::{ComponentPatch, ItemId, ItemStack};
     use ferrumc_math::{BlockPos, ChunkPos, Cuboid, Direction, ShardPos, Vec3};
     use ferrumc_net::DisconnectReason;
+    use ferrumc_observability::{CounterRegistry, NetTelemetryHub, ServerClock, SnapshotPublisher};
+    use ferrumc_plugin_host::PluginHost;
     use ferrumc_proto::generated::play::ClientboundPlayPacket;
     use ferrumc_session::{NetEvent, PlayerSessionHandle, SessionError, SessionRouter};
     use ferrumc_sim::{
@@ -1757,9 +1771,10 @@ mod tests {
         TIME_DAY, TIME_NOON,
     };
     use ferrumc_storage::InMemoryStore;
-    use ferrumc_world::FlatWorldGenerator;
-    use tokio::sync::{mpsc, oneshot};
+    use ferrumc_world::{BlockEntity, ChestInventory, FlatWorldGenerator, CHEST_SLOTS};
+    use tokio::sync::{mpsc, oneshot, watch};
 
+    use crate::plugins::BlockEventDispatcher;
     use crate::storage_worker::StorageFlushRequest;
 
     use super::{
@@ -1891,6 +1906,159 @@ mod tests {
         assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
         assert!(shard.loaded_chunks().has_persist_dirty());
         (shard, pos)
+    }
+
+    /// Installs an initially clean chest so only the later off-tick click can
+    /// produce a persistence request in the real driver-loop regression.
+    async fn clean_chest_shard(store: &InMemoryStore, position: BlockPos) -> SimShard {
+        let mut shard = SimShard::new(ShardPos::new(0, 0));
+        shard
+            .loaded_chunks_mut()
+            .acquire(
+                store,
+                &FlatWorldGenerator::new(),
+                position.to_chunk_pos(),
+                ChunkTicket::of(TicketReason::Player),
+            )
+            .await
+            .expect("load deterministic chest chunk");
+        let chunk = shard
+            .loaded_chunks_mut()
+            .get_mut(position.to_chunk_pos())
+            .expect("chest chunk is resident");
+        chunk
+            .set_block(
+                position,
+                BlockStateId::new(
+                    ferrumc_registry::block_state::block_default_state("chest")
+                        .expect("chest in registry"),
+                ),
+            )
+            .expect("chest position is inside the loaded chunk");
+        chunk
+            .set_block_entity(position, BlockEntity::Chest(ChestInventory::new()))
+            .expect("install an empty chest");
+        assert!(!shard.loaded_chunks().has_persist_dirty());
+        shard
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn driver_normal_stop_flushes_off_tick_chest_edits_before_the_next_tick() {
+        for explicit_shutdown in [false, true] {
+            let position = BlockPos::new(8, 65, 8);
+            let store = Arc::new(InMemoryStore::new());
+            let shard = clean_chest_shard(&store, position).await;
+            let mut router = SessionRouter::new();
+            let shard_rx = router.register_shard(ShardPos::new(0, 0));
+            let player = PlayerId::offline("final-flush");
+            let _player_handle = router
+                .join_player(player, "final-flush", spawn())
+                .expect("join reaches the first tick");
+            // Single slots make command admission and final flush bounded; no
+            // background worker or second tick can mask the stop-path flush.
+            let (commands_tx, commands_rx) = mpsc::channel(1);
+            let (storage_tx, mut storage_rx) = mpsc::channel(1);
+            let (stop_tx, stop_rx) = watch::channel(false);
+            let (fatal_tx, fatal_rx) = watch::channel(false);
+            let clock = ServerClock::new();
+            let started_at = tokio::time::Instant::now();
+            let driver = tokio::spawn(super::run(
+                router,
+                shard,
+                store,
+                FlatWorldGenerator::new(),
+                shard_rx,
+                commands_rx,
+                Duration::from_secs(3600),
+                Arc::new(CounterRegistry::new()),
+                clock.clone(),
+                storage_tx,
+                SnapshotPublisher::default(),
+                Arc::new(NetTelemetryHub::new()),
+                Arc::new(BlockEventDispatcher::new(PluginHost::in_memory())),
+                fatal_tx,
+                stop_rx,
+            ));
+            let diamonds = ItemStack::try_new(
+                ItemId::from_name("diamond").expect("diamond in registry"),
+                13,
+                ComponentPatch::empty(),
+            )
+            .expect("valid diamond stack");
+            let (reply, received) = oneshot::channel();
+            commands_tx
+                .send(SimCommand::ContainerLeftClick {
+                    player,
+                    position,
+                    slot: 0,
+                    cursor: diamonds.clone(),
+                    expected_slots: vec![ItemStack::empty(); CHEST_SLOTS],
+                    reply,
+                })
+                .await
+                .expect("driver command admitted");
+            let (cursor, chest) = received
+                .await
+                .expect("driver completed the off-tick click")
+                .expect("reachable chest accepted the click");
+            assert_eq!(cursor, ItemStack::empty());
+            assert_eq!(chest[0], diamonds);
+            assert_eq!(clock.now(), Tick::new(1));
+            assert_eq!(tokio::time::Instant::now(), started_at);
+            assert!(storage_rx.try_recv().is_err());
+
+            if explicit_shutdown {
+                stop_tx.send(true).expect("signal explicit driver stop");
+            } else {
+                drop(commands_tx);
+            }
+            let request = storage_rx
+                .recv()
+                .await
+                .expect("normal driver stop emits the off-tick edit");
+            assert_eq!(request.overlays.len(), 1);
+            let (_, overlay) = &request.overlays[0];
+            assert_eq!(overlay.pos(), position.to_chunk_pos());
+            assert_eq!(overlay.updated_at_tick(), 1);
+            let mut restored = FlatWorldGenerator::new().generate(position.to_chunk_pos());
+            overlay
+                .apply_to_chunk(&mut restored)
+                .expect("restore final overlay");
+            let Some(BlockEntity::Chest(chest)) = restored.block_entity(position) else {
+                panic!("final overlay must contain the edited chest");
+            };
+            assert_eq!(chest.slots()[0], diamonds);
+            driver
+                .await
+                .expect("driver task joins")
+                .expect("normal stop succeeds");
+            assert!(!*fatal_rx.borrow());
+            assert_eq!(clock.now(), Tick::new(1));
+            assert_eq!(tokio::time::Instant::now(), started_at);
+            assert!(storage_rx.recv().await.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn final_stop_flush_closed_channel_retains_dirty_state_and_last_ticket() {
+        let (mut shard, pos) = dirty_player_chunk().await;
+        let (storage_tx, storage_rx) = mpsc::channel::<StorageFlushRequest>(1);
+        drop(storage_rx);
+        let mut next_mutation_id = 0;
+
+        let error = super::flush_pending_before_stop(
+            &mut shard,
+            &storage_tx,
+            Tick::new(1),
+            &mut next_mutation_id,
+        )
+        .await
+        .expect_err("a closed worker must reject the final flush");
+
+        assert!(matches!(error, ServerError::InvalidState(_)));
+        assert!(shard.loaded_chunks().has_persist_dirty());
+        assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
+        assert_eq!(next_mutation_id, 0);
     }
 
     #[tokio::test]

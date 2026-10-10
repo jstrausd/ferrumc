@@ -5,7 +5,7 @@
 use ferrumc_codec::{BoundedReader, BoundedString};
 use ferrumc_command::{CommandSource, CommandTree};
 use ferrumc_core::{GameMode, PlayerId, TextColor, TextComponent};
-use ferrumc_items::{left_click_exchange, ItemStack, UntrustedItemStack};
+use ferrumc_items::{ItemStack, UntrustedItemStack};
 use ferrumc_math::{BlockPos, Direction, Vec3, WorldIntent};
 use ferrumc_net::{CompressionState, ConnectionLiveness, ConnectionState, DecodeError, PlayWriter};
 use ferrumc_observability::{PacketState, SessionDebug};
@@ -264,19 +264,20 @@ pub(super) async fn handle_play_body(
                 .await
                 .map_err(|_| anyhow::anyhow!("simulation driver is gone"));
         }
-        // A tab-complete request is answered locally from the command tree; it
-        // never touches the simulation.
+        // Root literals are local; Java argument suggestions use the bounded actor.
         ServerboundPlayPacket::TabCompleteRequest(req) => {
-            handle_tab_complete(
+            return handle_tab_complete(
                 ctx,
                 player,
+                name,
                 writer,
                 req.transaction_id(),
                 req.text().as_str(),
                 debug,
                 compression,
-            );
-            return Ok(());
+                liveness.next_deadline(),
+            )
+            .await;
         }
         // Place-with-held-item: resolve the held hotbar stack to a block-state and
         // route a place carrying it (or just ack, on empty hand / non-placeable /
@@ -1563,7 +1564,7 @@ async fn apply_chest_window_click(
                 return Ok(());
             };
             let position = open.position();
-            let cursor = open.cursor().clone();
+            let cursor = inventory.carried().clone();
             let expected_slots = open.chest_slots().to_vec();
             let (reply_tx, reply_rx) = oneshot::channel();
             ctx.commands
@@ -1583,7 +1584,7 @@ async fn apply_chest_window_click(
             // An inaccessible chest has no fresh snapshot. Keep the last mirror
             // and cursor intact; automatic screen closure is not modelled yet.
             if let (Some((new_cursor, snapshot)), Some(open)) = (outcome, window_state.open_mut()) {
-                open.set_cursor(new_cursor);
+                inventory.set_carried(new_cursor);
                 open.set_chest_slots(snapshot);
             }
         }
@@ -1595,11 +1596,7 @@ async fn apply_chest_window_click(
             }
             // A player-inventory slot shown in the window: a purely local conserving
             // exchange against the connection-owned inventory and cursor.
-            if let (Some(open), Some(slot_ref)) =
-                (window_state.open_mut(), inventory.slot_mut(index))
-            {
-                left_click_exchange(slot_ref, open.cursor_mut());
-            }
+            inventory.exchange_carried(index);
         }
     }
     Ok(())
@@ -1763,9 +1760,8 @@ async fn handle_close_container(
     .await
 }
 
-/// Closes the open container (if any): deposits its carried item into the player
-/// inventory (never lost), resyncs window 0 (player-slot clicks during the session
-/// changed it), and refreshes the broadcast held item.
+/// Closes window metadata, attempts to return the player-owned carried stack,
+/// retains overflow, and resyncs window 0 and the broadcast equipment.
 async fn close_open_container(
     ctx: &ConnContext,
     player: PlayerId,
@@ -1775,20 +1771,12 @@ async fn close_open_container(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    let Some(open) = window_state.take() else {
+    if window_state.take().is_none() {
         return Ok(());
-    };
-    // Return the carried item to the inventory; a non-empty leftover means the
-    // inventory was full (logged, never silently dropped — extremely unlikely in
-    // the creative slice, which always has empty slots).
-    let leftover = inventory.deposit(open.cursor().clone());
-    if leftover.item().is_some() {
-        tracing::warn!(
-            ?player,
-            count = leftover.count(),
-            "inventory full on container close; carried items could not be returned"
-        );
     }
+    // The inventory owns the cursor independently of this retired screen. A full
+    // bag retains its remainder for the next screen or durable leave snapshot.
+    inventory.return_carried();
     // Resync window 0 so the client sees both the returned cursor and any inventory
     // changes the session's player-slot clicks made.
     inventory.bump_state_id();
@@ -1836,21 +1824,64 @@ async fn close_open_container(
 /// (matching the permission-filtered command graph the join kit declared), and
 /// argument *hints* such as `<mode: 0..3>` are dropped — only concrete literal
 /// completions are sent, never placeholder text the client would insert verbatim.
-/// The offsets are character positions (the units the protocol's Command
-/// Suggestions field expects), so a non-ASCII prefix is indexed correctly.
-fn handle_tab_complete(
+/// The offsets are UTF-16 code units (the positions used by Java and Brigadier), so a non-ASCII prefix is indexed correctly.
+#[allow(clippy::too_many_arguments)] // one requester context, absolute deadline and correlated reply
+async fn handle_tab_complete(
     ctx: &ConnContext,
     player: PlayerId,
+    name: &str,
     writer: &mut PlayWriter,
     transaction_id: i32,
     text: &str,
     debug: &mut SessionDebug,
     compression: &CompressionState,
-) {
+    deadline: Option<ferrumc_net::LivenessDeadline>,
+) -> anyhow::Result<()> {
     let level = ctx.policy.permission_level(player);
     let allowed = |node: &str| ctx.command_permission_allowed(player, node);
-    let (start, length, suggestions) =
+    let (start, length, mut suggestions) =
         tab_complete_reply(ctx.policy.command_tree(), level, &allowed, text);
+    if let Some((label, args)) = java_completion_input(text) {
+        if let Some(bridge) = &ctx.java_bridge {
+            if let Some(descriptor) = bridge.find_command(label) {
+                suggestions.clear();
+                if descriptor
+                    .permission
+                    .as_ref()
+                    .is_none_or(|node| ctx.policy.java_permission_allowed(player, node))
+                {
+                    match guard_java_completion(
+                        deadline,
+                        ctx.shutdown.clone(),
+                        bridge.complete(label, args, ctx.java_player(player, name)),
+                    )
+                    .await?
+                    {
+                        Ok(completion) => {
+                            suggestions = completion.suggestions;
+                            super::outbound::send_java_messages(
+                                ctx,
+                                writer,
+                                debug,
+                                compression,
+                                completion.messages,
+                            )?;
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, player = name, "Java completion failed");
+                            super::outbound::send_java_feedback(
+                                ctx,
+                                writer,
+                                debug,
+                                compression,
+                                &error.to_string(),
+                            )?;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let matches: Vec<CommandSuggestionMatch> = suggestions
         .into_iter()
@@ -1875,18 +1906,52 @@ fn handle_tab_complete(
         &ctx.clock,
         ClientboundPlayPacket::TabCompleteResponse(response),
     );
+    Ok(())
+}
+
+/// Completion changes no Rust inventory transaction, so cancellation may drop
+/// its RPC. The actor then kills/reaps active work before accepting a new ID.
+async fn guard_java_completion<T>(
+    deadline: Option<ferrumc_net::LivenessDeadline>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    work: impl std::future::Future<Output = Result<T, crate::java_bridge::BridgeError>>,
+) -> anyhow::Result<Result<T, crate::java_bridge::BridgeError>> {
+    anyhow::ensure!(
+        !*shutdown.borrow(),
+        "server shutdown during Java completion"
+    );
+    tokio::select! {
+        biased;
+        _ = shutdown.changed() => Err(anyhow::anyhow!("server shutdown during Java completion")),
+        result = super::play::guard_play_work(deadline, async { Ok(work.await) }) => result,
+    }
+}
+
+/// Matches Bukkit's literal-space split, retaining interior/trailing empty args.
+fn java_completion_input(text: &str) -> Option<(&str, Vec<String>)> {
+    let input = text.strip_prefix('/').unwrap_or(text);
+    let boundary = input.find(' ')?;
+    let label = &input[..boundary];
+    if label.is_empty() {
+        return None;
+    }
+    let args: Vec<String> = input[boundary + 1..]
+        .split(' ')
+        .take(65)
+        .map(str::to_owned)
+        .collect();
+    Some((label, args))
 }
 
 /// Computes the tab-complete reply for `text` at permission `level` against
 /// `tree`, gating permission-node-declared commands through `is_allowed`: the
-/// `(start, length)` *character* span of `text` the matches replace, and the
+/// `(start, length)` UTF-16 span of `text` the matches replace, and the
 /// filtered list of literal completions.
 ///
 /// Pure (no I/O), so it is unit-tested directly. The leading `/` is stripped
 /// before suggesting; `start`/`length` delimit the in-progress token (from after
-/// the last whitespace to the end of `text`). They are reported in character units
-/// — what the protocol's Command Suggestions field expects — so a non-ASCII prefix
-/// is indexed correctly rather than by UTF-8 byte offset. Matches are filtered to
+/// the last whitespace to the end of `text`). They are reported in UTF-16 code units, so non-BMP characters use the same
+/// indices as the Java client rather than UTF-8 bytes or Unicode scalar counts. Matches are filtered to
 /// the literals the player's `level` and granted permission nodes allow (the
 /// declared graph is filtered the same way), and argument *hints* (which begin with
 /// `<`) are dropped so the client is never sent placeholder text to insert verbatim.
@@ -1898,18 +1963,12 @@ fn tab_complete_reply(
 ) -> (usize, usize, Vec<String>) {
     let input = text.strip_prefix('/').unwrap_or(text);
     let offset = text.len() - input.len();
-    // Byte index in `input` just past the last whitespace char (the token start).
-    // Stepping by the whitespace char's UTF-8 width (not a bare `+ 1`) keeps the
-    // index on a char boundary even for a multi-byte whitespace char, so the slices
-    // below never panic on hostile input.
-    let token_start = input.rfind(char::is_whitespace).map_or(0, |idx| {
-        idx + input[idx..].chars().next().map_or(1, char::len_utf8)
-    });
+    // Bukkit and Brigadier separate argument tokens with a literal ASCII space.
+    let token_start = input.rfind(' ').map_or(0, |idx| idx + 1);
     let start_bytes = offset + token_start;
-    // The protocol carries start/length as character positions, so convert the byte
-    // offsets to char counts; for ASCII (the common case) the two coincide.
-    let start = text[..start_bytes].chars().count();
-    let length = text[start_bytes..].chars().count();
+    // Brigadier ranges use Java UTF-16 indices, including surrogate pairs.
+    let start = text[..start_bytes].encode_utf16().count();
+    let length = text[start_bytes..].encode_utf16().count();
 
     let graph = tree.to_brigadier(level, is_allowed);
     let allowed: Vec<&str> = graph
@@ -2197,6 +2256,7 @@ mod tests {
             .resolve(Path::new("."))
             .expect("resolve default access policy");
         ConnContext {
+            shutdown: tokio::sync::watch::channel(false).1,
             limits: ConnectionLimits::default(),
             io_timeout: config.io_timeout(),
             compression_threshold: config.compression_threshold(),
@@ -2206,6 +2266,9 @@ mod tests {
             chunk_stream_interval: config.chunk_stream_interval(),
             commands,
             player_store: setup.player_store,
+            player_admissions: crate::player_admission::PlayerAdmissions::new(
+                config.max_connections(),
+            ),
             policy: Arc::new(policy),
             block_events: Arc::new(BlockEventDispatcher::new(host)),
             java_bridge: None,
@@ -2318,16 +2381,13 @@ mod tests {
             for (window_id, state_id) in [(1, 0), (1, 2), (1, -1), (2, 1), (0, 1)] {
                 let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
                 *inventory.slot_mut(9).expect("main slot") = container_probe_stack(4);
-                let inventory_before = inventory.container_content_payload().expect("inventory");
                 let mut windows = WindowState::new();
                 windows.open_chest(
                     BlockPos::new(8, 65, 8),
                     vec![ItemStack::empty(); CHEST_SLOTS],
                 );
-                windows
-                    .open_mut()
-                    .expect("open chest")
-                    .set_cursor(container_probe_stack(5));
+                inventory.set_carried(container_probe_stack(5));
+                let inventory_before = inventory.container_content_payload().expect("inventory");
                 let mut writer = PlayWriter::with_defaults(ctx.limits);
                 handle_container_packet(
                     &ctx,
@@ -2343,7 +2403,7 @@ mod tests {
                     inventory_before
                 );
                 let open = windows.open().expect("same window stays open");
-                assert_eq!(open.cursor(), &container_probe_stack(5));
+                assert_eq!(inventory.carried(), &container_probe_stack(5));
                 assert_eq!(open.chest_slots(), fresh);
                 let content = drain_container_resync(&mut writer);
                 assert_eq!((content.window_id(), content.state_id()), (1, 2));
@@ -2385,10 +2445,7 @@ mod tests {
                 BlockPos::new(8, 65, 8),
                 vec![ItemStack::empty(); CHEST_SLOTS],
             );
-            windows
-                .open_mut()
-                .expect("open chest")
-                .set_cursor(container_probe_stack(5));
+            inventory.set_carried(container_probe_stack(5));
             let mut writer = PlayWriter::with_defaults(ctx.limits);
             handle_container_packet(
                 &ctx,
@@ -2399,12 +2456,15 @@ mod tests {
             )
             .await
             .expect("current click handled");
-            let open = windows.open().expect("window stays open");
+            assert!(windows.open().is_some(), "window stays open");
             assert_eq!(
                 inventory.slot(9).expect("main slot").count(),
                 if conflicting_view { 4 } else { 9 }
             );
-            assert_eq!(open.cursor().count(), if conflicting_view { 5 } else { 0 });
+            assert_eq!(
+                inventory.carried().count(),
+                if conflicting_view { 5 } else { 0 }
+            );
             assert_eq!(drain_container_resync(&mut writer).window_id(), 1);
             probe.await.expect("refresh probe finished");
         }
@@ -2447,7 +2507,6 @@ mod tests {
         let (commands, mut inbox) = mpsc::channel(1);
         let ctx = handler_context(commands, PluginHost::in_memory()).await;
         let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
-        let inventory_before = inventory.container_content_payload().expect("inventory");
         let mut windows = WindowState::new();
         windows.open_chest(
             BlockPos::new(8, 65, 8),
@@ -2459,10 +2518,8 @@ mod tests {
             vec![ItemStack::empty(); CHEST_SLOTS],
         );
         assert_eq!(current, 2);
-        windows
-            .open_mut()
-            .expect("new chest")
-            .set_cursor(container_probe_stack(5));
+        inventory.set_carried(container_probe_stack(5));
+        let inventory_before = inventory.container_content_payload().expect("inventory");
         let mut writer = PlayWriter::with_defaults(ctx.limits);
         for wrong_id in [0, 1, 3] {
             handle_container_packet(
@@ -2474,10 +2531,7 @@ mod tests {
             )
             .await
             .expect("stale close is harmless");
-            assert_eq!(
-                windows.open().expect("new chest retained").cursor(),
-                &container_probe_stack(5)
-            );
+            assert_eq!(inventory.carried(), &container_probe_stack(5));
             assert_eq!(
                 inventory.container_content_payload().expect("inventory"),
                 inventory_before
@@ -2488,6 +2542,98 @@ mod tests {
                 "wrong close never reaches the driver"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn full_bag_close_duplicate_and_replacement_keep_one_player_owned_cursor() {
+        use ferrumc_world::CHEST_SLOTS;
+
+        let (commands, mut inbox) = mpsc::channel(1); // exactly one equipment refresh
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        for index in crate::inventory::MAIN_START..crate::inventory::PLAYER_WINDOW_END {
+            inventory.set_creative_slot(index, container_probe_stack(64));
+        }
+        let carried = container_probe_stack(7);
+        inventory.set_carried(carried.clone());
+        let slots_before = (0..crate::inventory::SLOT_COUNT)
+            .map(|index| inventory.slot(index).expect("slot").clone())
+            .collect::<Vec<_>>();
+        let mut windows = WindowState::new();
+        let old = windows.open_chest(
+            BlockPos::new(8, 65, 8),
+            vec![ItemStack::empty(); CHEST_SLOTS],
+        );
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            ServerboundPlayPacket::CloseContainer(CloseContainer::new(old)),
+        )
+        .await
+        .expect("close");
+        assert!(windows.open().is_none());
+        assert_eq!(inventory.carried(), &carried);
+        assert_eq!(
+            (0..crate::inventory::SLOT_COUNT)
+                .map(|index| inventory.slot(index).expect("slot").clone())
+                .collect::<Vec<_>>(),
+            slots_before
+        );
+        let content = drain_container_resync(&mut writer);
+        assert_eq!(content.window_id(), 0);
+        assert_eq!(
+            content.payload(),
+            inventory
+                .container_content_payload()
+                .expect("window0 payload")
+        );
+        assert!(matches!(
+            inbox.try_recv().expect("equipment update"),
+            SimCommand::SetEquipment { .. }
+        ));
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            ServerboundPlayPacket::CloseContainer(CloseContainer::new(old)),
+        )
+        .await
+        .expect("duplicate close");
+        assert_eq!(writer.total_queued(), 0);
+        assert!(inbox.try_recv().is_err());
+        let replacement = windows.open_chest(
+            BlockPos::new(9, 65, 8),
+            vec![ItemStack::empty(); CHEST_SLOTS],
+        );
+        assert_ne!(old, replacement);
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            ServerboundPlayPacket::CloseContainer(CloseContainer::new(old)),
+        )
+        .await
+        .expect("stale old close");
+        assert_eq!(
+            windows.open().expect("new window retained").window_id(),
+            replacement
+        );
+        assert_eq!(inventory.carried(), &carried);
+        assert_eq!(writer.total_queued(), 0);
+        assert!(inbox.try_recv().is_err());
+        let mut carried_bytes = Vec::new();
+        carried.encode_slot(&mut carried_bytes).expect("cursor");
+        assert!(windows
+            .open()
+            .expect("new window")
+            .content_payload(&inventory)
+            .expect("content")
+            .ends_with(&carried_bytes));
     }
 
     /// Builds the real handler context around a bounded command spy and a
@@ -3248,6 +3394,125 @@ mod tests {
         command_task
             .await
             .expect("bounded placement command spy shuts down");
+    }
+
+    #[test]
+    fn java_completion_keeps_trailing_empty_argument_and_bounded_token_count() {
+        assert_eq!(super::java_completion_input("/bfixture"), None);
+        assert_eq!(super::java_completion_input("/ "), None);
+        assert_eq!(
+            super::java_completion_input("/BFIXTURE probe  "),
+            Some((
+                "BFIXTURE",
+                vec!["probe".to_owned(), String::new(), String::new()]
+            )),
+        );
+        assert_eq!(super::java_completion_input("/bfixture\targ"), None);
+        assert_eq!(
+            super::java_completion_input("/bfixture \u{2003}\t"),
+            Some(("bfixture", vec!["\u{2003}\t".to_owned()]))
+        );
+        assert_eq!(
+            super::java_completion_input("/bridgefixture:bfixture Grüße 🌍"),
+            Some((
+                "bridgefixture:bfixture",
+                vec!["Grüße".to_owned(), "🌍".to_owned()]
+            )),
+        );
+        let hostile = format!("/bfixture {}", "x ".repeat(1000));
+        assert_eq!(
+            super::java_completion_input(&hostile)
+                .expect("arguments")
+                .1
+                .len(),
+            65
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn java_completion_cancels_at_the_exact_outstanding_keep_alive_deadline() {
+        use ferrumc_net::LivenessTimeout;
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+        use tokio::time::{advance, Instant};
+
+        struct DropFlag(Arc<AtomicBool>);
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Relaxed);
+            }
+        }
+        let mut liveness =
+            super::super::play::play_liveness(Instant::now(), Duration::from_secs(30))
+                .expect("Play tracker");
+        liveness
+            .keep_alive_sent(77, Instant::now())
+            .expect("request sent");
+        let (_signal, shutdown) = tokio::sync::watch::channel(false);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let marker = DropFlag(Arc::clone(&dropped));
+        let task = tokio::spawn(super::guard_java_completion(
+            liveness.next_deadline(),
+            shutdown,
+            async move {
+                let _marker = marker;
+                std::future::pending::<Result<(), crate::java_bridge::BridgeError>>().await
+            },
+        ));
+        tokio::task::yield_now().await;
+        advance(Duration::from_secs(14)).await;
+        assert!(!task.is_finished());
+        advance(Duration::from_secs(1)).await;
+        let error = task
+            .await
+            .expect("guard finished")
+            .expect_err("response deadline");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&LivenessTimeout::KeepAlive { id: 77 })
+        );
+        assert!(
+            dropped.load(Ordering::Relaxed),
+            "RPC was cancelled at the deadline"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn java_completion_observes_shutdown_and_preserves_remote_errors() {
+        use std::time::Duration;
+        use tokio::time::Instant;
+        let liveness = super::super::play::play_liveness(Instant::now(), Duration::from_secs(30))
+            .expect("Play tracker");
+        let (signal, shutdown) = tokio::sync::watch::channel(false);
+        let remote = crate::java_bridge::BridgeError::Remote("completer failed".to_owned());
+        let result = super::guard_java_completion(
+            liveness.next_deadline(),
+            shutdown.clone(),
+            std::future::ready(Err::<(), _>(remote.clone())),
+        )
+        .await
+        .expect("recoverable callback result");
+        assert_eq!(result.expect_err("remote error"), remote);
+        let task = tokio::spawn(super::guard_java_completion(
+            liveness.next_deadline(),
+            shutdown,
+            std::future::pending::<Result<(), crate::java_bridge::BridgeError>>(),
+        ));
+        tokio::task::yield_now().await;
+        signal.send(true).expect("server shutdown");
+        assert!(task
+            .await
+            .expect("guard finished")
+            .expect_err("cancelled")
+            .to_string()
+            .contains("server shutdown"));
+    }
+
+    #[test]
+    fn tab_complete_offsets_match_javas_utf16_cursor_positions() {
+        let tree = build_command_tree();
+        let (start, length, _) = tab_complete_reply(&tree, OP_LEVEL, &|_| true, "/say 🌍 🌍a");
+        assert_eq!((start, length), (8, 3));
     }
 
     #[test]

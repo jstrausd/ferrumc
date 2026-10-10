@@ -26,7 +26,7 @@ use common::{login_to_play, TestClient};
 const GUARD: Duration = Duration::from_secs(10);
 
 /// Current app-owned player payload schema.
-const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
+const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
 
 /// Raw player table used only to preserve and inspect an undecodable backend row.
 const PLAYER_TABLE: TableDefinition<'_, &[u8], &[u8]> = TableDefinition::new("ferrumc:player");
@@ -70,8 +70,12 @@ fn test_runtime() -> Runtime {
 
 /// A valid current-layout payload with state distinct from spawn defaults.
 fn valid_payload() -> Vec<u8> {
-    br#"{"x":21.5,"y":70.0,"z":9.25,"yaw":45.0,"pitch":-12.0,"selected_slot":2,"slots":[]}"#
-        .to_vec()
+    serde_json::to_vec(&serde_json::json!({
+        "x":21.5,"y":70.0,"z":9.25,"yaw":45.0,"pitch":-12.0,"selected_slot":2,
+        "slots":vec![serde_json::json!({"item_id":0,"count":0});46],
+        "carried":{"item_id":0,"count":0},
+    }))
+    .expect("valid schema-two payload")
 }
 
 /// Reads through the final spawn-chunk frame so a pre-fix admitted connection
@@ -246,6 +250,38 @@ fn corrupt_player_payload_does_not_overwrite_the_original_record() {
     )
     .expect("bounded corrupt record");
     assert_typed_record_rejected_unchanged(&runtime, temp.path(), "CorruptPayload", &original);
+}
+
+#[test]
+fn malformed_schema_two_carried_does_not_overwrite_the_original_record() {
+    let runtime = test_runtime();
+    for (name, carried) in [
+        ("MissingCursor", None),
+        (
+            "InvalidCursor",
+            Some(serde_json::json!({"item_id":1,"count":65})),
+        ),
+        (
+            "UnknownCursor",
+            Some(serde_json::json!({"item_id":i32::MAX,"count":7})),
+        ),
+    ] {
+        let temp = temp_world();
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&valid_payload()).expect("valid payload");
+        if let Some(carried) = carried {
+            payload["carried"] = carried;
+        } else {
+            payload.as_object_mut().expect("object").remove("carried");
+        }
+        let original = PlayerRecord::new(
+            PLAYER_SCHEMA_VERSION,
+            GameMode::Survival,
+            serde_json::to_vec(&payload).expect("JSON"),
+        )
+        .expect("bounded record");
+        assert_typed_record_rejected_unchanged(&runtime, temp.path(), name, &original);
+    }
 }
 
 #[test]

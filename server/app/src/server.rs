@@ -57,8 +57,10 @@ const STORAGE_FLUSH_CHANNEL_CAPACITY: usize = 256;
 pub struct RunningServer {
     /// The address the listener is bound to.
     local_addr: SocketAddr,
-    /// The shutdown signal fanned out to every task.
+    /// Stops network admission and signals live connections to finish cleanup.
     shutdown: watch::Sender<bool>,
+    /// Stops simulation only after all connection leave acknowledgments finish.
+    driver_shutdown: watch::Sender<bool>,
     /// The accept-loop task.
     accept_task: JoinHandle<()>,
     /// The simulation/session driver task.
@@ -151,12 +153,17 @@ impl RunningServer {
         // fully dropped. Connection tasks would otherwise be detached, so this is
         // what makes a connected player's state durable across a graceful shutdown —
         // and what releases the redb file before anything reopens it.
-        // The driver performs its final flush and then drops its storage sender;
+        // Keep the driver alive for connection release/Leave acknowledgments.
+        // It then performs its final flush and drops its storage sender;
         // the worker observes the closed channel, drains everything pending, and
-        // exits. Polling all joins together does not change that channel ordering,
-        // and guarantees an early failure never detaches another task.
-        let tasks =
-            await_server_tasks(self.accept_task, self.driver_task, self.storage_worker_task).await;
+        // exits. Every task is still observed before applying any failure.
+        let tasks = await_server_tasks(
+            self.accept_task,
+            self.driver_task,
+            self.storage_worker_task,
+            self.driver_shutdown,
+        )
+        .await;
         let java = match self.java_runtime {
             Some(runtime) => runtime.shutdown().await.map_err(anyhow::Error::new),
             None => Ok(()),
@@ -172,9 +179,11 @@ async fn await_server_tasks(
     accept_task: JoinHandle<()>,
     driver_task: JoinHandle<ServerResult<()>>,
     storage_worker_task: JoinHandle<ServerResult<()>>,
+    driver_shutdown: watch::Sender<bool>,
 ) -> anyhow::Result<()> {
-    let (accept_result, driver_result, storage_result) =
-        tokio::join!(accept_task, driver_task, storage_worker_task);
+    let accept_result = accept_task.await;
+    let _ = driver_shutdown.send(true);
+    let (driver_result, storage_result) = tokio::join!(driver_task, storage_worker_task);
 
     match storage_result {
         Ok(Ok(())) => {}
@@ -303,6 +312,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
 
     let (commands_tx, commands_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (driver_shutdown_tx, driver_shutdown_rx) = watch::channel(false);
 
     // Shared observability state: one atomic-backed metric registry fed by the
     // driver and every connection task, and a single-writer server clock the
@@ -351,10 +361,11 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         Arc::clone(&net_telemetry),
         Arc::clone(&block_events),
         shutdown_tx.clone(),
-        shutdown_rx.clone(),
+        driver_shutdown_rx,
     ));
 
     let ctx = ConnContext {
+        shutdown: shutdown_rx.clone(),
         limits: ConnectionLimits::default(),
         io_timeout: config.io_timeout(),
         compression_threshold: config.compression_threshold(),
@@ -364,6 +375,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         chunk_stream_interval: config.chunk_stream_interval(),
         commands: commands_tx,
         player_store,
+        player_admissions: crate::player_admission::PlayerAdmissions::new(config.max_connections()),
         policy,
         block_events,
         java_bridge,
@@ -387,6 +399,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     Ok(RunningServer {
         local_addr,
         shutdown: shutdown_tx,
+        driver_shutdown: driver_shutdown_tx,
         accept_task,
         driver_task,
         storage_worker_task,
@@ -512,6 +525,51 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn shutdown_keeps_driver_alive_until_connections_finish_leave_cleanup() {
+        let (release_connections, connections_complete) = oneshot::channel();
+        let accept_task = tokio::spawn(async move {
+            connections_complete
+                .await
+                .expect("connection save and leave completed");
+        });
+        let (stop_driver, mut driver_signal) = watch::channel(false);
+        let observed_signal = driver_signal.clone();
+        let (driver_exited, worker_wait) = oneshot::channel();
+        let driver_task = tokio::spawn(async move {
+            driver_signal.changed().await.expect("driver stop signal");
+            assert!(*driver_signal.borrow());
+            driver_exited
+                .send(())
+                .expect("final flush ends worker input");
+            Ok(())
+        });
+        let worker_task = tokio::spawn(async move {
+            worker_wait.await.expect("driver final flush");
+            Ok(())
+        });
+        let coordinator = tokio::spawn(await_server_tasks(
+            accept_task,
+            driver_task,
+            worker_task,
+            stop_driver,
+        ));
+        tokio::task::yield_now().await;
+        assert!(
+            !*observed_signal.borrow(),
+            "driver must answer pending connection cleanup"
+        );
+        assert!(!coordinator.is_finished());
+        release_connections
+            .send(())
+            .expect("finish all connections");
+        coordinator
+            .await
+            .expect("join coordinator")
+            .expect("ordered shutdown");
+        assert!(*observed_signal.borrow());
+    }
+
+    #[tokio::test]
     async fn shutdown_awaits_all_tasks_before_prioritizing_storage_failure() {
         let accept_task = tokio::spawn(async {});
         let (release_driver, driver_released) = oneshot::channel();
@@ -530,6 +588,7 @@ mod tests {
             accept_task,
             driver_task,
             storage_worker_task,
+            watch::channel(false).0,
         ));
         tokio::task::yield_now().await;
         assert!(

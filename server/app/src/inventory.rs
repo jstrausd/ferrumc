@@ -102,10 +102,12 @@ const KIT_STACK_COUNT: u8 = 64;
 const INITIAL_STATE_ID: i32 = 1;
 
 /// A server-authoritative 46-slot player inventory plus the selected hotbar index,
-/// the window state id, and the connection-local game-mode mirror.
+/// the sole carried stack, window state id, and connection-local game-mode mirror.
 pub(crate) struct PlayerInventory {
     /// Every window-0 slot, indexed `0..SLOT_COUNT`.
     slots: [ItemStack; SLOT_COUNT],
+    /// Player-owned cursor, retained even when no chest screen is open.
+    carried: ItemStack,
     /// The window state id, sent on every clientbound inventory update and bumped
     /// on every change (wrapping).
     state_id: i32,
@@ -130,6 +132,7 @@ impl PlayerInventory {
         }
         Self {
             slots,
+            carried: ItemStack::empty(),
             state_id: INITIAL_STATE_ID,
             selected: 0,
             game_mode,
@@ -147,9 +150,11 @@ impl PlayerInventory {
         game_mode: GameMode,
         selected: u8,
         slots: [ItemStack; SLOT_COUNT],
+        carried: ItemStack,
     ) -> Self {
         Self {
             slots,
+            carried,
             state_id: INITIAL_STATE_ID,
             selected: if selected < HOTBAR_LEN { selected } else { 0 },
             game_mode,
@@ -184,12 +189,37 @@ impl PlayerInventory {
 
     /// A mutable reference to slot `index`, or `None` if out of range.
     ///
-    /// Used by the container window handler to apply a conserving
-    /// [`left_click_exchange`] against a player-inventory slot shown inside an open
-    /// container window. The caller is responsible for the clientbound resync that
-    /// keeps the client's view in step.
+    /// Test fixtures may seed a slot directly; production exchanges use
+    /// [`Self::exchange_carried`] to keep cursor ownership inside this inventory.
+    #[cfg(test)]
     pub(crate) fn slot_mut(&mut self, index: usize) -> Option<&mut ItemStack> {
         self.slots.get_mut(index)
+    }
+
+    /// The sole authoritative carried stack, shared by every inventory screen.
+    pub(crate) fn carried(&self) -> &ItemStack {
+        &self.carried
+    }
+
+    /// Adopts the authoritative carried result of a completed chest transaction.
+    pub(crate) fn set_carried(&mut self, carried: ItemStack) {
+        self.carried = carried;
+        self.bump_state_id();
+    }
+
+    /// Conserving exchange between one player slot and its carried stack.
+    pub(crate) fn exchange_carried(&mut self, index: usize) {
+        if let Some(slot) = self.slots.get_mut(index) {
+            left_click_exchange(slot, &mut self.carried);
+            self.bump_state_id();
+        }
+    }
+
+    /// Returns carried items to storage slots when possible, retaining overflow.
+    /// Repeated attempts cannot create or discard a stack, including components.
+    pub(crate) fn return_carried(&mut self) {
+        let carried = std::mem::replace(&mut self.carried, ItemStack::empty());
+        self.carried = self.deposit(carried);
     }
 
     /// The 36-slot main-inventory + hotbar region (`MAIN_START..PLAYER_WINDOW_END`)
@@ -203,7 +233,7 @@ impl PlayerInventory {
     }
 
     /// Deposits `cursor` back into the main inventory + hotbar, returning whatever
-    /// could not fit (empty in practice).
+    /// could not fit. The sole cursor owner must retain this remainder.
     ///
     /// Used when a container window closes so a carried item is never lost: it
     /// first merges into matching stacks, then fills empty slots, applying the
@@ -211,8 +241,7 @@ impl PlayerInventory {
     /// or hold the same item (never a different-item slot, which would swap an
     /// unrelated item onto the cursor). Bumps the window state id when anything was
     /// stored so the follow-up window-0 resync carries a fresh id. A non-empty
-    /// return means the inventory was full; the caller logs it rather than dropping
-    /// silently.
+    /// return means the inventory was full; [`Self::return_carried`] retains it.
     #[must_use]
     pub(crate) fn deposit(&mut self, mut cursor: ItemStack) -> ItemStack {
         if cursor.item().is_none() {
@@ -285,7 +314,7 @@ impl PlayerInventory {
     }
 
     /// Builds the `SetContainerContent` body for window 0: all [`SLOT_COUNT`]
-    /// slots followed by an empty carried (cursor) item.
+    /// slots followed by the authoritative carried item.
     ///
     /// # Errors
     ///
@@ -293,7 +322,7 @@ impl PlayerInventory {
     /// kit), or [`ItemValidationError::WindowTooLarge`] — unreachable here since
     /// [`SLOT_COUNT`] is far below the window cap.
     pub(crate) fn container_content_payload(&self) -> Result<Vec<u8>, ItemValidationError> {
-        encode_container_content_payload(&self.slots, &ItemStack::empty())
+        encode_container_content_payload(&self.slots, &self.carried)
     }
 
     /// Whether inventory slot `index` is mirrored into the player's *visible*
@@ -453,6 +482,74 @@ mod tests {
             inv.state_id(),
             before,
             "an empty deposit does not bump state"
+        );
+    }
+
+    #[test]
+    fn repeated_full_bag_returns_retain_the_exact_carried_stack() {
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let stone = ItemId::new(STONE_ITEM).expect("stone");
+        for index in MAIN_START..PLAYER_WINDOW_END {
+            inventory.set_creative_slot(
+                index,
+                ItemStack::new(stone, nz(64), ComponentPatch::empty()),
+            );
+        }
+        let carried = ItemStack::new(
+            stone,
+            nz(7),
+            ComponentPatch::new(vec![ferrumc_items::ComponentValue::Damage(3)], Vec::new()),
+        );
+        inventory.set_carried(carried.clone());
+        let slots_before = inventory.slots.clone();
+        for _ in 0..3 {
+            inventory.return_carried();
+            assert_eq!(inventory.carried(), &carried);
+            assert_eq!(inventory.slots, slots_before);
+        }
+        // A local chest player-section exchange keeps the component patch too.
+        inventory.exchange_carried(MAIN_START);
+        assert_eq!(inventory.slot(MAIN_START), Some(&carried));
+        assert_eq!(inventory.carried(), &slots_before[MAIN_START]);
+    }
+
+    #[test]
+    fn partial_return_retains_overflow_and_later_free_space_accepts_it_once() {
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let stone = ItemId::new(STONE_ITEM).expect("stone");
+        for index in MAIN_START..PLAYER_WINDOW_END {
+            inventory.set_creative_slot(
+                index,
+                ItemStack::new(stone, nz(64), ComponentPatch::empty()),
+            );
+        }
+        inventory.set_creative_slot(
+            MAIN_START,
+            ItemStack::new(stone, nz(60), ComponentPatch::empty()),
+        );
+        inventory.set_carried(ItemStack::new(stone, nz(7), ComponentPatch::empty()));
+        let conserved = total_stone(&inventory) + u32::from(inventory.carried().count());
+        inventory.return_carried();
+        assert_eq!(inventory.slot(MAIN_START).expect("slot").count(), 64);
+        assert_eq!(inventory.carried().count(), 3);
+        inventory.return_carried();
+        assert_eq!(inventory.carried().count(), 3);
+        assert_eq!(
+            total_stone(&inventory) + u32::from(inventory.carried().count()),
+            conserved
+        );
+        inventory.set_creative_slot(MAIN_START + 1, ItemStack::empty());
+        inventory.return_carried();
+        assert!(inventory.carried().item().is_none());
+        assert_eq!(
+            inventory.slot(MAIN_START + 1).expect("free slot").count(),
+            3
+        );
+        let final_payload = inventory.container_content_payload().expect("payload");
+        inventory.return_carried();
+        assert_eq!(
+            inventory.container_content_payload().expect("payload"),
+            final_payload
         );
     }
 

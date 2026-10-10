@@ -655,6 +655,7 @@ impl PlayPolicy {
                             "args",
                             ferrumc_command::ArgumentType::GreedyString,
                         )
+                        .suggests_ask_server()
                         .executes(move |_| completed()),
                     );
                 if let Some(permission) = &command.permission {

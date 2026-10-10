@@ -4,7 +4,7 @@
 //! [`PlayerInventory`](crate::inventory::PlayerInventory). A *container* window —
 //! a chest's `generic_9x3` screen — is opened on demand and tracked here while it
 //! is on screen: the assigned window id, the chest's world position, a mirror of
-//! the chest's [`CHEST_SLOTS`] item slots, the carried (cursor) item, and the
+//! the chest's [`CHEST_SLOTS`] item slots and the
 //! window's own state id.
 //!
 //! The chest contents are authoritative in the simulation; this mirror exists so
@@ -49,19 +49,17 @@ pub(crate) struct OpenContainer {
     position: BlockPos,
     /// Mirror of the chest's [`CHEST_SLOTS`] slots (authoritative copy is in the sim).
     slots: Vec<ItemStack>,
-    cursor: ItemStack,
     state_id: i32,
 }
 
 impl OpenContainer {
     /// Opens a chest window `window_id` over the chest at `position`, seeded with
-    /// the simulation's `slots` snapshot and an empty cursor.
+    /// the simulation's `slots` snapshot. The player inventory owns the cursor.
     fn new(window_id: i32, position: BlockPos, slots: Vec<ItemStack>) -> Self {
         Self {
             window_id,
             position,
             slots,
-            cursor: ItemStack::empty(),
             state_id: INITIAL_STATE_ID,
         }
     }
@@ -85,21 +83,6 @@ impl OpenContainer {
     /// clicks before the authoritative simulation exchanges any items.
     pub(crate) fn chest_slots(&self) -> &[ItemStack] {
         &self.slots
-    }
-
-    /// The carried (cursor) item.
-    pub(crate) fn cursor(&self) -> &ItemStack {
-        &self.cursor
-    }
-
-    /// Replaces the cursor (with the authoritative result of a sim click).
-    pub(crate) fn set_cursor(&mut self, cursor: ItemStack) {
-        self.cursor = cursor;
-    }
-
-    /// A mutable reference to the cursor, for a local player-slot exchange.
-    pub(crate) fn cursor_mut(&mut self) -> &mut ItemStack {
-        &mut self.cursor
     }
 
     /// Refreshes the chest-slot mirror from an authoritative sim snapshot.
@@ -144,7 +127,7 @@ impl OpenContainer {
         let mut combined = Vec::with_capacity(CHEST_WINDOW_SLOTS);
         combined.extend_from_slice(&self.slots);
         combined.extend_from_slice(inventory.window_slots());
-        encode_container_content_payload(&combined, &self.cursor)
+        encode_container_content_payload(&combined, inventory.carried())
     }
 }
 
@@ -174,8 +157,8 @@ impl WindowState {
     }
 
     /// Opens a chest window over `position` seeded with `slots`, returning its
-    /// assigned id. Any previously open container is dropped by the caller first
-    /// (returning its cursor), so this never silently discards a carried item.
+    /// assigned id. Replacing window metadata never changes the player-owned
+    /// carried item; the caller resynchronizes that same item into the new screen.
     pub(crate) fn open_chest(&mut self, position: BlockPos, slots: Vec<ItemStack>) -> i32 {
         let window_id = self.allocate_window_id();
         self.open = Some(OpenContainer::new(window_id, position, slots));
@@ -247,7 +230,14 @@ mod tests {
     fn content_payload_has_all_window_slots_plus_cursor() {
         use ferrumc_core::GameMode;
 
-        let inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let carried = ItemStack::try_new(
+            ferrumc_items::ItemId::from_name("stone").expect("stone"),
+            7,
+            ferrumc_items::ComponentPatch::empty(),
+        )
+        .expect("carried");
+        inventory.set_carried(carried.clone());
         let open = OpenContainer::new(
             1,
             BlockPos::new(0, 0, 0),
@@ -256,5 +246,30 @@ mod tests {
         let payload = open.content_payload(&inventory).expect("payload encodes");
         // The body starts with the slot-count varint (63 < 128 -> one byte).
         assert_eq!(payload[0], CHEST_WINDOW_SLOTS as u8);
+        let mut encoded_carried = Vec::new();
+        carried
+            .encode_slot(&mut encoded_carried)
+            .expect("cursor encodes");
+        assert!(payload.ends_with(&encoded_carried));
+        assert!(inventory
+            .container_content_payload()
+            .expect("window zero")
+            .ends_with(&encoded_carried));
+        let mut windows = WindowState::new();
+        windows.open_chest(
+            BlockPos::new(0, 0, 0),
+            vec![ItemStack::empty(); CHEST_SLOTS],
+        );
+        windows.take();
+        windows.open_chest(
+            BlockPos::new(1, 0, 0),
+            vec![ItemStack::empty(); CHEST_SLOTS],
+        );
+        assert!(windows
+            .open()
+            .expect("replacement")
+            .content_payload(&inventory)
+            .expect("payload")
+            .ends_with(&encoded_carried));
     }
 }

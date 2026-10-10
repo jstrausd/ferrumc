@@ -79,6 +79,11 @@ enum Operation {
         args: Vec<String>,
         player: JavaPlayer,
     },
+    Complete {
+        command: String,
+        args: Vec<String>,
+        player: JavaPlayer,
+    },
     Join {
         player: JavaPlayer,
     },
@@ -91,9 +96,10 @@ enum Operation {
 impl Operation {
     fn recipient(&self) -> Option<&str> {
         match self {
-            Self::Command { player, .. } | Self::Join { player } | Self::Quit { player } => {
-                Some(&player.uuid)
-            }
+            Self::Command { player, .. }
+            | Self::Complete { player, .. }
+            | Self::Join { player }
+            | Self::Quit { player } => Some(&player.uuid),
             Self::Load { .. } | Self::Shutdown => None,
         }
     }
@@ -150,6 +156,15 @@ pub(crate) struct JavaMessage {
     pub(crate) text: String,
 }
 
+/// Bounded plugin suggestions and callback messages for the requesting player.
+#[derive(Debug)]
+pub(crate) struct JavaCompletion {
+    /// Insertable suggestions produced by the ordinary Bukkit completion path.
+    pub(crate) suggestions: Vec<String>,
+    /// Callback messages scoped to the current player or console.
+    pub(crate) messages: Vec<JavaMessage>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Response {
@@ -158,11 +173,18 @@ struct Response {
     #[serde(default)]
     plugins: Vec<JavaPlugin>,
     messages: Vec<JavaMessage>,
+    completions: Option<Vec<String>>,
     error: Option<String>,
 }
 
 impl Response {
-    fn validate(&self, id: u64, recipient: Option<&str>, load: bool) -> Result<(), BridgeError> {
+    fn validate(
+        &self,
+        id: u64,
+        recipient: Option<&str>,
+        load: bool,
+        complete: bool,
+    ) -> Result<(), BridgeError> {
         ensure(
             self.id == id,
             "response ID does not match the active request",
@@ -173,6 +195,16 @@ impl Response {
             load || self.plugins.is_empty(),
             "metadata outside load response",
         )?;
+        ensure(
+            complete == self.completions.is_some(),
+            "completion field does not match the active operation",
+        )?;
+        if let Some(suggestions) = &self.completions {
+            ensure(suggestions.len() <= 64, "too many completions")?;
+            for suggestion in suggestions {
+                bounded(suggestion, 256, "completion")?;
+            }
+        }
         ensure(
             !self.ok || self.error.is_none(),
             "successful response contains an error",
@@ -287,6 +319,7 @@ struct QueuedRequest {
     recipient: Option<String>,
     load: bool,
     shutdown: bool,
+    complete: bool,
     reply: oneshot::Sender<Result<Response, BridgeError>>,
 }
 
@@ -335,6 +368,38 @@ impl JavaBridge {
         .into_messages()
     }
 
+    /// Invokes the real `PluginCommand` completion path after Rust permission checks.
+    /// The argument list includes the in-progress argument, even when it is empty.
+    pub(crate) async fn complete(
+        &self,
+        label: &str,
+        args: Vec<String>,
+        player: JavaPlayer,
+    ) -> Result<JavaCompletion, BridgeError> {
+        ensure(
+            !args.is_empty() && args.len() <= 64,
+            "completion needs 1..=64 arguments",
+        )?;
+        for argument in &args {
+            bounded(argument, 512, "completion argument")?;
+        }
+        let response = self
+            .rpc(Operation::Complete {
+                command: label.to_owned(),
+                args,
+                player,
+            })
+            .await?;
+        let suggestions = response
+            .completions
+            .clone()
+            .ok_or_else(|| BridgeError::Protocol("missing completions".to_owned()))?;
+        Ok(JavaCompletion {
+            suggestions,
+            messages: response.into_messages()?,
+        })
+    }
+
     /// Dispatches a real player lifecycle event after Play admission / on leave.
     pub(crate) async fn event(
         &self,
@@ -376,6 +441,7 @@ impl JavaBridge {
                 recipient: operation.recipient().map(str::to_owned),
                 load: matches!(operation, Operation::Load { .. }),
                 shutdown: matches!(operation, Operation::Shutdown),
+                complete: matches!(operation, Operation::Complete { .. }),
                 reply,
             })
             .map_err(|error| match error {
@@ -528,6 +594,7 @@ async fn exchange<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     id: u64,
     recipient: Option<&str>,
     load: bool,
+    complete: bool,
 ) -> Result<Response, BridgeError> {
     let length = u32::try_from(bytes.len())
         .map_err(|_| BridgeError::Protocol("outbound frame length overflow".to_owned()))?;
@@ -543,7 +610,7 @@ async fn exchange<W: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
     output.read_exact(&mut bytes).await?;
     let response: Response =
         serde_json::from_slice(&bytes).map_err(|error| BridgeError::Protocol(error.to_string()))?;
-    response.validate(id, recipient, load)?;
+    response.validate(id, recipient, load, complete)?;
     Ok(response)
 }
 
@@ -573,7 +640,7 @@ async fn run_actor(
             _ = stop.changed() => Err(BridgeError::Cancelled),
             () = sleep_until(request.deadline) => Err(BridgeError::Timeout),
             () = request.reply.closed() => Err(BridgeError::Cancelled),
-            response = exchange(&mut input, &mut output, &request.bytes, request.id, request.recipient.as_deref(), request.load) => response,
+            response = exchange(&mut input, &mut output, &request.bytes, request.id, request.recipient.as_deref(), request.load, request.complete) => response,
         };
         let failed = outcome.as_ref().err().cloned();
         let shutdown = request.shutdown;
@@ -629,7 +696,16 @@ mod tests {
                 .expect("response length");
             peer.write_all(&payload).await.expect("response bytes");
         });
-        let response = exchange(&mut input, &mut output, b"{}", 7, Some(PLAYER), false).await;
+        let response = exchange(
+            &mut input,
+            &mut output,
+            b"{}",
+            7,
+            Some(PLAYER),
+            false,
+            false,
+        )
+        .await;
         writer.await.expect("fixture writer finished");
         response
     }
@@ -671,6 +747,38 @@ mod tests {
     }
 
     #[test]
+    fn completions_are_required_only_for_the_correlated_operation_and_are_bounded() {
+        let parse = |completions: serde_json::Value| {
+            serde_json::from_value::<Response>(json!({
+                "id":7,"ok":true,"messages":[],"error":null,"completions":completions
+            }))
+        };
+        let valid = parse(json!(["alpha", "Grüße Ω", "🌍"])).expect("valid completion JSON");
+        valid
+            .validate(7, Some(PLAYER), false, true)
+            .expect("complete response");
+        assert!(valid.validate(7, Some(PLAYER), false, false).is_err());
+        for bad in [
+            json!(null),
+            json!(["bad\0item"]),
+            json!(["x".repeat(257)]),
+            json!(vec!["item"; 65]),
+        ] {
+            assert!(parse(bad)
+                .expect("typed response")
+                .validate(7, Some(PLAYER), false, true)
+                .is_err());
+        }
+        for malformed in [json!([false]), json!([null]), json!("item")] {
+            assert!(parse(malformed).is_err());
+        }
+        let missing: Response =
+            serde_json::from_value(json!({"id":7,"ok":true,"messages":[],"error":null}))
+                .expect("non-completion response");
+        assert!(missing.validate(7, Some(PLAYER), false, true).is_err());
+    }
+
+    #[test]
     fn response_validation_rejects_spoofed_recipients_unknown_fields_and_bounded_metadata() {
         let parse = |value: serde_json::Value| {
             serde_json::from_value::<Response>(value).expect("response JSON")
@@ -679,17 +787,17 @@ mod tests {
             json!({"id":7,"ok":true,"messages":[{"player":"other-player","text":"spoof"}],"error":null}),
         );
         assert!(matches!(
-            targeted.validate(7, Some(PLAYER), false),
+            targeted.validate(7, Some(PLAYER), false, false),
             Err(BridgeError::Protocol(_))
         ));
         let excessive = parse(
             json!({"id":7,"ok":true,"messages":[{"player":null,"text":"x".repeat(4097)}],"error":null}),
         );
-        assert!(excessive.validate(7, Some(PLAYER), false).is_err());
+        assert!(excessive.validate(7, Some(PLAYER), false, false).is_err());
         let messages = parse(
             json!({"id":7,"ok":true,"messages":vec![json!({"player":null,"text":"x"});MAX_MESSAGES+1],"error":null}),
         );
-        assert!(messages.validate(7, Some(PLAYER), false).is_err());
+        assert!(messages.validate(7, Some(PLAYER), false, false).is_err());
         assert!(serde_json::from_value::<Response>(
             json!({"id":7,"ok":true,"messages":[],"error":null,"unknown":true})
         )
@@ -702,7 +810,7 @@ mod tests {
             let load = parse(
                 json!({"id":7,"ok":true,"plugins":[{"name":"Fixture","version":"1","commands":commands}],"messages":[],"error":null}),
             );
-            assert!(load.validate(7, None, true).is_err());
+            assert!(load.validate(7, None, true, false).is_err());
         }
         let failed =
             parse(json!({"id":7,"ok":false,"messages":[],"error":"unsupported world API"}));
@@ -723,7 +831,7 @@ mod tests {
         }))
         .expect("metadata JSON");
         response
-            .validate(7, None, true)
+            .validate(7, None, true, false)
             .expect("exact UTF-8 bound and dotted label");
         let mut command = response.plugins[0].commands[0].clone();
         command.bind_namespace("Fixture");
@@ -744,7 +852,7 @@ mod tests {
         }
         assert!(bridge.find_command("other:falias").is_none());
         response.plugins[0].version.push('x');
-        assert!(response.validate(7, None, true).is_err());
+        assert!(response.validate(7, None, true, false).is_err());
     }
 
     #[tokio::test(start_paused = true)]

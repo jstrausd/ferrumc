@@ -16,12 +16,15 @@ use ferrumc_net::{
     DEFAULT_KEEP_ALIVE_TIMEOUT,
 };
 use ferrumc_observability::{PacketState, SessionDebug};
-use ferrumc_proto::generated::play::{ClientboundKeepAlive, ClientboundPlayPacket, GameEvent};
-use ferrumc_session::{NetEvent, OutboundMessage, PlayerSessionHandle};
+use ferrumc_proto::generated::play::{
+    ClientboundKeepAlive, ClientboundPlayPacket, GameEvent, PlayDisconnect,
+};
+use ferrumc_session::{NetEvent, OutboundMessage, PlayerSessionHandle, SessionError};
 
 use crate::driver::SimCommand;
 use crate::inventory::PlayerInventory;
 use crate::observe;
+use crate::player_admission::AdmissionError;
 use crate::player_data::{is_valid_player_position, load_player_for_join, PlayerData, PlayerLoad};
 use crate::window::WindowState;
 
@@ -31,7 +34,7 @@ use super::handlers::handle_play_body;
 use super::join::send_join_kit;
 use super::outbound::{
     enqueue_traced, enqueue_traced_classified, flush_writer, is_mandatory_overflow,
-    observe_queue_len,
+    observe_queue_len, send_mandatory,
 };
 use super::rate_limiter::ChatRateLimiter;
 use super::serverbound_budget::ServerboundBudget;
@@ -57,6 +60,31 @@ pub(super) async fn enter_play(
     // Upgrade the session label from the peer address to the player name now that
     // login has completed.
     debug.set_session(name.as_str());
+
+    // Claim before any storage read. The old connection owns this UUID until
+    // its durable save and acknowledged simulation leave have both completed.
+    let mut reservation = match ctx.player_admissions.reserve(player) {
+        Ok(reservation) => reservation,
+        Err(error) => {
+            tracing::warn!(%error, %player, name = name.as_str(), "rejecting overlapping player admission");
+            let mut writer = PlayWriter::with_defaults(ctx.limits);
+            let refusal = send_mandatory(
+                &mut writer,
+                &mut debug,
+                &compression,
+                &ctx.clock,
+                admission_refusal(error),
+            );
+            if let Err(send_error) = refusal {
+                tracing::debug!(%send_error, "could not enqueue player admission refusal");
+            } else if let Err(send_error) =
+                flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout).await
+            {
+                tracing::debug!(%send_error, "could not flush player admission refusal");
+            }
+            return Err(error.into());
+        }
+    };
 
     // Resolve storage admission before joining simulation or constructing any
     // teardown state. Only a confirmed store miss may start fresh; backend,
@@ -144,6 +172,9 @@ pub(super) async fn enter_play(
         tracing::warn!(%err, "failed to encode initial equipment; joining without it");
         Vec::new()
     });
+    // Validate structural deadline setup before joining. Every later error must
+    // pass through the shared leave-save path, even a failed initial kit send.
+    let mut liveness = play_liveness(Instant::now(), ctx.io_timeout)?;
     let mut handle = join_simulation(ctx, player, name.as_str(), position, equipment).await?;
 
     // The client holds the spawn batch after the join kit; the stream tracks it from
@@ -151,7 +182,7 @@ pub(super) async fn enter_play(
     // the player's actual (restored) position so the first streaming pass centres on
     // where they rejoin: if they left far from spawn, their chunk is then streamed in
     // (centre-first) and the loading screen releases without waiting for a move.
-    let mut chunk_stream = ChunkStream::new(ctx);
+    let mut chunk_stream = ChunkStream::before_join(ctx);
     chunk_stream.observe(position);
 
     // Per-connection chat rate limiter, seeded at the current server tick. Lives
@@ -174,47 +205,56 @@ pub(super) async fn enter_play(
     // Make the sim's authoritative mode match the restored (or default-creative)
     // mode so the creative-slot gate accepts this player and later enforcement
     // (creative no-decrement, break speed, flight) reads the right mode.
-    send_sim_command_accepted(
-        ctx,
-        SimCommand::SetGameMode {
-            player,
-            mode: game_mode,
-            acceptance: None,
-        },
-    )
-    .await?;
-    // Replay the keystone payload, restoring the look and — for a returning player —
-    // the game mode and held slot, then drain any already-buffered play frames.
     let mut writer = PlayWriter::with_defaults(ctx.limits);
-    send_join_kit(
-        &mut writer,
-        &mut stream,
-        &compression,
-        ctx,
-        &mut debug,
-        player,
-        name.as_str(),
-        position,
-        player_yaw,
-        player_pitch,
-        is_returning,
-        &inventory,
-    )
-    .await?;
-    // Start absolute Play deadlines after the join payload has reached the socket.
-    // Chunk/output timer wakeups never extend this inbound progress window.
-    let mut liveness = play_liveness(Instant::now(), ctx.io_timeout)?;
+    let setup: anyhow::Result<()> = async {
+        send_sim_command_accepted(
+            ctx,
+            SimCommand::SetGameMode {
+                player,
+                mode: game_mode,
+                acceptance: None,
+            },
+        )
+        .await?;
+        // Restore mode, look, inventory and cursor before buffered Play packets.
+        send_join_kit(
+            &mut writer,
+            &mut stream,
+            &compression,
+            ctx,
+            &mut debug,
+            player,
+            name.as_str(),
+            position,
+            player_yaw,
+            player_pitch,
+            is_returning,
+            &inventory,
+            &mut chunk_stream,
+        )
+        .await?;
+        // Start absolute deadlines only after the kit reached the socket.
+        liveness = play_liveness(Instant::now(), ctx.io_timeout)?;
+        Ok(())
+    }
+    .await;
     // Drain the frames already buffered before the loop. Any error here — a
     // serverbound budget kick on a flood pipelined during the login handoff, or a
     // decode/socket failure — is deferred to a break inside the loop rather than
     // returned via `?`, so this connection still runs the shared leave-save and
     // chunk-ticket release teardown below instead of leaking the join's tickets.
-    let mut deferred_break: Option<anyhow::Error> = None;
+    let mut deferred_break = setup.err();
     // Per-connection open-container window state (a chest screen, when open). The
     // always-open player inventory lives in `inventory`; this tracks the at-most-one
     // container window layered on top of it.
     let mut window_state = WindowState::new();
-    if let Some(bridge) = &ctx.java_bridge {
+    let mut java_join_attempted = false;
+    if let Some(bridge) = ctx
+        .java_bridge
+        .as_ref()
+        .filter(|_| deferred_break.is_none())
+    {
+        java_join_attempted = true;
         let outcome = bridge
             .event(true, ctx.java_player(player, name.as_str()))
             .await;
@@ -508,7 +548,7 @@ pub(super) async fn enter_play(
     // awaits may legitimately take longer than a network response window.
     drop(stream);
 
-    if let Some(bridge) = &ctx.java_bridge {
+    if let Some(bridge) = ctx.java_bridge.as_ref().filter(|_| java_join_attempted) {
         match bridge
             .event(false, ctx.java_player(player, name.as_str()))
             .await
@@ -539,22 +579,21 @@ pub(super) async fn enter_play(
     // driver): the save is durable on the shared store the instant it returns (the
     // in-memory backend inserts inline; a redb backend commits), so a fast rejoin —
     // and the post-shutdown drain that waits on this connection's concurrency permit
-    // — reads the just-saved state rather than a stale one. The saved position is
+    // — reads the just-saved state rather than a stale one. The UUID lease also
+    // prevents a competing connection from reading while this save is pending.
+    // The saved position is
     // the latest accepted client move or authoritative server teleport, falling
-    // back to the join position if neither occurred. Failures are logged, never
-    // fatal: a connection ending must always run its teardown.
-    // If the player disconnects with a container open, return any carried (cursor)
-    // item to the inventory before the leave-save so it is persisted, not lost. The
+    // back to the join position if neither occurred. Failed saves quarantine this
+    // UUID, but a connection ending must still run its remaining teardown.
+    // Return the carried item even without an open screen; full-bag overflow
+    // stays player-owned and is persisted alongside the inventory. The
     // client cleared its own cursor on disconnect, so no clientbound sync is needed.
-    if let Some(open) = window_state.take() {
-        let leftover = inventory.deposit(open.cursor().clone());
-        if leftover.item().is_some() {
-            tracing::warn!(
-                player = name.as_str(),
-                count = leftover.count(),
-                "inventory full on disconnect; carried items could not be returned"
-            );
-        }
+    window_state.take();
+    inventory.return_carried();
+
+    if chunk_stream.ticket_handoff_pending {
+        reservation.quarantine();
+        tracing::warn!(%player, name = name.as_str(), "unconfirmed join chunk-ticket ownership; UUID quarantined until server restart");
     }
 
     let save_position = chunk_stream.last_position().unwrap_or(position);
@@ -562,23 +601,22 @@ pub(super) async fn enter_play(
     match player_data.to_record(inventory.game_mode()) {
         Ok(record) => {
             if let Err(err) = ctx.player_store.save_player(player, record).await {
-                tracing::warn!(%err, player = name.as_str(), "failed to save player state on leave");
+                reservation.quarantine();
+                tracing::warn!(%err, %player, name = name.as_str(), "failed to save player state on leave; UUID quarantined until server restart");
             }
         }
         Err(err) => {
-            tracing::warn!(%err, player = name.as_str(), "failed to encode player state on leave");
+            reservation.quarantine();
+            tracing::warn!(%err, %player, name = name.as_str(), "failed to encode player state on leave; UUID quarantined until server restart");
         }
     }
 
     // Release every chunk this connection had the client holding so its player
     // tickets stop pinning chunks resident after it leaves. Best-effort: a gone
     // driver just means the whole simulation is winding down anyway.
-    if !chunk_stream.loaded.is_empty() {
-        let positions = chunk_stream.loaded.iter().copied().collect();
-        let _ = ctx
-            .commands
-            .send(SimCommand::ReleaseChunks { positions })
-            .await;
+    if let Err(error) = release_owned_chunks(&ctx.commands, &chunk_stream.loaded).await {
+        reservation.quarantine();
+        tracing::warn!(%error, %player, name = name.as_str(), "failed to queue acquired chunk-ticket release; UUID quarantined until server restart");
     }
 
     // Preserve a typed peer-decode reason through the session leave event. Both
@@ -587,15 +625,67 @@ pub(super) async fn enter_play(
     // at the app boundary.
     let disconnect_reason = disconnect_reason_for_result(&result);
 
-    // Best-effort despawn notice regardless of how the link ended.
-    let _ = ctx
-        .commands
-        .send(SimCommand::Event {
-            event: NetEvent::disconnected(player, disconnect_reason),
-            acceptance: None,
-        })
-        .await;
+    // Enqueuing Leave is insufficient: the driver must remove the old binding
+    // before a fresh connection can load and join with this UUID.
+    if let Err(error) = acknowledge_leave(&ctx.commands, player, disconnect_reason).await {
+        reservation.quarantine();
+        tracing::warn!(%error, %player, name = name.as_str(), "failed to acknowledge player leave; UUID quarantined until server restart");
+    }
     result
+}
+
+/// Releases only confirmed tickets; configured spawn columns alone confer no
+/// ownership. FIFO command handling completes this release before Leave ack.
+pub(super) async fn release_owned_chunks(
+    commands: &tokio::sync::mpsc::Sender<SimCommand>,
+    acquired: &std::collections::BTreeSet<ferrumc_math::ChunkPos>,
+) -> anyhow::Result<()> {
+    if acquired.is_empty() {
+        return Ok(());
+    }
+    commands
+        .send(SimCommand::ReleaseChunks {
+            positions: acquired.iter().copied().collect(),
+        })
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("simulation driver closed before acquired chunk-ticket release")
+        })
+}
+
+/// Only classified admission refusals produce this small mandatory packet;
+/// no storage read, simulation join or Java callback has happened at this point.
+fn admission_refusal(error: AdmissionError) -> ClientboundPlayPacket {
+    let mut reason = ferrumc_nbt::NbtCompound::new();
+    reason.push("text", ferrumc_nbt::NbtTag::String(error.to_string()));
+    ClientboundPlayPacket::PlayDisconnect(PlayDisconnect::new(ferrumc_nbt::NbtTag::Compound(
+        reason,
+    )))
+}
+
+/// Awaits the driver's Leave acceptance. An already absent player is safe too:
+/// overload handling may have removed its binding before connection teardown.
+async fn acknowledge_leave(
+    commands: &tokio::sync::mpsc::Sender<SimCommand>,
+    player: PlayerId,
+    reason: DisconnectReason,
+) -> anyhow::Result<()> {
+    let (reply, acknowledgment) = oneshot::channel();
+    commands
+        .send(SimCommand::Event {
+            event: NetEvent::disconnected(player, reason),
+            acceptance: Some(reply),
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver closed before player leave"))?;
+    match acknowledgment
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver dropped player leave acknowledgment"))?
+    {
+        Ok(()) => Ok(()),
+        Err(SessionError::UnknownPlayer { player: absent }) if absent == player => Ok(()),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Maps a typed decode or liveness failure to its session leave reason.
@@ -832,6 +922,14 @@ async fn pump_serverbound(
     // is what the token bucket expects.
     let now = std::time::Instant::now();
     loop {
+        // A previous callback may have consumed the deadline; even an
+        // unmodelled buffered packet must not postpone its enforcement.
+        let deadline = liveness
+            .next_deadline()
+            .ok_or_else(|| anyhow::anyhow!("Play liveness is closed"))?;
+        if Instant::now() >= deadline.at() {
+            return Err(deadline.timeout().into());
+        }
         let next = match decoder.next_packet_compressed(ConnectionState::Play, compression) {
             Ok(next) => next,
             Err(err) => {
@@ -910,6 +1008,125 @@ fn mirror_game_mode_change(event: &GameEvent, inventory: &mut PlayerInventory) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admission_refusals_have_distinct_stable_standard_protocol_reasons() {
+        let mut seen = std::collections::BTreeSet::new();
+        for error in [
+            AdmissionError::AlreadyReserved,
+            AdmissionError::Quarantined,
+            AdmissionError::AtCapacity,
+        ] {
+            let packet = admission_refusal(error);
+            assert_eq!(Criticality::for_packet(&packet), Criticality::Mandatory);
+            let ClientboundPlayPacket::PlayDisconnect(refusal) = packet else {
+                panic!("standard Play Disconnect");
+            };
+            let ferrumc_nbt::NbtTag::Compound(reason) = refusal.reason() else {
+                panic!("text component root");
+            };
+            assert_eq!(
+                reason.get("text"),
+                Some(&ferrumc_nbt::NbtTag::String(error.to_string()))
+            );
+            assert!(seen.insert(error.to_string()));
+        }
+        assert_eq!(
+            AdmissionError::AlreadyReserved.to_string(),
+            "player UUID is already active or finishing leave"
+        );
+    }
+
+    #[tokio::test]
+    async fn leave_keeps_uuid_reserved_until_the_actual_driver_acknowledgment() {
+        use crate::player_admission::{AdmissionError, PlayerAdmissions};
+        let player = PlayerId::offline("LeaveFence");
+        let registry = PlayerAdmissions::new(1);
+        let reservation = registry.reserve(player).expect("claim");
+        let (commands, mut inbox) = tokio::sync::mpsc::channel(1);
+        let leaving = tokio::spawn(async move {
+            acknowledge_leave(&commands, player, DisconnectReason::ServerShutdown)
+                .await
+                .expect("leave acknowledgment");
+            drop(reservation);
+        });
+        let SimCommand::Event {
+            event:
+                NetEvent::Disconnected {
+                    player: leaving_player,
+                    ..
+                },
+            acceptance: Some(reply),
+        } = inbox.recv().await.expect("Leave queued")
+        else {
+            panic!("typed leave must request an acknowledgment");
+        };
+        assert_eq!(leaving_player, player);
+        assert_eq!(
+            registry
+                .reserve(player)
+                .expect_err("old driver mapping still exists"),
+            AdmissionError::AlreadyReserved
+        );
+        assert!(
+            !leaving.is_finished(),
+            "queue admission alone must not release UUID"
+        );
+        reply.send(Ok(())).expect("driver removes mapping");
+        leaving.await.expect("cleanup returns");
+        assert!(registry.reserve(player).is_ok());
+    }
+
+    #[tokio::test]
+    async fn leave_accepts_only_the_exact_already_absent_identity_or_success() {
+        for outcome in [
+            Err(SessionError::UnknownPlayer {
+                player: PlayerId::offline("Absent"),
+            }),
+            Err(SessionError::UnknownPlayer {
+                player: PlayerId::offline("Different"),
+            }),
+            Err(SessionError::ShardInboxFull {
+                shard: ferrumc_math::ShardPos::new(0, 0),
+            }),
+        ] {
+            let player = PlayerId::offline("Absent");
+            let accepted_absent = matches!(&outcome, Err(SessionError::UnknownPlayer { player: absent }) if *absent == player);
+            let (commands, mut inbox) = tokio::sync::mpsc::channel(1);
+            let leaving = tokio::spawn(async move {
+                acknowledge_leave(&commands, player, DisconnectReason::ServerShutdown).await
+            });
+            let SimCommand::Event {
+                acceptance: Some(reply),
+                ..
+            } = inbox.recv().await.expect("Leave")
+            else {
+                panic!("typed ack");
+            };
+            reply.send(outcome).expect("reply");
+            assert_eq!(leaving.await.expect("task").is_ok(), accepted_absent);
+        }
+        let (commands, inbox) = tokio::sync::mpsc::channel(1);
+        drop(inbox);
+        assert!(acknowledge_leave(
+            &commands,
+            PlayerId::offline("GoneDriver"),
+            DisconnectReason::ServerShutdown
+        )
+        .await
+        .is_err());
+        let (commands, mut inbox) = tokio::sync::mpsc::channel(1);
+        let leaving = tokio::spawn(async move {
+            acknowledge_leave(
+                &commands,
+                PlayerId::offline("GoneReply"),
+                DisconnectReason::ServerShutdown,
+            )
+            .await
+        });
+        drop(inbox.recv().await.expect("queued Leave loses reply sender"));
+        assert!(leaving.await.expect("task").is_err());
+    }
 
     #[tokio::test(start_paused = true)]
     async fn ready_outbound_work_cannot_starve_ready_inbound_echoes_or_timers() {

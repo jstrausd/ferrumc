@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use ferrumc_codec::BoundedString;
 use ferrumc_config::{LoginDecision, PacketBudgetConfig, ResolvedAccess};
@@ -36,6 +36,8 @@ const STATUS_JSON_MAX_CHARS: usize = 32_767;
 /// handed to each [`handle_connection`](super::handle_connection) call.
 #[derive(Clone)]
 pub(crate) struct ConnContext {
+    /// Server cancellation for stateless Java callbacks waiting outside the Play select.
+    pub(crate) shutdown: watch::Receiver<bool>,
     /// Per-state hostile-input frame caps.
     pub(crate) limits: ConnectionLimits,
     /// Deadline applied to each socket read and write.
@@ -61,6 +63,8 @@ pub(crate) struct ConnContext {
     /// wraps; player records are byte-oriented to storage (see
     /// [`crate::player_data`]).
     pub(crate) player_store: Arc<dyn PlayerStore>,
+    /// Bounded canonical UUID ownership across load, save and acknowledged leave.
+    pub(crate) player_admissions: Arc<crate::player_admission::PlayerAdmissions>,
     /// The shared play policy: bypass permissions, the spawn position, and the
     /// command tree consulted for serverbound play packets.
     pub(crate) policy: Arc<PlayPolicy>,

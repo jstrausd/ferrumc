@@ -22,6 +22,8 @@ ferrumc-codec = { workspace = true }
 # Typed 1.21.8 packets (handshake / login / configuration / play) the wiring
 # encodes and decodes.
 ferrumc-proto = { workspace = true }
+# The protocol Play Disconnect carries a bounded network-NBT text component.
+ferrumc-nbt = { workspace = true }
 # Per-version registry constants (dimension geometry, biome, protocol version).
 ferrumc-registry = { workspace = true }
 # The item-stack model + trusted/untrusted slot codecs: builds the join-kit

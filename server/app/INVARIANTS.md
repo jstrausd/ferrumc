@@ -25,11 +25,33 @@
   transactions complete before their updated inventory is persisted.
 - A canceled chunk-stream send retains unload bookkeeping until admission; a
   canceled reply releases only actually acquired tickets behind a durable flush.
+- Join starts with an empty acquired-ticket set. The actual `StreamChunks` reply
+  transfers ticket ownership before packet encoding/flush; failed setup before
+  that reply releases no guessed spawn tickets, and an unconfirmed admitted
+  handoff quarantines the player UUID.
 - A chest click may exchange items only after both active window and state IDs
   match. The driver also compares that viewer's bounded chest snapshot atomically
   before a chest-slot exchange; conflicting views return the unchanged cursor
   and fresh contents. Resyncs include both slot sections and the cursor.
 - A Close Container packet may close only the window whose exact ID it carries.
+- The player inventory is the sole owner of the carried stack across every
+  screen. Closing or disconnecting attempts a deposit and retains its overflow;
+  window 0 and chest resyncs always encode that same stack.
+- Normal shutdown drains every connection's save, ticket release and Leave
+  acknowledgment while the driver remains alive, then stops simulation and
+  awaits the final storage drain. Terminal task failures remain observable.
+- New player saves use schema 2: exactly 46 bounded slots and a required,
+  validated carried item; unknown fields and malformed cursor data reject
+  admission. Schema 1 explicitly migrates with an empty cursor and the prior
+  slot-normalization policy. Loading never rewrites records. Persisted slots
+  and carried items retain only registry IDs/counts; component persistence and
+  player/world crash-atomic transactions remain unimplemented.
+- A bounded server-owned UUID lease is acquired before player loading and held
+  through durable leave-save and acknowledged simulation Leave. Every error
+  after accepted Join runs shared teardown. Save/encode/Leave-ack failure
+  quarantines that UUID until this server instance drops; quarantine counts
+  against the configured connection ceiling. Restart clears admission state,
+  but does not repair a failed durable write.
 - An inaccessible chest refuses exchanges and retains the last snapshot/cursor;
   server-driven closure of a vanished or unreachable chest is not yet modelled.
 - Java compatibility is optional. Native-only startup neither launches nor
@@ -58,7 +80,15 @@
 - Java callbacks run through the actor outside simulation/storage ownership.
   Unimplemented world/scheduler APIs report a concrete callback error. A remote
   callback error preserves framing; a protocol error stops the actor.
+- Java argument nodes declare `minecraft:ask_server`. Completion uses Rust
+  command permissions and the current sender, preserves Bukkit's literal-space
+  empty arguments and original alias casing, and reports UTF-16 ranges. Only
+  completion responses contain up to 64 suggestions of 256 UTF-8 bytes each.
+  Stateless completion awaits observe the active Play deadline and shutdown;
+  cancelling an active RPC may force process termination and skip disable hooks.
 - Startup rejection awaits process cleanup before returning and accepts no
-  clients. Normal shutdown awaits every connection quit hook before one plugin
-  shutdown request, then awaits child exit. Forced termination cannot guarantee
-  Java disable hooks. The process boundary is not an OS permission sandbox.
+  clients. Normal shutdown awaits connection quit-request outcomes before
+  attempting one plugin shutdown request, then awaits child exit. A healthy
+  adapter delivers these hooks; forced termination, including cancellation of
+  an active completion during stop, cannot guarantee Java quit/disable hooks.
+  The process boundary is not an OS permission sandbox.

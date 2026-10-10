@@ -29,7 +29,7 @@ use common::{encode, login_to_play, TestClient};
 const GUARD: Duration = Duration::from_secs(20);
 
 /// Current app-owned player payload schema.
-const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
+const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
 
 /// Default configured spawn used by this regression.
 const SPAWN: Vec3 = Vec3::new(8.0, 64.0, 8.0);
@@ -593,7 +593,7 @@ fn out_of_range_record_recovers_at_spawn_and_stays_healed_after_restart() {
         "slots": empty_slots,
     });
     let original = PlayerRecord::new(
-        PLAYER_SCHEMA_VERSION,
+        SchemaVersion::new(1), // explicitly exercise legacy migration during position recovery
         GameMode::Survival,
         serde_json::to_vec(&original_payload).expect("encode invalid-position fixture"),
     )

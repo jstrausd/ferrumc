@@ -3,28 +3,33 @@
 //! [`PlayerData`] is the connection-owned view of everything that must survive a
 //! player leaving and rejoining — or the server restarting: spawn-relative
 //! position, look (yaw + pitch), the selected hotbar index, and the 46-slot
-//! inventory layout. It is serialized into the opaque [`PlayerRecord`] payload
+//! inventory layout and player-owned carried item. It is serialized into the opaque [`PlayerRecord`] payload
 //! (`PlayerRecord.data`) while the player's [`GameMode`] rides the record's own
 //! typed field; storage never interprets either, so the storage layer stays
 //! byte-oriented and free of any inventory/connection types.
 //!
 //! # Versioning and robustness
 //!
-//! Every record is stamped with [`PLAYER_SCHEMA_VERSION`]. A record written under
-//! a different version, or a payload that fails to decode, is rejected with a
-//! classified [`PlayerLoadError`]. Only a confirmed missing storage record may
+//! New records use schema 2 with exactly 46 slots and a required, validated
+//! carried item. Schema 1 explicitly migrates its layout with an empty cursor;
+//! its old slot normalization policy remains intact. Migration happens in memory
+//! and is written only by a later successful leave-save. Other versions and
+//! malformed payloads are rejected with a classified [`PlayerLoadError`].
+//! Only a confirmed missing storage record may
 //! use fresh-player defaults, so an unreadable record can never be overwritten by
 //! a later default-state leave save.
 //!
 //! # Inventory fidelity
 //!
-//! Each slot persists its registry item id and stack count, which restores the
+//! Each slot and the carried item persist their registry item id and stack count, which restores the
 //! full inventory *layout* (what is where, and how many). Data components
 //! (custom name, damage, NBT, …) are intentionally not persisted in this version:
 //! the trusted slot encoder and the untrusted slot decoder use different on-wire
 //! framing, so they do not round-trip, and a lossy component codec would be worse
-//! than none. Restoring item + count covers the creative building loadout this
-//! milestone targets; component persistence is a follow-up that would bump
+//! than none. Live exchanges retain components, but a restart does not. Stack
+//! counts are validated against the registry maximum, so a component-supplied
+//! custom stack limit is not supported by this storage contract. Component persistence
+//! remains a follow-up that would bump
 //! [`PLAYER_SCHEMA_VERSION`].
 
 use std::error::Error;
@@ -42,8 +47,9 @@ use crate::inventory::{PlayerInventory, SLOT_COUNT};
 
 /// The schema version stamped on every [`PlayerRecord`] this module writes.
 ///
-/// A loaded record carrying any other version is rejected as incompatible.
-pub(crate) const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
+/// Schema 1 migrates explicitly; other versions are rejected as incompatible.
+pub(crate) const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
+const LEGACY_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
 
 /// Largest magnitude accepted for a player coordinate.
 ///
@@ -153,6 +159,7 @@ pub(crate) async fn load_player_for_join(
 /// to a clean stack (or an empty slot), so a corrupt entry never produces an
 /// invalid [`ItemStack`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PersistedSlot {
     /// The registry item id, or `0` for an empty slot.
     item_id: i32,
@@ -192,6 +199,73 @@ impl PersistedSlot {
     }
 }
 
+/// Schema-2 carried item, strictly validated rather than silently normalized.
+/// Its storage contract retains item identity/count, matching inventory slots;
+/// component fidelity across restart remains a separate persistence milestone.
+#[derive(Debug, Clone, PartialEq)]
+struct PersistedCarried(ItemStack);
+
+impl Serialize for PersistedCarried {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if !self.0.is_valid() || self.0.item().is_some_and(ItemId::is_air) {
+            return Err(serde::ser::Error::custom("invalid carried stack"));
+        }
+        PersistedSlot::capture(&self.0).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PersistedCarried {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let slot = PersistedSlot::deserialize(deserializer)?;
+        if slot.item_id == 0 && slot.count == 0 {
+            return Ok(Self(ItemStack::empty()));
+        }
+        let item = ItemId::new(slot.item_id)
+            .filter(|item| !item.is_air())
+            .ok_or_else(|| serde::de::Error::custom("unknown or air carried item ID"))?;
+        let stack = ItemStack::try_new(item, slot.count, ComponentPatch::empty())
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self(stack))
+    }
+}
+
+/// The original JSON layout, read only for explicit schema-1 migration.
+#[derive(Deserialize)]
+struct LegacyPlayerData {
+    x: f64,
+    y: f64,
+    z: f64,
+    yaw: f32,
+    pitch: f32,
+    selected_slot: u8,
+    slots: Vec<PersistedSlot>,
+}
+
+impl From<LegacyPlayerData> for PlayerData {
+    fn from(data: LegacyPlayerData) -> Self {
+        // Retain the schema-1 policy: pad short layouts, ignore slots beyond the
+        // known window, and normalize malformed entries when restoring slots.
+        let slots = (0..SLOT_COUNT)
+            .map(|index| {
+                data.slots.get(index).copied().unwrap_or(PersistedSlot {
+                    item_id: 0,
+                    count: 0,
+                })
+            })
+            .collect();
+        Self {
+            x: data.x,
+            y: data.y,
+            z: data.z,
+            yaw: data.yaw,
+            pitch: data.pitch,
+            selected_slot: data.selected_slot,
+            slots,
+            carried: PersistedCarried(ItemStack::empty()),
+        }
+    }
+}
+
 /// A versioned, serializable snapshot of one player's persisted state.
 ///
 /// The [`GameMode`] is *not* held here: it lives in the typed
@@ -199,6 +273,7 @@ impl PersistedSlot {
 /// with [`PlayerData::capture`] and turn it back into a seeded
 /// [`PlayerInventory`] with [`PlayerData::restore_inventory`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PlayerData {
     /// Player position, x component (world space).
     x: f64,
@@ -213,7 +288,48 @@ pub(crate) struct PlayerData {
     /// The selected hotbar index (`0..=8`).
     selected_slot: u8,
     /// The 46 inventory slots, in window-0 order.
+    #[serde(deserialize_with = "deserialize_inventory_slots")]
     slots: Vec<PersistedSlot>,
+    /// Required schema-2 carried item; missing data is corruption, not empty.
+    carried: PersistedCarried,
+}
+
+/// Decodes only the schema-2 window layout, rejecting excess entries before
+/// they can grow an allocation or be silently discarded during restoration.
+fn deserialize_inventory_slots<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<PersistedSlot>, D::Error> {
+    struct SlotsVisitor;
+    impl<'de> serde::de::Visitor<'de> for SlotsVisitor {
+        type Value = Vec<PersistedSlot>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "exactly {SLOT_COUNT} inventory slots")
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut sequence: A,
+        ) -> Result<Self::Value, A::Error> {
+            if sequence.size_hint().is_some_and(|count| count > SLOT_COUNT) {
+                return Err(serde::de::Error::custom("too many inventory slots"));
+            }
+            let mut slots = Vec::with_capacity(SLOT_COUNT);
+            while let Some(slot) = sequence.next_element()? {
+                if slots.len() == SLOT_COUNT {
+                    return Err(serde::de::Error::custom("too many inventory slots"));
+                }
+                slots.push(slot);
+            }
+            if slots.len() != SLOT_COUNT {
+                return Err(serde::de::Error::custom(
+                    "inventory must contain exactly 46 slots",
+                ));
+            }
+            Ok(slots)
+        }
+    }
+    deserializer.deserialize_seq(SlotsVisitor)
 }
 
 impl PlayerData {
@@ -246,6 +362,7 @@ impl PlayerData {
             pitch,
             selected_slot: inventory.selected(),
             slots,
+            carried: PersistedCarried(inventory.carried().clone()),
         }
     }
 
@@ -275,7 +392,12 @@ impl PlayerData {
         for (index, slot) in self.slots.iter().take(SLOT_COUNT).enumerate() {
             slots[index] = slot.restore();
         }
-        PlayerInventory::from_persisted(game_mode, self.selected_slot, slots)
+        PlayerInventory::from_persisted(
+            game_mode,
+            self.selected_slot,
+            slots,
+            self.carried.0.clone(),
+        )
     }
 
     /// Encodes this snapshot, plus the typed `game_mode`, into a [`PlayerRecord`].
@@ -299,6 +421,11 @@ impl PlayerData {
     /// classified errors. Neither is absence and neither authorizes fresh-player
     /// defaults.
     pub(crate) fn from_record(record: &PlayerRecord) -> Result<Self, PlayerLoadError> {
+        if record.schema_version() == LEGACY_PLAYER_SCHEMA_VERSION {
+            return serde_json::from_slice::<LegacyPlayerData>(record.data())
+                .map(Self::from)
+                .map_err(|source| PlayerLoadError::Corrupt { source });
+        }
         if record.schema_version() != PLAYER_SCHEMA_VERSION {
             return Err(PlayerLoadError::Incompatible {
                 found: record.schema_version(),
@@ -312,6 +439,195 @@ impl PlayerData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn schema_two_payload() -> serde_json::Value {
+        serde_json::to_value(PlayerData::capture(
+            Vec3::new(4.0, 65.0, -9.0),
+            23.0,
+            -7.0,
+            &sample_inventory(),
+        ))
+        .expect("valid current payload")
+    }
+
+    fn assert_corrupt(payload: Vec<u8>) {
+        let record = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload)
+            .expect("bounded malformed record");
+        assert!(matches!(
+            PlayerData::from_record(&record),
+            Err(PlayerLoadError::Corrupt { .. })
+        ));
+    }
+
+    #[test]
+    fn schema_one_explicitly_migrates_without_rewriting_the_loaded_record() {
+        let mut legacy = schema_two_payload();
+        legacy.as_object_mut().expect("object").remove("carried");
+        legacy["slots"].as_array_mut().expect("slots").truncate(39);
+        let original = serde_json::to_vec(&legacy).expect("legacy JSON");
+        let record = PlayerRecord::new(
+            LEGACY_PLAYER_SCHEMA_VERSION,
+            GameMode::Survival,
+            original.clone(),
+        )
+        .expect("record");
+        let decoded = PlayerData::from_record(&record).expect("explicit migration");
+        assert_eq!(
+            record.data(),
+            original,
+            "loading never rewrites storage bytes"
+        );
+        assert_eq!(record.schema_version(), LEGACY_PLAYER_SCHEMA_VERSION);
+        assert_eq!(decoded.position(), Vec3::new(4.0, 65.0, -9.0));
+        assert_eq!((decoded.yaw(), decoded.pitch()), (23.0, -7.0));
+        let inventory = decoded.restore_inventory(GameMode::Survival);
+        assert_eq!(inventory.selected(), 5);
+        assert!(inventory.carried().item().is_none());
+        for index in 0..39 {
+            let slot: PersistedSlot =
+                serde_json::from_value(legacy["slots"][index].clone()).expect("legacy slot");
+            assert_eq!(inventory.slot(index), Some(&slot.restore()));
+        }
+        assert!((39..SLOT_COUNT).all(|index| inventory
+            .slot(index)
+            .expect("padded slot")
+            .item()
+            .is_none()));
+        let rewritten = decoded
+            .to_record(GameMode::Survival)
+            .expect("next leave encoding");
+        assert_eq!(rewritten.schema_version(), PLAYER_SCHEMA_VERSION);
+        let current: serde_json::Value = serde_json::from_slice(rewritten.data()).expect("JSON");
+        assert_eq!(
+            current["carried"],
+            serde_json::json!({"item_id":0,"count":0})
+        );
+        assert_eq!(
+            current["slots"].as_array().expect("slots").len(),
+            SLOT_COUNT
+        );
+        assert!(PlayerData::from_record(&rewritten).is_ok());
+    }
+
+    #[test]
+    fn full_inventory_overflow_round_trips_without_components() {
+        let mut inventory = sample_inventory();
+        let stone = ItemId::from_name("stone").expect("stone");
+        for index in crate::inventory::MAIN_START..crate::inventory::PLAYER_WINDOW_END {
+            inventory.set_creative_slot(
+                index,
+                ItemStack::try_new(stone, 64, ComponentPatch::empty()).expect("full stack"),
+            );
+        }
+        let carried = ItemStack::try_new(stone, 7, ComponentPatch::empty()).expect("carried");
+        inventory.set_carried(carried.clone());
+        inventory.return_carried();
+        let captured = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory);
+        let record = captured.to_record(GameMode::Creative).expect("save");
+        let restored = PlayerData::from_record(&record)
+            .expect("load")
+            .restore_inventory(GameMode::Creative);
+        assert_eq!(restored.carried(), &carried);
+        assert_eq!(
+            restored.container_content_payload().expect("payload"),
+            inventory.container_content_payload().expect("payload")
+        );
+    }
+
+    #[test]
+    fn component_persistence_is_explicitly_limited_to_id_and_count() {
+        let mut inventory = sample_inventory();
+        let stack = ItemStack::try_new(
+            ItemId::from_name("stone").expect("stone"),
+            7,
+            ComponentPatch::new(vec![ferrumc_items::ComponentValue::Damage(3)], Vec::new()),
+        )
+        .expect("component stack");
+        inventory.set_carried(stack.clone());
+        let record = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory)
+            .to_record(GameMode::Creative)
+            .expect("encode");
+        let restored = PlayerData::from_record(&record)
+            .expect("decode")
+            .restore_inventory(GameMode::Creative);
+        assert_eq!(restored.carried().item(), stack.item());
+        assert_eq!(restored.carried().count(), stack.count());
+        assert!(
+            restored.carried().components().is_empty(),
+            "S02 component codec is not implemented"
+        );
+    }
+
+    #[test]
+    fn schema_two_rejects_missing_invalid_unknown_or_duplicate_carried_data() {
+        let valid = schema_two_payload();
+        assert!(PlayerData::from_record(
+            &PlayerRecord::new(
+                PLAYER_SCHEMA_VERSION,
+                GameMode::Survival,
+                serde_json::to_vec(&valid).expect("valid")
+            )
+            .expect("record")
+        )
+        .is_ok());
+        let mut missing = valid.clone();
+        missing.as_object_mut().expect("object").remove("carried");
+        assert_corrupt(serde_json::to_vec(&missing).expect("JSON"));
+        let stone = ItemId::from_name("stone").expect("stone").id();
+        let sword = ItemId::from_name("diamond_sword").expect("sword").id();
+        for carried in [
+            serde_json::Value::Null,
+            serde_json::json!([]),
+            serde_json::json!("empty"),
+            serde_json::json!({}),
+            serde_json::json!({"item_id":stone}),
+            serde_json::json!({"item_id":stone,"count":0}),
+            serde_json::json!({"item_id":stone,"count":65}),
+            serde_json::json!({"item_id":sword,"count":2}),
+            serde_json::json!({"item_id":0,"count":1}),
+            serde_json::json!({"item_id":-1,"count":7}),
+            serde_json::json!({"item_id":i32::MAX,"count":7}),
+            serde_json::json!({"item_id":stone,"count":-1}),
+            serde_json::json!({"item_id":stone,"count":256}),
+            serde_json::json!({"item_id":stone,"count":1,"components":[]}),
+            serde_json::json!({"item_id":stone,"count":1,"ignored":true}),
+        ] {
+            let mut payload = valid.clone();
+            payload["carried"] = carried;
+            assert_corrupt(serde_json::to_vec(&payload).expect("JSON"));
+        }
+        let bytes = serde_json::to_vec(&valid).expect("JSON");
+        let json = String::from_utf8(bytes.clone()).expect("UTF8");
+        let duplicate = json.replacen(
+            "\"carried\":",
+            "\"carried\":{\"item_id\":0,\"count\":0},\"carried\":",
+            1,
+        );
+        assert_corrupt(duplicate.into_bytes());
+        let duplicate_field = json.replacen("\"carried\":{", "\"carried\":{\"count\":0,", 1);
+        assert_corrupt(duplicate_field.into_bytes());
+        assert_corrupt(bytes[..bytes.len() - 1].to_vec());
+        let mut trailing = bytes;
+        trailing.extend_from_slice(b"trailing");
+        assert_corrupt(trailing);
+    }
+
+    #[test]
+    fn schema_two_rejects_wrong_layout_lengths_and_unknown_fields() {
+        let valid = schema_two_payload();
+        for count in [0, SLOT_COUNT - 1, SLOT_COUNT + 1, 4096] {
+            let mut payload = valid.clone();
+            payload["slots"] =
+                serde_json::json!(vec![serde_json::json!({"item_id":0,"count":0}); count]);
+            assert_corrupt(serde_json::to_vec(&payload).expect("JSON"));
+        }
+        let mut unknown = valid.clone();
+        unknown["future_items"] = serde_json::json!([1]);
+        assert_corrupt(serde_json::to_vec(&unknown).expect("JSON"));
+        let mut unknown_slot = valid;
+        unknown_slot["slots"][0]["future_items"] = serde_json::json!([1]);
+        assert_corrupt(serde_json::to_vec(&unknown_slot).expect("JSON"));
+    }
 
     fn sample_inventory() -> PlayerInventory {
         let mut inv = PlayerInventory::with_creative_kit(GameMode::Creative);
@@ -487,6 +803,7 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
             selected_slot: 200, // out of range
+            carried: PersistedCarried(ItemStack::empty()),
             slots: vec![
                 PersistedSlot {
                     item_id: -1,

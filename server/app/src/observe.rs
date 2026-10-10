@@ -153,6 +153,7 @@ pub(crate) fn clientbound_play_name(packet: &ClientboundPlayPacket) -> &'static 
         ClientboundPlayPacket::BlockEntityData(_) => "block_entity_data",
         ClientboundPlayPacket::OpenSignEditor(_) => "open_sign_editor",
         ClientboundPlayPacket::OpenScreen(_) => "open_screen",
+        ClientboundPlayPacket::PlayDisconnect(_) => "play_disconnect",
     }
 }
 

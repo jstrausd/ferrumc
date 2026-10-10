@@ -231,6 +231,35 @@ fn counter(directory: &Path, key: &str) -> anyhow::Result<u32> {
         .map_err(Into::into)
 }
 
+async fn check_completions(admin: &mut TestClient, canonical: uuid::Uuid) -> anyhow::Result<()> {
+    assert_eq!(tab_complete(admin, "/bfi", 1).await?, ["bfixture"]);
+    assert_eq!(
+        tab_complete(admin, "/BFIXTURE explicit", 3).await?,
+        ["explicit:BFIXTURE:JavaAdmin"]
+    );
+    assert_eq!(tab_complete(admin, "/bfixture a", 4).await?, ["alpha"]);
+    assert_eq!(
+        tab_complete(admin, "/bfixture ", 5).await?,
+        ["alpha", "beta", "Grüße Ω", "🌍"]
+    );
+    assert_eq!(
+        tab_complete(admin, "/bridgefixture:bfixture probe ", 6).await?,
+        [format!("probe:bridgefixture:bfixture:{canonical}:2:")]
+    );
+    assert_eq!(
+        tab_complete(admin, "/bfixture probe  ", 7).await?,
+        [format!("probe:bfixture:{canonical}:3:")]
+    );
+    for (id, bad) in (10_i32..).zip(["fail", "large", "many", "nul", "surrogate"]) {
+        assert_eq!(
+            tab_complete(admin, &format!("/bfixture {bad}"), id).await?,
+            [] as [String; 0]
+        );
+    }
+    assert_eq!(tab_complete(admin, "/bfixture a", 20).await?, ["alpha"]);
+    Ok(())
+}
+
 async fn socket_lifecycle(artifacts: &Artifacts, directory: &Path) -> anyhow::Result<()> {
     artifacts.install(directory, false)?;
     let config = artifacts.config(directory, "127.0.0.1:0")?;
@@ -250,7 +279,7 @@ async fn socket_lifecycle(artifacts: &Artifacts, directory: &Path) -> anyhow::Re
                 format!("fixture:{label}:JavaAdmin:{canonical}:true:true:FerrumC:1.0.0")
             );
         }
-        assert_eq!(tab_complete(&mut admin, "/bfi", 1).await?, ["bfixture"]);
+        check_completions(&mut admin, canonical).await?;
         assert_eq!(
             command_reply(&mut admin, "bfixture unicode").await?,
             "Grüße 🌍"
@@ -279,8 +308,12 @@ async fn socket_lifecycle(artifacts: &Artifacts, directory: &Path) -> anyhow::Re
         let mut guest = login_to_play(address, "JavaGuest").await?;
         complete_join(&mut guest, false).await?;
         assert_eq!(
+            tab_complete(&mut guest, "/bfixture fail", 21).await?,
+            [] as [String; 0]
+        );
+        assert_eq!(
             tab_complete(&mut guest, "/bfi", 2).await?,
-            Vec::<String>::new()
+            [] as [String; 0]
         );
         assert!(
             command_reply(&mut guest, "BFIXTURE")

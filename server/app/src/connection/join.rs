@@ -14,9 +14,10 @@ use ferrumc_proto::generated::play::{
     SetCenterChunk, SetContainerContent, SetDefaultSpawnPosition,
 };
 
-use crate::driver::SimCommand;
+use crate::driver::{SimCommand, StreamedChunk};
 use crate::inventory::{PlayerInventory, WINDOW_ID};
 
+use super::chunk_stream::ChunkStream;
 use super::context::ConnContext;
 use super::outbound::{enqueue_traced_classified, flush_writer, send_mandatory};
 use super::{spawn_sync, GAME_EVENT_CHANGE_GAMEMODE, JOIN_TELEPORT_ID};
@@ -77,6 +78,7 @@ pub(super) async fn send_join_kit(
     pitch: f32,
     is_returning: bool,
     inventory: &PlayerInventory,
+    chunk_stream: &mut ChunkStream,
 ) -> anyhow::Result<()> {
     let kit = &ctx.join_kit;
     let clock = &ctx.clock;
@@ -171,7 +173,7 @@ pub(super) async fn send_join_kit(
         )),
     )?;
     // Initialize window 0 with the full 46-slot inventory (the starter kit in the
-    // hotbar) and an empty cursor. Mandatory: a dropped container-content leaves the
+    // hotbar) and the persisted player-owned cursor. Mandatory: a dropped container-content leaves the
     // client's inventory view desynced.
     let container_payload = inventory
         .container_content_payload()
@@ -227,18 +229,13 @@ pub(super) async fn send_join_kit(
     // returns. The spawn batch remains up-front rather than paced through that
     // pump so the ordinary spawn join path is unchanged.
     let spawn_positions: Vec<ChunkPos> = kit.chunk_positions().collect();
-    let (reply_tx, reply_rx) = oneshot::channel();
-    ctx.commands
-        .send(SimCommand::StreamChunks {
-            load: spawn_positions,
-            unload: Vec::new(),
-            reply: reply_tx,
-        })
-        .await
-        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
-    let chunks = reply_rx
-        .await
-        .map_err(|_| anyhow::anyhow!("simulation driver dropped the spawn chunk reply"))?;
+    let chunks = acquire_join_chunks(
+        &ctx.commands,
+        spawn_positions,
+        &mut chunk_stream.loaded,
+        &mut chunk_stream.ticket_handoff_pending,
+    )
+    .await?;
     for streamed in chunks {
         let outcome = enqueue_traced_classified(
             writer,
@@ -259,4 +256,136 @@ pub(super) async fn send_join_kit(
         }
     }
     flush_writer(writer, stream, compression, ctx.io_timeout).await
+}
+
+/// Atomically records the actual ticket handoff before any encoding or socket
+/// flush can fail. Failed load/encode entries were already released by the driver;
+/// a lost receiver makes the driver release only its actual acquired batch.
+async fn acquire_join_chunks(
+    commands: &tokio::sync::mpsc::Sender<SimCommand>,
+    positions: Vec<ChunkPos>,
+    acquired: &mut std::collections::BTreeSet<ChunkPos>,
+    pending: &mut bool,
+) -> anyhow::Result<Vec<StreamedChunk>> {
+    let (reply, receive) = oneshot::channel();
+    commands
+        .send(SimCommand::StreamChunks {
+            load: positions,
+            unload: Vec::new(),
+            reply,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+    *pending = true;
+    let chunks = receive
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver dropped the spawn chunk reply"))?;
+    acquired.extend(
+        chunks
+            .iter()
+            .map(|chunk| ChunkPos::new(chunk.chunk.x(), chunk.chunk.z())),
+    );
+    *pending = false;
+    Ok(chunks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use tokio::sync::mpsc;
+
+    fn streamed(pos: ChunkPos) -> StreamedChunk {
+        let chunk = ferrumc_world::FlatWorldGenerator::new().generate(pos);
+        StreamedChunk {
+            chunk: crate::world::chunk_packet(pos, &chunk).expect("chunk"),
+            block_entities: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_setup_before_acquisition_never_releases_another_players_tickets() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let acquired = BTreeSet::new();
+        super::super::play::release_owned_chunks(&commands, &acquired)
+            .await
+            .expect("nothing owned");
+        assert!(
+            inbox.try_recv().is_err(),
+            "no release for configured but unacquired spawn columns"
+        );
+    }
+
+    #[tokio::test]
+    async fn partial_reply_is_owned_before_any_later_encoding_or_flush_failure() {
+        let positions = vec![
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+        ];
+        let returned = vec![positions[0], positions[2]];
+        let (commands, mut inbox) = mpsc::channel(1);
+        let (acquired_ready, inspect) = oneshot::channel();
+        let connection = tokio::spawn(async move {
+            let mut acquired = BTreeSet::new();
+            let mut pending = false;
+            let chunks = acquire_join_chunks(&commands, positions, &mut acquired, &mut pending)
+                .await
+                .expect("partial successful reply");
+            acquired_ready
+                .send((acquired.clone(), pending))
+                .expect("inspect handoff");
+            // Socket failure after receipt cannot undo this already-owned batch.
+            drop(chunks);
+            super::super::play::release_owned_chunks(&commands, &acquired)
+                .await
+                .expect("error teardown release");
+        });
+        let SimCommand::StreamChunks { reply, .. } = inbox.recv().await.expect("acquire") else {
+            panic!("acquire command");
+        };
+        assert!(
+            reply
+                .send(returned.iter().copied().map(streamed).collect())
+                .is_ok(),
+            "handoff"
+        );
+        let (owned, pending) = inspect
+            .await
+            .expect("ownership recorded before socket stage");
+        assert_eq!(owned, returned.iter().copied().collect());
+        assert!(!pending);
+        let SimCommand::ReleaseChunks { positions } = inbox.recv().await.expect("release") else {
+            panic!("release command");
+        };
+        assert_eq!(
+            positions, returned,
+            "skipped column was never acquired and cannot be released"
+        );
+        connection.await.expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn missing_join_reply_retains_uncertainty_without_guessing_ticket_positions() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let driver = tokio::spawn(async move {
+            drop(inbox.recv().await.expect("admitted chunk request"));
+        });
+        let mut acquired = BTreeSet::new();
+        let mut pending = false;
+        assert!(acquire_join_chunks(
+            &commands,
+            vec![ChunkPos::new(0, 0)],
+            &mut acquired,
+            &mut pending
+        )
+        .await
+        .is_err());
+        assert!(
+            pending,
+            "caller must quarantine an unconfirmed admitted batch"
+        );
+        assert!(acquired.is_empty(), "no guessed releases");
+        driver.await.expect("driver ends");
+    }
 }
