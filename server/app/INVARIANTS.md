@@ -25,3 +25,10 @@
   transactions complete before their updated inventory is persisted.
 - A canceled chunk-stream send retains unload bookkeeping until admission; a
   canceled reply releases only actually acquired tickets behind a durable flush.
+- A chest click may exchange items only after both active window and state IDs
+  match. The driver also compares that viewer's bounded chest snapshot atomically
+  before a chest-slot exchange; conflicting views return the unchanged cursor
+  and fresh contents. Resyncs include both slot sections and the cursor.
+- A Close Container packet may close only the window whose exact ID it carries.
+- An inaccessible chest refuses exchanges and retains the last snapshot/cursor;
+  server-driven closure of a vanished or unreachable chest is not yet modelled.

@@ -81,6 +81,12 @@ impl OpenContainer {
         self.state_id
     }
 
+    /// The chest snapshot last sent to this viewer, used to reject conflicting
+    /// clicks before the authoritative simulation exchanges any items.
+    pub(crate) fn chest_slots(&self) -> &[ItemStack] {
+        &self.slots
+    }
+
     /// The carried (cursor) item.
     pub(crate) fn cursor(&self) -> &ItemStack {
         &self.cursor

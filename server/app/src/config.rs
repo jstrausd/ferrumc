@@ -1007,7 +1007,7 @@ mod tests {
     fn spawn_protection_defaults_to_disabled() {
         let parsed = AppConfig::from_toml_str("").expect("empty config is valid");
         assert_eq!(parsed.spawn_protect_radius, 0);
-        assert!(parsed.spawn_protect_bypass.is_empty());
+        assert_eq!(parsed.spawn_protect_bypass, [] as [String; 0]);
         assert_eq!(parsed.plugins_dir, None);
     }
 
@@ -1029,7 +1029,7 @@ mod tests {
     #[test]
     fn operators_default_to_empty_with_player_level_zero() {
         let parsed = AppConfig::from_toml_str("").expect("empty config is valid");
-        assert!(parsed.ops.is_empty());
+        assert_eq!(parsed.ops, [] as [String; 0]);
         assert_eq!(parsed.default_permission_level, 0);
     }
 
@@ -1039,8 +1039,8 @@ mod tests {
         assert_eq!(parsed.access, AccessConfig::default());
         assert_eq!(parsed.access.per_ip_connection_limit, 3);
         assert!(!parsed.access.whitelist_enabled);
-        assert!(parsed.access.whitelist.is_empty());
-        assert!(parsed.access.bans.is_empty());
+        assert_eq!(parsed.access.whitelist, [] as [String; 0]);
+        assert_eq!(parsed.access.bans, [] as [String; 0]);
     }
 
     #[test]

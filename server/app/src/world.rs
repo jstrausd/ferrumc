@@ -674,7 +674,7 @@ mod tests {
                 .get(pos)
                 .expect("spawn chunk resident");
             let chunk = chunk_packet(pos, resident).expect("chunk packet builds");
-            assert!(!chunk.chunk_data().as_slice().is_empty());
+            assert_ne!(chunk.chunk_data().as_slice(), [] as [u8; 0]);
 
             let heightmaps = chunk.heightmaps();
             assert_eq!(heightmaps.len(), 1);
@@ -683,9 +683,12 @@ mod tests {
 
             assert_eq!(chunk.sky_light_mask(), &[0x03FF_FFFF]);
             assert_eq!(chunk.empty_block_light_mask(), &[0x03FF_FFFF]);
-            assert!(chunk.block_light_mask().is_empty());
+            assert_eq!(chunk.block_light_mask(), [] as [i64; 0]);
             assert_eq!(chunk.sky_light().len(), 26);
-            assert!(chunk.block_light().is_empty());
+            assert_eq!(
+                chunk.block_light(),
+                [] as [ferrumc_codec::BoundedBytes<2048>; 0]
+            );
             for section in chunk.sky_light() {
                 assert_eq!(section.as_slice().len(), 2048);
             }

@@ -568,6 +568,8 @@ pub(crate) enum SimCommand {
     /// viewers. The connection sends its current cursor and adopts the returned
     /// cursor + snapshot; a `None` reply (chest gone / out of reach / bad slot)
     /// leaves the connection's cursor untouched and triggers a resync.
+    /// A conflicting viewer snapshot returns the unchanged cursor and current
+    /// chest contents without applying an exchange.
     ContainerLeftClick {
         /// The clicking player.
         player: PlayerId,
@@ -577,6 +579,9 @@ pub(crate) enum SimCommand {
         slot: usize,
         /// The player's carried item at click time (server-authoritative).
         cursor: ItemStack,
+        /// The bounded chest snapshot this viewer last received. The driver
+        /// compares it while holding the shard, before applying the exchange.
+        expected_slots: Vec<ItemStack>,
         /// One-shot reply: the `(new_cursor, snapshot)` after the click, or `None`
         /// if the click could not be applied (the caller keeps its cursor).
         reply: oneshot::Sender<Option<(ItemStack, Vec<ItemStack>)>>,
@@ -1318,13 +1323,16 @@ async fn handle_command(
             position,
             slot,
             cursor,
+            expected_slots,
             reply,
         } => {
-            // Apply the conserving slot/cursor exchange atomically against the
-            // authoritative chest while we hold the shard, so concurrent viewers are
-            // serialised and a click can never dupe or lose an item. The connection
-            // adopts the returned cursor + snapshot (or keeps its cursor on `None`).
-            let outcome = shard.container_left_click(player, position, slot, cursor);
+            // Checking and exchanging contain no await and share the shard's
+            // sole owner. Another viewer cannot change the chest between them.
+            let outcome = match shard.container_open(player, position) {
+                Some(snapshot) if snapshot != expected_slots => Some((cursor, snapshot)),
+                Some(_) => shard.container_left_click(player, position, slot, cursor),
+                None => None,
+            };
             let _ = reply.send(outcome);
         }
     }

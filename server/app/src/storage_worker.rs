@@ -513,11 +513,10 @@ mod tests {
             .expect("worker answers the durability barrier")
             .expect_err("a failed durability barrier must not report success");
         retry_gate.wait_until_reached().await;
-        assert!(store
-            .snapshot()
-            .expect("failed snapshot")
-            .block_mutations()
-            .is_empty());
+        assert_eq!(
+            store.snapshot().expect("failed snapshot").block_mutations(),
+            []
+        );
         let attempts = tokenized_attempts(&store);
         assert_eq!(attempts.len(), 2);
         assert!(attempts
@@ -657,7 +656,7 @@ mod tests {
         retry_gate.wait_until_reached().await;
         let before_recovery = store.snapshot().expect("pre-recovery snapshot");
         assert!(before_recovery.chunk_overlay(key).is_none());
-        assert!(before_recovery.block_mutations().is_empty());
+        assert_eq!(before_recovery.block_mutations(), []);
         let attempts = store
             .attempted_state()
             .expect("pre-recovery attempts")
@@ -729,7 +728,7 @@ mod tests {
         overlay_response.wait_until_reached().await;
         let overlay_committed = store.snapshot().expect("held overlay snapshot");
         assert_eq!(overlay_committed.chunk_overlay(key), Some(&overlay));
-        assert!(overlay_committed.block_mutations().is_empty());
+        assert_eq!(overlay_committed.block_mutations(), []);
         overlay_response.release();
         acknowledged
             .await
@@ -890,11 +889,13 @@ mod tests {
             .expect("worker task joins")
             .expect_err("retry exhaustion is terminal");
         assert!(tx.is_closed());
-        assert!(store
-            .snapshot()
-            .expect("terminal snapshot")
-            .block_mutations()
-            .is_empty());
+        assert_eq!(
+            store
+                .snapshot()
+                .expect("terminal snapshot")
+                .block_mutations(),
+            []
+        );
         let attempts = tokenized_attempts(&store);
         assert_eq!(attempts.len(), TEST_RETRY_POLICY.max_attempts as usize);
         assert!(attempts
@@ -944,11 +945,13 @@ mod tests {
             tokenized_attempts(&store).len(),
             TEST_RETRY_POLICY.max_attempts as usize
         );
-        assert!(store
-            .snapshot()
-            .expect("failed final snapshot")
-            .block_mutations()
-            .is_empty());
+        assert_eq!(
+            store
+                .snapshot()
+                .expect("failed final snapshot")
+                .block_mutations(),
+            []
+        );
     }
 
     #[test]

@@ -1428,9 +1428,13 @@ async fn handle_set_held_item(
 /// other case — right-click, shift-click, drag, number-key swap, double-click,
 /// drop-outside, an out-of-window slot, or a malformed body — is treated as a
 /// no-op and the whole window is resynced (authoritative `SetContainerContent`)
-/// rather than guessed, so the protocol can never duplicate or lose an item. A
-/// click on window 0 (the always-open inventory) resyncs it. Never disconnects,
-/// never trusts the client's claimed result, never panics.
+/// rather than guessed. Window and state IDs must match before either slot
+/// section can mutate. Stale
+/// IDs refresh the chest snapshot and resync the current window; clicks for an
+/// unknown window without an open chest resync the player inventory. The client's
+/// claimed result is never trusted. If the chest becomes inaccessible, exchanges
+/// are refused and the last snapshot/cursor are retained; server-driven closure
+/// of that screen is not yet modelled.
 #[allow(clippy::too_many_arguments)] // one click step: identity + window state + I/O + trace
 async fn handle_window_click(
     ctx: &ConnContext,
@@ -1442,20 +1446,17 @@ async fn handle_window_click(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    let window_id = packet.window_id();
-    // A click on the open chest window: apply the safe subset, then resync (which
-    // both confirms a handled click and heals an unhandled/ambiguous one).
-    if window_state
-        .open()
-        .is_some_and(|open| open.window_id() == window_id)
-    {
-        apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
+    // Validate both IDs before parsing or mutating either chest or player slots.
+    // Even window 0 is stale while a chest is the active container screen.
+    if let Some(open) = window_state.open() {
+        if packet.window_id() == open.window_id() && packet.state_id() == open.state_id() {
+            apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
+        } else {
+            refresh_chest_window(ctx, player, window_state).await?;
+        }
         return resync_chest_window(ctx, writer, inventory, window_state, debug, compression);
     }
-    // Otherwise the always-open player inventory (window 0): conservative resync.
-    if window_id != WINDOW_ID {
-        return Ok(());
-    }
+    // With no chest open, window 0 is the only authoritative window to resync.
     inventory.bump_state_id();
     let payload = match inventory.container_content_payload() {
         Ok(payload) => payload,
@@ -1495,13 +1496,16 @@ async fn apply_chest_window_click(
     // Parse only the fixed prefix: slot (i16), button (i8), mode (varint). A
     // truncated/malformed body resyncs (no-op here).
     let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) else {
+        refresh_chest_window(ctx, player, window_state).await?;
         return Ok(());
     };
     // Normal-mode left-click only; everything else resyncs.
     if mode != 0 || button != 0 {
+        refresh_chest_window(ctx, player, window_state).await?;
         return Ok(());
     }
     let Some(target) = OpenContainer::classify_slot(slot) else {
+        refresh_chest_window(ctx, player, window_state).await?;
         return Ok(());
     };
     match target {
@@ -1513,6 +1517,7 @@ async fn apply_chest_window_click(
             };
             let position = open.position();
             let cursor = open.cursor().clone();
+            let expected_slots = open.chest_slots().to_vec();
             let (reply_tx, reply_rx) = oneshot::channel();
             ctx.commands
                 .send(SimCommand::ContainerLeftClick {
@@ -1520,6 +1525,7 @@ async fn apply_chest_window_click(
                     position,
                     slot: chest_slot,
                     cursor,
+                    expected_slots,
                     reply: reply_tx,
                 })
                 .await
@@ -1527,13 +1533,19 @@ async fn apply_chest_window_click(
             let outcome = reply_rx
                 .await
                 .map_err(|_| anyhow::anyhow!("simulation driver dropped the container reply"))?;
-            // `None` (chest gone / out of reach) keeps the cursor; the resync heals.
+            // An inaccessible chest has no fresh snapshot. Keep the last mirror
+            // and cursor intact; automatic screen closure is not modelled yet.
             if let (Some((new_cursor, snapshot)), Some(open)) = (outcome, window_state.open_mut()) {
                 open.set_cursor(new_cursor);
                 open.set_chest_slots(snapshot);
             }
         }
         WindowSlot::Player(index) => {
+            // Another viewer may have changed the chest since this state ID was
+            // sent. Heal that stale screen before allowing its local slot click.
+            if !refresh_chest_window(ctx, player, window_state).await? {
+                return Ok(());
+            }
             // A player-inventory slot shown in the window: a purely local conserving
             // exchange against the connection-owned inventory and cursor.
             if let (Some(open), Some(slot_ref)) =
@@ -1544,6 +1556,37 @@ async fn apply_chest_window_click(
         }
     }
     Ok(())
+}
+
+/// Refreshes the open chest mirror through its owning driver. Returns true only
+/// when the viewer's snapshot was current, so a stale player-slot click is a
+/// no-op. An inaccessible chest preserves the cursor and refuses the exchange.
+async fn refresh_chest_window(
+    ctx: &ConnContext,
+    player: PlayerId,
+    window_state: &mut WindowState,
+) -> anyhow::Result<bool> {
+    let Some(open) = window_state.open() else {
+        return Ok(false);
+    };
+    let (reply, response) = oneshot::channel();
+    ctx.commands
+        .send(SimCommand::OpenContainer {
+            player,
+            position: open.position(),
+            reply,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+    let snapshot = response
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver dropped the container refresh reply"))?;
+    if let (Some(snapshot), Some(open)) = (snapshot, window_state.open_mut()) {
+        let unchanged = open.chest_slots() == snapshot;
+        open.set_chest_slots(snapshot);
+        return Ok(unchanged);
+    }
+    Ok(false)
 }
 
 /// Decodes the fixed prefix of a Click Container body: slot (`i16`), button
@@ -1566,9 +1609,9 @@ fn decode_click_prefix(rest: &[u8]) -> Option<(i16, i8, i32)> {
 /// Resyncs the open chest window: bumps its state id and re-sends the full
 /// authoritative `SetContainerContent` (chest slots, player section, cursor).
 ///
-/// This is the single confirm/heal path — sent after every handled click and
-/// after every unhandled/ambiguous one — so the client's view always converges on
-/// the server's authoritative state regardless of what it predicted.
+/// This is the single confirm/heal path after handled or refused clicks. Callers
+/// refresh the snapshot while the chest is accessible; an inaccessible chest
+/// retains its last mirror and cursor until the client closes the screen.
 fn resync_chest_window(
     ctx: &ConnContext,
     writer: &mut PlayWriter,
@@ -1642,8 +1685,8 @@ async fn open_chest_window(
     resync_chest_window(ctx, writer, inventory, window_state, debug, compression)
 }
 
-/// Handles a serverbound Close Container: close any open container, returning its
-/// carried item to the inventory.
+/// Handles a serverbound Close Container: only the current window's exact ID may
+/// close it and return its cursor. A delayed close for an earlier window is a no-op.
 #[allow(clippy::too_many_arguments)] // one close step: identity + window state + I/O + trace
 async fn handle_close_container(
     ctx: &ConnContext,
@@ -1651,10 +1694,16 @@ async fn handle_close_container(
     writer: &mut PlayWriter,
     inventory: &mut PlayerInventory,
     window_state: &mut WindowState,
-    _packet: &CloseContainer,
+    packet: &CloseContainer,
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
+    if window_state
+        .open()
+        .is_none_or(|open| open.window_id() != packet.window_id())
+    {
+        return Ok(());
+    }
     close_open_container(
         ctx,
         player,
@@ -1851,9 +1900,9 @@ mod tests {
     };
     use ferrumc_plugin_host::PluginHost;
     use ferrumc_proto::generated::play::{
-        ClientboundPlayPacket, ConfirmTeleportation, ServerboundKeepAlive, ServerboundPlayPacket,
-        SetCenterChunk, SetCreativeSlot, SetPlayerPosition, SetPlayerPositionAndRotation,
-        SetPlayerRotation, UpdateSign, UseItemOn,
+        ClientboundPlayPacket, CloseContainer, ConfirmTeleportation, ServerboundKeepAlive,
+        ServerboundPlayPacket, SetCenterChunk, SetCreativeSlot, SetPlayerPosition,
+        SetPlayerPositionAndRotation, SetPlayerRotation, UpdateSign, UseItemOn, WindowClick,
     };
     use ferrumc_proto::types::BlockPosition;
     use ferrumc_sim::SimShard;
@@ -2119,6 +2168,277 @@ mod tests {
             net_telemetry: Arc::new(NetTelemetryHub::new()),
             access: Arc::new(access),
             budget: config.budget(),
+        }
+    }
+
+    /// Drives the complete decode/dispatch path without sockets while retaining
+    /// the inventory, cursor, window, and encoded outbound resync for inspection.
+    fn handle_container_packet<'call>(
+        ctx: &'call ConnContext,
+        inventory: &'call mut PlayerInventory,
+        windows: &'call mut WindowState,
+        writer: &'call mut PlayWriter,
+        packet: ServerboundPlayPacket,
+    ) -> impl std::future::Future<Output = anyhow::Result<()>> + 'call {
+        Box::pin(async move {
+            let mut body = BytesMut::new();
+            packet.encode(&mut body)?;
+            handle_play_body(
+                ctx,
+                PlayerId::offline("ContainerProbe"),
+                "ContainerProbe",
+                writer,
+                &mut ChunkStream::new(ctx),
+                &mut ChatRateLimiter::new(ctx.clock.now()),
+                inventory,
+                windows,
+                &mut 0.0,
+                &mut 0.0,
+                &body,
+                &mut SessionDebug::new("ContainerProbe"),
+                &CompressionState::disabled(),
+                &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)?,
+            )
+            .await
+        })
+    }
+
+    fn container_probe_stack(count: u8) -> ItemStack {
+        ItemStack::try_new(
+            ItemId::from_name("stone").expect("stone item"),
+            count,
+            ComponentPatch::empty(),
+        )
+        .expect("valid probe stack")
+    }
+
+    fn container_probe_click(window: i32, state: i32, slot: i16) -> ServerboundPlayPacket {
+        let mut rest = slot.to_be_bytes().to_vec();
+        rest.push(0); // left button
+        write_var_int(&mut rest, 0); // normal click
+        write_var_int(&mut rest, 0); // no claimed changed slots
+        write_var_int(&mut rest, 0); // claimed empty cursor is never trusted
+        ServerboundPlayPacket::WindowClick(WindowClick::new(window, state, rest))
+    }
+
+    fn drain_container_resync(
+        writer: &mut PlayWriter,
+    ) -> ferrumc_proto::generated::play::SetContainerContent {
+        let batch = writer
+            .drain_batch(&CompressionState::disabled())
+            .expect("resync encodes");
+        assert_eq!(batch.frame_count(), 1, "exactly one mandatory resync");
+        let mut framed = BoundedReader::new(batch.bytes());
+        let length = usize::try_from(framed.read_var_int().expect("frame length"))
+            .expect("positive frame length");
+        let body = framed.read_bytes(length).expect("whole frame");
+        assert_eq!(framed.remaining(), 0);
+        let mut reader = BoundedReader::new(body);
+        let id = reader.read_var_int().expect("packet id");
+        let ClientboundPlayPacket::SetContainerContent(content) =
+            ClientboundPlayPacket::decode(id, &mut reader).expect("resync packet")
+        else {
+            panic!("expected container-content resync");
+        };
+        assert_eq!(reader.remaining(), 0);
+        content
+    }
+
+    #[tokio::test]
+    async fn stale_container_ids_reject_both_slot_sections_before_mutation_and_refresh() {
+        use ferrumc_world::CHEST_SLOTS;
+
+        // Each wrong ID is tested against chest AND local player-slot mutations.
+        // The refresh differs from the mirror, proving the reply is authoritative.
+        let mut fresh = vec![ItemStack::empty(); CHEST_SLOTS];
+        fresh[0] = container_probe_stack(7);
+        let returned = fresh.clone();
+        let (commands, mut inbox) = mpsc::channel(1); // one request at a time
+        let probe = tokio::spawn(async move {
+            let mut refreshes = 0;
+            while let Some(command) = inbox.recv().await {
+                let SimCommand::OpenContainer { reply, .. } = command else {
+                    panic!("invalid IDs must not dispatch any mutation");
+                };
+                refreshes += 1;
+                reply.send(Some(returned.clone())).expect("live handler");
+            }
+            refreshes
+        });
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        for slot in [0, 27] {
+            for (window_id, state_id) in [(1, 0), (1, 2), (1, -1), (2, 1), (0, 1)] {
+                let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+                *inventory.slot_mut(9).expect("main slot") = container_probe_stack(4);
+                let inventory_before = inventory.container_content_payload().expect("inventory");
+                let mut windows = WindowState::new();
+                windows.open_chest(
+                    BlockPos::new(8, 65, 8),
+                    vec![ItemStack::empty(); CHEST_SLOTS],
+                );
+                windows
+                    .open_mut()
+                    .expect("open chest")
+                    .set_cursor(container_probe_stack(5));
+                let mut writer = PlayWriter::with_defaults(ctx.limits);
+                handle_container_packet(
+                    &ctx,
+                    &mut inventory,
+                    &mut windows,
+                    &mut writer,
+                    container_probe_click(window_id, state_id, slot),
+                )
+                .await
+                .expect("stale click resyncs");
+                assert_eq!(
+                    inventory.container_content_payload().expect("inventory"),
+                    inventory_before
+                );
+                let open = windows.open().expect("same window stays open");
+                assert_eq!(open.cursor(), &container_probe_stack(5));
+                assert_eq!(open.chest_slots(), fresh);
+                let content = drain_container_resync(&mut writer);
+                assert_eq!((content.window_id(), content.state_id()), (1, 2));
+                assert_eq!(
+                    content.payload(),
+                    open.content_payload(&inventory)
+                        .expect("full authoritative window")
+                );
+            }
+        }
+        drop(ctx);
+        assert_eq!(probe.await.expect("request probe finished"), 10);
+    }
+
+    #[tokio::test]
+    async fn player_slot_click_requires_a_current_accessible_chest_snapshot() {
+        use ferrumc_world::CHEST_SLOTS;
+
+        for (conflicting_view, accessible) in [(false, true), (true, true), (true, false)] {
+            let mut returned = vec![ItemStack::empty(); CHEST_SLOTS];
+            if conflicting_view {
+                returned[0] = container_probe_stack(7);
+            }
+            let (commands, mut inbox) = mpsc::channel(1);
+            let probe = tokio::spawn(async move {
+                let SimCommand::OpenContainer { reply, .. } = inbox.recv().await.expect("refresh")
+                else {
+                    panic!("local player-slot click only refreshes the chest");
+                };
+                reply
+                    .send(accessible.then_some(returned))
+                    .expect("live handler");
+            });
+            let ctx = handler_context(commands, PluginHost::in_memory()).await;
+            let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+            *inventory.slot_mut(9).expect("main slot") = container_probe_stack(4);
+            let mut windows = WindowState::new();
+            windows.open_chest(
+                BlockPos::new(8, 65, 8),
+                vec![ItemStack::empty(); CHEST_SLOTS],
+            );
+            windows
+                .open_mut()
+                .expect("open chest")
+                .set_cursor(container_probe_stack(5));
+            let mut writer = PlayWriter::with_defaults(ctx.limits);
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                container_probe_click(1, 1, 27),
+            )
+            .await
+            .expect("current click handled");
+            let open = windows.open().expect("window stays open");
+            assert_eq!(
+                inventory.slot(9).expect("main slot").count(),
+                if conflicting_view { 4 } else { 9 }
+            );
+            assert_eq!(open.cursor().count(), if conflicting_view { 5 } else { 0 });
+            assert_eq!(drain_container_resync(&mut writer).window_id(), 1);
+            probe.await.expect("refresh probe finished");
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_window_without_an_open_chest_resyncs_the_player_inventory() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let before = inventory.slot(9).expect("main slot").clone();
+        let mut windows = WindowState::new();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            container_probe_click(99, 42, 9),
+        )
+        .await
+        .expect("unknown window resyncs");
+        assert_eq!(inventory.slot(9), Some(&before));
+        let content = drain_container_resync(&mut writer);
+        assert_eq!(content.window_id(), 0);
+        assert_eq!(
+            content.payload(),
+            inventory.container_content_payload().expect("inventory")
+        );
+        assert!(
+            inbox.try_recv().is_err(),
+            "no world work for a nonexistent window"
+        );
+    }
+
+    #[tokio::test]
+    async fn wrong_close_id_cannot_close_a_newer_window_or_deposit_its_cursor() {
+        use ferrumc_world::CHEST_SLOTS;
+
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let inventory_before = inventory.container_content_payload().expect("inventory");
+        let mut windows = WindowState::new();
+        windows.open_chest(
+            BlockPos::new(8, 65, 8),
+            vec![ItemStack::empty(); CHEST_SLOTS],
+        );
+        windows.take(); // the old window was already closed
+        let current = windows.open_chest(
+            BlockPos::new(8, 65, 8),
+            vec![ItemStack::empty(); CHEST_SLOTS],
+        );
+        assert_eq!(current, 2);
+        windows
+            .open_mut()
+            .expect("new chest")
+            .set_cursor(container_probe_stack(5));
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        for wrong_id in [0, 1, 3] {
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::CloseContainer(CloseContainer::new(wrong_id)),
+            )
+            .await
+            .expect("stale close is harmless");
+            assert_eq!(
+                windows.open().expect("new chest retained").cursor(),
+                &container_probe_stack(5)
+            );
+            assert_eq!(
+                inventory.container_content_payload().expect("inventory"),
+                inventory_before
+            );
+            assert_eq!(writer.total_queued(), 0);
+            assert!(
+                inbox.try_recv().is_err(),
+                "wrong close never reaches the driver"
+            );
         }
     }
 
@@ -2907,7 +3227,7 @@ mod tests {
         let (_, _, op_matches) = tab_complete_reply(&tree, OP_LEVEL, &|_| true, "/ga");
         assert_eq!(op_matches, vec![GAMEMODE_COMMAND.to_string()]);
         let (_, _, member_matches) = tab_complete_reply(&tree, MEMBER_LEVEL, &|_| true, "/ga");
-        assert!(member_matches.is_empty());
+        assert_eq!(member_matches, [] as [String; 0]);
     }
 
     #[test]
@@ -2917,7 +3237,7 @@ mod tests {
         // display-only and must not be sent as an insertable match.
         let (start, length, matches) = tab_complete_reply(&tree, OP_LEVEL, &|_| true, "/gamemode ");
         assert_eq!((start, length), (10, 0));
-        assert!(matches.is_empty());
+        assert_eq!(matches, [] as [String; 0]);
     }
 
     #[test]
@@ -2955,8 +3275,8 @@ mod tests {
         let loc = packet.location();
         assert_eq!((loc.x(), loc.y(), loc.z()), (0, 0, 0));
         assert!(packet.is_front_text());
-        assert!(packet.line_1().as_str().is_empty());
-        assert!(packet.line_4().as_str().is_empty());
+        assert_eq!(packet.line_1().as_str(), "");
+        assert_eq!(packet.line_4().as_str(), "");
     }
 
     #[test]

@@ -820,7 +820,7 @@ mod tests {
 
         assert!(dispatcher.decision_snapshots().is_empty());
         assert_eq!(decision, ResolvedDecision::Allow);
-        assert!(emitted.is_empty());
+        assert_eq!(emitted, []);
     }
 
     #[test]
@@ -931,6 +931,6 @@ mod tests {
             &perms,
         );
         assert_eq!(decision, ResolvedDecision::Allow);
-        assert!(emitted.is_empty());
+        assert_eq!(emitted, []);
     }
 }

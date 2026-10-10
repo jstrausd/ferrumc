@@ -564,7 +564,7 @@ mod tests {
             MAX_CHUNK_UNLOADS_PER_UPDATE,
         );
         assert_eq!(first.load.len(), MAX_CHUNK_LOADS_PER_UPDATE);
-        assert!(first.unload.is_empty());
+        assert_eq!(first.unload, []);
         assert!(first
             .load
             .iter()
@@ -585,7 +585,7 @@ mod tests {
             if transition.load.is_empty() {
                 break;
             }
-            assert!(transition.unload.is_empty());
+            assert_eq!(transition.unload, []);
             for pos in transition.load {
                 loaded.insert(pos);
             }
@@ -706,8 +706,8 @@ mod tests {
             MAX_CHUNK_LOADS_PER_UPDATE,
             MAX_CHUNK_UNLOADS_PER_UPDATE,
         );
-        assert!(latest.load.is_empty());
-        assert!(latest.unload.is_empty());
+        assert_eq!(latest.load, []);
+        assert_eq!(latest.unload, []);
     }
 
     /// Builds a bare [`ChunkStream`] for the block-crossing test without a

@@ -1344,6 +1344,12 @@ mod tests {
 
     use super::*;
 
+    /// Generated packets do not implement `PartialEq`. Match the empty slice
+    /// directly while retaining packet diagnostics on a failed assertion.
+    fn assert_no_packets(packets: &[ClientboundPlayPacket]) {
+        assert!(matches!(packets, []), "unexpected packets: {packets:?}");
+    }
+
     fn op() -> CommandSource {
         CommandSource::for_player(PlayerId::offline("Op"), "Op", 4)
     }
@@ -1566,7 +1572,7 @@ mod tests {
             .dispatch("playsound not_a_sound", &op())
             .expect("dispatch reaches the handler");
         assert!(!result.is_success());
-        assert!(presentation_packets("playsound not_a_sound", SPAWN_POS).is_empty());
+        assert_no_packets(&presentation_packets("playsound not_a_sound", SPAWN_POS));
     }
 
     #[test]
@@ -1601,14 +1607,14 @@ mod tests {
             .dispatch("particle nope", &op())
             .expect("reaches the handler")
             .is_success());
-        assert!(presentation_packets("particle nope", SPAWN_POS).is_empty());
+        assert_no_packets(&presentation_packets("particle nope", SPAWN_POS));
     }
 
     #[test]
     fn presentation_packets_ignores_other_commands() {
-        assert!(presentation_packets("spawn", SPAWN_POS).is_empty());
-        assert!(presentation_packets("gamemode 1", SPAWN_POS).is_empty());
-        assert!(presentation_packets("", SPAWN_POS).is_empty());
+        assert_no_packets(&presentation_packets("spawn", SPAWN_POS));
+        assert_no_packets(&presentation_packets("gamemode 1", SPAWN_POS));
+        assert_no_packets(&presentation_packets("", SPAWN_POS));
     }
 
     /// The issuer name passed to `scoreboard_packets` in tests.
@@ -1743,9 +1749,7 @@ mod tests {
             .dispatch("team color red mauve", &op())
             .expect("reaches handler")
             .is_success());
-        assert!(scoreboard_packets("team color red mauve", ISSUER)
-            .expect("no error")
-            .is_empty());
+        assert_no_packets(&scoreboard_packets("team color red mauve", ISSUER).expect("no error"));
     }
 
     #[test]
@@ -1807,13 +1811,9 @@ mod tests {
 
     #[test]
     fn scoreboard_packets_ignores_other_commands() {
-        assert!(scoreboard_packets("spawn", ISSUER)
-            .expect("no error")
-            .is_empty());
-        assert!(scoreboard_packets("title hi", ISSUER)
-            .expect("no error")
-            .is_empty());
-        assert!(scoreboard_packets("", ISSUER).expect("no error").is_empty());
+        assert_no_packets(&scoreboard_packets("spawn", ISSUER).expect("no error"));
+        assert_no_packets(&scoreboard_packets("title hi", ISSUER).expect("no error"));
+        assert_no_packets(&scoreboard_packets("", ISSUER).expect("no error"));
     }
 
     /// The operator-level player used as the issuer in region-command tests.
@@ -2126,7 +2126,7 @@ mod tests {
             .dispatch("time query daytime", &op())
             .expect("dispatches");
         assert!(result.is_success());
-        assert!(result.feedback().to_plain_string().is_empty());
+        assert_eq!(result.feedback().to_plain_string(), "");
 
         let player = region_player();
         let cmds = region_commands("time query daytime", player);
