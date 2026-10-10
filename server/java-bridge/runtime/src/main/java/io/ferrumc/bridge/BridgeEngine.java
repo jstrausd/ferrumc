@@ -100,8 +100,8 @@ final class BridgeEngine implements AutoCloseable {
                     completions = new JsonArray();
                     Requests.fields(request, "id", "op", "command", "args", "player");
                     requireReady();
-                    String label = Requests.string(request, "command", 130).toLowerCase(Locale.ROOT);
-                    if (!label.matches("[a-z0-9_\\-.]{1,64}(:[a-z0-9_\\-.]{1,64})?"))
+                    String label = Requests.string(request, "command", 130);
+                    if (!label.toLowerCase(Locale.ROOT).matches("[a-z0-9_\\-.]{1,64}(:[a-z0-9_\\-.]{1,64})?"))
                         throw new IllegalArgumentException("invalid command label");
                     String[] args = Requests.strings(request, "args", 64, 1024).toArray(String[]::new);
                     if (args.length == 0) throw new IllegalArgumentException("completion requires the current argument, including an empty trailing argument");
@@ -354,7 +354,7 @@ final class BridgeEngine implements AutoCloseable {
     }
 
     private JsonArray complete(CommandSender sender, String label, String[] args) {
-        PluginCommand command = commands.get(label);
+        PluginCommand command = commands.get(label.toLowerCase(Locale.ROOT));
         if (command == null) throw new IllegalArgumentException("unknown plugin command: " + label);
         if (!command.getPlugin().isEnabled()) throw new IllegalStateException("command plugin is disabled");
         JsonArray result = new JsonArray();

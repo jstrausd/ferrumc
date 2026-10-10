@@ -123,7 +123,7 @@ class BridgeProcessIT {
             ok(denied); assertTrue(suggestions(denied).isEmpty());
             JsonObject spec = player("Tester", UUID_A, false, "fixture.use");
             JsonObject explicit = child.call(complete(spec, "BFIXTURE", "explicit")); ok(explicit);
-            assertEquals(List.of("explicit:bfixture:Tester"), suggestions(explicit));
+            assertEquals(List.of("explicit:BFIXTURE:Tester"), suggestions(explicit));
             JsonObject inherited = child.call(complete(spec, "bridgefixture:bfixture", "probe", "")); ok(inherited);
             assertEquals(List.of("probe:bridgefixture:bfixture:" + UUID_A + ":2:"), suggestions(inherited));
             JsonObject prefix = child.call(complete(spec, "bridgefixture", "a")); ok(prefix);

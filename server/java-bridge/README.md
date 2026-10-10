@@ -55,10 +55,11 @@ and run in Maven's `verify` lifecycle.
   explicit `TabCompleter`, then executor completion when the explicit callback
   returns `null`. Rust declares `minecraft:ask_server` on these argument nodes
   and checks the command permission before sending a callback. Aliases and
-  namespaces, current sender context, trailing empty arguments and UTF-16
+  namespaces, original alias casing, current sender context, interior/trailing
+  empty arguments from Bukkit's literal-space split and UTF-16
   replacement ranges are supported. Default online-player-name completion
   remains unsupported: a callback returning `null` through both paths reports
-  the missing roster API. Suggestions have no hover tooltip.
+  a concrete unsupported API. Suggestions have no hover tooltip.
 - The current request's `Player` / `CommandSender` name, UUID, operator status,
   `hasPermission`, `isPermissionSet`, `getServer` and `sendMessage`; strings,
   string arrays and text components return bounded text messages. Components
