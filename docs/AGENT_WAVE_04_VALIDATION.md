@@ -196,16 +196,40 @@ Originaldaten-/Generator-/Claimchecks und alle sieben unabhängigen Clientgates
 sind grün. Die noch unintegrierten Storage- und Worldcompileränderungen gehören
 nicht zu diesem Lauf.
 
+## Unabhängige UUID-Storage- und Compilerintegration
+
+STORAGE-ENTITY001.1 wurde als `a5d11819` integriert. Der
+[Storage-Review](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE_REVIEW.md) ist CLEAN:
+Debug/Release je212 Originaltests, zusätzlich9 eigene Probes,39 tatsächliche
+Writeabortcutpoints, Lostreply/Reopen, strict Alltargetclippy und fmt grün.
+Format5 bleibt opt-in; die aktive Format4-App wird dadurch nicht umgestellt.
+Die konkrete .2-Offlinemigration ist getrennt freigegeben und in Umsetzung.
+
+GEN-05.1 wurde als `c4e3dc76` integriert. Der
+[Compiler-Review](agent-tasks/GEN-05_1_DENSITY_COMPILER_REVIEW.md) ist CLEAN:
+isolierter Snapshot auf `0276f3d4`,17/17 Files nach Probe-Restore bytegleich.
+Debug/Release je177 Originaltests sowie3 eigene Probes grün; strict
+Alltargetclippy und Workspace-fmt grün. Zusätzliche256 gemeinsame DAGs wurden
+gegen ein unabhängiges Reachability-/Depthmodell geprüft. Root reproduzierte
+die128 Original-JAR-Codecrecords normal und mit Python `-O`; Fixture und
+Manifest bytegleich. Die Union misst3102 Vertices/3435 Edges/Depth87.
+Dies ist Struktur-/Codecabnahme und aktiviert noch keine Terrainberechnung.
+
+Diese beiden integrierten Runtimeänderungen sind im älteren CI-Lauf
+`9c35e769` noch nicht enthalten. Ein neuer Lauf muss den tatsächlichen
+veröffentlichten Head prüfen; bis dahin bleibt seine Gesamt-CI offen.
+
 ## Laufende Folgearbeit
 
 - `feature_catalog`: REG-WORLDGEN001 abgeschlossen555ee2aa; STORAGE-ENTITY001.1 unabhängig CLEAN geprüft und
-  integriert `a5d11819`. Jetzt konkreter Sim-Item-Entity-Vertrag; keine
+  integriert `a5d11819`. Vollständiger Sim-Item-Entity-Vertrag durch Root geprüft
+  und freigegeben; Runtimeumsetzung SIM-03.3/SRV-02.1 begonnen. Keine
   vorzeitige Gameplayaktivierung.
 - `item_transfer_primitives`: GEN-04.3 originale kubische Splines integriert;
-  freigegebene GEN-05.1-Compilerimplementierung. Der separate echte JAR-Codec-
-  und Strukturoracle-Auftrag ist beendet. Holderhelper-/Splinepflichtfelder und kombinierte Tiefe
-  werden gegen die Originalcodecs geprüft. Anschließend
-  Densityregistry/-router, NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
+  GEN-05.1-Compiler unabhängig CLEAN geprüft und als `c4e3dc76` integriert.
+  Der separate echte JAR-Codec- und Strukturoracle-Auftrag ist beendet.
+  Jetzt freigegebene GEN-05.2-Seed-/Scalar-/Climateumsetzung; danach
+  NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
 - `select_world_ticket`: STORAGE-ENTITY001.1 integriert `a5d11819`;
   unabhängige Debug-/Releaseabnahme je212 Tests plus9 eigene Probes,39 tatsächliche
   Writeabortcutpoints und Lostreply/Reopen sowie strictchecks grün.

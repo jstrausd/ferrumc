@@ -127,15 +127,18 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | STORAGE-ENTITY001.1 | `select_world_ticket`, Review `feature_catalog` und Root | `server/crates/ferrumc-storage/**`, eigenes Taskdoc | CLEAN geprüft und integriert `a5d11819`: unabhängige Debug-/Releaseprüfung je212 Tests plus9 eigene Probes,39 echte Writeabortcutpoints und Lostreply/Reopen; strictchecks grün. Fresh/strict Format5-UUIDproducer mit bounded Pages und Indizes; vorhandenes Format4 unverändert verweigert. Migration/Gameplaytransfers bleiben getrennt. |
 | STORAGE-ENTITY001.2 | `select_world_ticket`, Designreview Root | `server/crates/ferrumc-storage/**`, eigener .2-Brief | Konkrete explizite4→5-Migration durch Root freigegeben und in Umsetzung: voller Validator, unverändertes hashgebundenes Backup, immutable344-Byte-Checkpoint, bounded Prüfkopien und exakte Delta/Resume-Abnahme. Keine automatische Appmigration. |
 | REG-WORLDGEN001 | `feature_catalog`, Review Root | `server/crates/ferrumc-registry/**`, eigenes Taskdoc | CLEAN geprüft und auf main integriert555ee2aa:60 Noiseparameter,35 Densityresources und7 Noisesettings. Root Debug/Release jeweils69,4 eigene negative/Bitproben, strictchecks und102 Originalressourcen normal/-O grün. Statische Daten; Worldcompiler/Terrainaktivierung bleiben offen. |
-| GEN-05.1 | `item_transfer_primitives`, separater Codec-Oracleagent | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Freigegebener bounded Densitycompiler in Umsetzung: alle35 Definitionen und7 Router, echte Holder-/Splinecodecstruktur, private IR mit4096Vertices/8192Edges/Depth96. JSONnumbertokens für direkte f32-Decodierung. Separate Original-JAR-Proben; keine Seed-/Sample-/Chunkaktivierung. |
+| GEN-05.1 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Unabhängig CLEAN und integriert `c4e3dc76`: alle35 Definitionen/7 Router,128 tatsächliche Original-JAR-Records, Debug/Release je177 und3 eigene Probes grün. Frischer Originalreexport normal/-O bytegleich, Freeze17/17 und strictchecks grün. [Review](agent-tasks/GEN-05_1_DENSITY_COMPILER_REVIEW.md); Seed-/Sample-/Chunkconsumer folgen. |
+| GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | [Konkreter Seed-/Scalar-/Climatevertrag](agent-tasks/GEN-05_2_SEEDED_ROUTER_APPROVAL.md) vollständig geprüft und freigegeben; Runtimeumsetzung begonnen. Zwei originale Visitorviews, shared Workmeter, alle7 Settings/35 Definitionen gegen echtes JAR. Chunkwrapper/Terrainaktivierung bleiben .3 und weiteren Consumern zugeordnet. |
+| SIM-03.3 / SRV-02.1 | `feature_catalog`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | [Konkreter ItemEntity-Vertrag](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md) vollständig geprüft und freigegeben; Runtimeumsetzung begonnen. Sealed Slotpayload, owned Refusals/Removal, FCIE144-Byte-Header/262144-Byte-Body,16MiB Aggregatebudget, checked Capture/Restore und originale Zählerregeln. Noch keine App-/Drop-/Pickup-/Physikaktivierung. |
 
-Aktuell arbeiten neben Root der Weltcompileragent `item_transfer_primitives`,
-der unabhängige Storage-Reviewer `feature_catalog` und der Storageagent
+Aktuell arbeiten neben Root der Weltagent `item_transfer_primitives`,
+der Simagent `feature_catalog` und der Storageagent
 `select_world_ticket`. Der separate `gen05_1_codec_oracle`-Auftrag ist beendet.
 Der Storageimplementer setzt nach .1-Integration die freigegebene explizite
-.2-Migration um. Der bisherige Reviewer bereitet den konkreten Item-Entity-
-Consumervertrag in Sim vor; dessen Runtimefreigabe folgt der Vertragsprüfung. Die Vergabe
-überschreitet die drei Childslots nicht; Root prüft den finalen Worldcompiler.
+.2-Migration um. Der bisherige Reviewer implementiert den vollständig geprüften
+Item-Entity-Vertrag in Sim; der Weltagent implementiert nach CLEAN-Integration
+des Compilers die freigegebene Seedberechnung. Die Vergabe überschreitet die
+drei Childslots nicht; Root überwacht, prüft und integriert die Ergebnisse.
 
 Root hat die integrierte Runtime `62a5b74d` in einem detached Checkout
 geprüft: 2.304 Tests, 38 Doctests, strict Clippy/fmt und Generatorcheck grün,

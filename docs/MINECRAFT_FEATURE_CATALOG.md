@@ -460,7 +460,9 @@ Artefakte und verbleibende Grenzen stehen im
 | STORAGE-ENTITY001.1 | F | [UUID-Storageproducer](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE.md), `a5d11819`: unabhängiges Review CLEAN, Debug/Release je212 Tests plus9 eigene Probes,39 Writecutpoints und Lostreply/Reopen grün. Fresh/strict Format5; Migration/Gameplay-/CASconsumer bleiben getrennt. |
 | STORAGE-ENTITY001.2 | A | [Explizite4→5-Migration](agent-tasks/STORAGE-ENTITY001_2_UUID_MIGRATION.md): konkreter Vertrag durch Root geprüft, `select_world_ticket` implementiert checked Backup/Checkpoint/Delta/Resume mit expliziten Diskbudgets. Keine Appaktivierung. |
 | REG-WORLDGEN001 | F | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md),555ee2aa: unabhängiges Rootreview CLEAN, Debug/Release jeweils69 und4 Reviewerproben grün;102 tatsächliche Originalressourcen und195 Amplitudenbits vollständig geprüft. Keine aktive Terrainpipeline. |
-| GEN-05.1 | A | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md): `item_transfer_primitives` implementiert alle35 Originaldefinitionen/sieben Router, bounded private Holder-/Splinegraphen und originalgetreue Zahlenlexeme. Echter JAR-Codec-/Strukturoracle arbeitet separat; Sampling/Terrain bleiben offen. |
+| GEN-05.1 | F | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md), `c4e3dc76`: unabhängiger Rootreview CLEAN, Debug/Release je177 plus3 eigene Probes und strictchecks grün.128 tatsächliche Original-JAR-Records, frischer normal/-O-Reexport bytegleich;35 Definitionen/7 Router. Seed-/Terrainconsumer bleiben offen. |
+| GEN-05.2 | A | [Seed-/Scalar-/Climateconsumer](agent-tasks/GEN-05_2_SEEDED_ROUTER_APPROVAL.md): konkreter vollständiger Vertrag durch Root freigegeben, `item_transfer_primitives` implementiert echte Seedbindung, Factory-/Boundviews und gemeinsame Budgetauswertung gegen actual JAR. Noch keine Chunks. |
+| SIM-03.3 / SRV-02.1 | A | [Besessene ItemEntities](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md): vollständiger Rootdesignreview und Runtimefreigabe, `feature_catalog` implementiert sealed Slotstate, lossless FCIE/FCIScodec, owned Refusals/Removal, checked Restore und originale Counter. Drop/Pickup/Appaktivierung folgen. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
@@ -475,9 +477,9 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Simagent `feature_catalog` | SIM-03.3 / SRV-02.1 | konkreter Item-Entity-Vertrag in Vorbereitung | Neuer eigener Simbrief; Storage-.1-Review CLEAN abgeschlossen. Runtimecode erst nach Vertragsfreigabe. |
+| Simagent `feature_catalog` | SIM-03.3 / SRV-02.1 | Runtimeumsetzung nach vollständiger Vertragsfreigabe | Sim-Crate und eigener Brief; Storage-.1-Review CLEAN abgeschlossen. Slotpayload-/Codec-/Restoreconsumer jetzt in Umsetzung. |
 | Storageagent `select_world_ticket` | STORAGE-ENTITY001.2 | Migration in Umsetzung | Storage-Crate und .2-Brief; .1 integriert `a5d11819`, neuer Migrationvertrag konkret freigegeben. |
-| Weltagent `item_transfer_primitives` | GEN-05.1 | Compilerfinalisierung | World-Crate; separater Codec-Oracleauftrag beendet. Root prüft den finalen Freeze; Seed-/Terrainconsumer danach. |
+| Weltagent `item_transfer_primitives` | GEN-05.2 | Seed-/Scalar-/Climateumsetzung | World-Crate und GEN-05-Brief; Compiler CLEAN als `c4e3dc76` integriert, konkreter .2-Vertrag durch Root freigegeben. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
 aktiven Slots stehen im Implementierungsboard. Reviews nutzen frei gewordene
