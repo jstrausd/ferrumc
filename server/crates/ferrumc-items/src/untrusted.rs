@@ -464,7 +464,7 @@ mod tests {
         // model it: it is stripped rather than kept as an opaque passthrough.
         let stack = UntrustedItemStack::present(1, 1, vec![(ITEM_NAME, vec![9, 9, 9])], Vec::new());
         let validated = stack.into_validated().unwrap();
-        assert!(validated.components().added().is_empty());
+        assert_eq!(validated.components().added().len(), 0);
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
         let stack =
             UntrustedItemStack::present(1, 1, vec![(ITEM_NAME, payload.clone())], Vec::new());
         let validated = stack.into_validated().unwrap();
-        assert!(validated.components().added().is_empty());
+        assert_eq!(validated.components().added().len(), 0);
 
         // Encoding the validated stack as a trusted slot emits neither the
         // `item_name` type id nor the hostile payload bytes.
