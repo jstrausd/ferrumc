@@ -169,9 +169,52 @@
   status are distinct. Last-ticket release preserves registrations; subsequent
   spawn/move into the unloaded target refuses, while remove and migration to a
   different resident chunk remain available. No chunk is force-loaded. There
-  is no automatic entity tick, activation, AI, collision, item payload, storage,
+  is no automatic entity tick, activation, AI, collision, storage driver,
   plugin event, tracking output, app/scheduler consumer or cross-shard transfer.
   Removal returns base data, never a durable delete/save acknowledgement.
+- Concrete item state lives directly in the existing entity owner slot, with
+  one owned stack and sealed finite properties; no payload sidecar, second
+  owner, raw mutable stack/patch access or generic component framework exists.
+  Legacy item-type registrations remain explicit placeholders; real consumers
+  return `MissingItemState`, never an EMPTY/default fallback.
+- Existing store constructors admit no item bytes. Opt-in configuration is
+  explicit and at most 16 MiB of complete native bodies per owner. Every native
+  FCIE body is at most 262,144 bytes including its fixed 144-byte header and
+  entire FCIS stack. Valid larger FCIS stacks are refused unchanged. The sum
+  of checked admitted body lengths is updated once at spawn/replace/remove;
+  scalar counters, properties and transforms do not change that sum. This is
+  an encoded-byte bound, not an RSS guarantee.
+- New item spawn/restore/replace/property/counter/remove mutations require the
+  existing non-escaping `EntityTickContext`. Legacy store transform updates
+  refuse payload slots; context updates preserve that same owning slot.
+  Legacy remove refuses payload slots before any detach/index/generation/budget
+  change; owned remove returns the base and complete payload and remains legal
+  after chunk unload. All owned-input refusals return their complete input
+  without normalization or cloning. No payload is silently disposed by an
+  old base-data removal API.
+- Snapshot/capture validates semantic FCIS, finite properties, canonical native
+  basis, cached lengths and aggregate accounting before payload clone or
+  publication. Whole-store snapshot revalidates every payload before its first
+  clone; single-item capture checks its entire row and cached owner aggregate.
+  Store/SimShard Clone copies only sealed admitted states with fresh incarnation;
+  impossible private invariant corruption is fail-stop in that existing
+  infallible trait. Public try_snapshot/capture return typed errors instead.
+- Native item storage preserves signed i32 age/delay/health, all finite motion
+  magnitudes and signed-zero motion/bob bits. It deliberately does not apply
+  Vanilla NBT short truncation, motion-above-ten sanitization or corruption
+  defaults. Target and thrower UUIDs are independent. FCIE contains no wire ID
+  or local handle. Decode checks outer schema/key/scope/UUID/type/chunk and
+  canonical finite header before stack allocation; lossless FCIS bytes must
+  re-encode identically. Restore requires a newly supplied caller wire ID and
+  owner/resident/duplicate/capacity/budget admission before publication.
+- Pure active/inactive item counter projections decrement positive delay except
+  32767, increment age except -32768 using Java i32 wrapping, and compare the
+  resulting age against the exact signed caller rate. They do not independently
+  exempt sentinel age from a negative-rate comparison, cause health death,
+  remove an item or emit events. Keep/Due, cancellation age reset and owned
+  removal are separate. Full active ticks must preserve physics/merge between
+  the delay and age phases. No automatic activation, once-per-tick claim,
+  unloaded/offline step or wall-clock catch-up is implemented.
 - A logical region may have at most one ownership claim.
 - Shard lifecycle is strictly `Created -> Active -> Draining -> Stopped`.
   Rejected transitions leave the prior state unchanged.

@@ -42,12 +42,50 @@ the explicit cap. Standard tree allocation exhaustion remains process failure.
 
 Registrations survive last-ticket release. Resident memory, entity visibility,
 tracking and ticking are separate states; only the first is currently checked.
-There is no app/scheduler entity consumer, entity persistence, UUID/wire allocator,
-cross-shard transfer, living/item payload, AI or packet/plugin event output.
+There is no app/scheduler entity consumer, durable entity save driver, UUID/wire
+allocator, cross-shard transfer, living payload, AI or packet/plugin event output.
 The reviewed Paper 1.21.8 Build 60 lookup/section/rotation/lifecycle sources and
 these deliberate boundaries are recorded in
 `docs/agent-tasks/SIM-03_2_ENTITY_OWNERSHIP.md`. Source review and producer tests
 do not establish complete entity behavior or a live Paper comparison.
+
+## Owned item state and native snapshots
+
+`initialize_entities_with_item_budget` configures the existing owner slots with
+an explicit encoded-body allowance up to 16 MiB. Legacy constructors retain a
+zero item budget. Base-only item registrations are placeholders and real item
+operations refuse them as `MissingItemState`; they never acquire an empty
+default payload. Concrete admission and all payload mutation use the existing
+`EntityTickContext`. Refused spawn/restore/replace returns every incoming owned
+item unchanged. Legacy remove refuses payload slots; `remove_owned` returns
+their base and entire state, including after ticket unload. Direct legacy
+store transform mutation refuses payload slots; the checked context moves the
+same slot without transferring item ownership.
+
+Native FCIE schema 1 uses a 144-byte header and the checked lossless FCIS stack
+codec. The whole body is at most 256 KiB, so even an otherwise valid FCIS stack
+can be refused by the tighter native limit. Aggregate usage counts complete
+native bodies; it does not claim equal decoded heap or RSS. Motion/bob admit
+finite values and retain IEEE bits, including signed zero. Age, pickup delay
+and health retain their full signed i32 runtime values. Pickup target and
+thrower are independent UUIDs. Native restore checks outer key, scope, type,
+chunk and canonical transform before FCIS allocation, then requires an explicit
+new wire ID from the caller. Capture performs no I/O, dirty clear or save ack.
+
+Checked item/store snapshots validate payloads before cloning. Store/SimShard
+Clone remains source compatible and validates the entire item sum first; an
+impossible private invariant violation is fail-stop in that infallible trait,
+while `try_snapshot`/capture return typed errors. Copies have fresh store
+incarnations and do not grant permission for competing active owners.
+
+Active/inactive counter projections preserve Java wrapping, sentinels and the
+exact signed despawn comparison. They return only Keep/Due. Cancellation age
+reset and owned removal are separate calls. These helpers supply no physics,
+merge, pickup, activation decision, event dispatch, tracking or gameplay wiring;
+complete active ticks must interleave delay and age changes correctly around
+physics/merge. Unloaded/offline items receive no automatic or wall-clock step.
+See `docs/agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md` for the pinned reference,
+native-policy deviations and acceptance evidence.
 
 ## Generation binding and persistence capture
 

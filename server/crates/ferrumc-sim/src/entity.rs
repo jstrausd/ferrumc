@@ -1,7 +1,11 @@
 //! Bounded owner-local entity identity, transforms and chunk indexes.
 //!
 //! Registration is distinct from chunk residency, visibility, entity ticking
-//! and persistence. This producer provides no AI, collision or item ownership.
+//! and persistence. Item payloads use the same owner slots and a tick capability;
+//! physics, pickup, tracking and durable storage consumers remain separate.
+
+mod item;
+pub use item::*;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -141,6 +145,12 @@ pub enum EntityStoreError {
         /// Missing target chunk in the owner's loaded map.
         chunk: ChunkPos,
     },
+    /// Legacy base-only removal cannot silently dispose of an owned payload.
+    #[error("item payload requires tick-context owned removal")]
+    PayloadRequiresOwnedRemove,
+    /// An item payload may only move through its owner's tick capability.
+    #[error("item mutation requires an entity tick context")]
+    ItemMutationRequiresTickContext,
 }
 
 /// A validated finite entity position and normalized body rotation.
@@ -333,13 +343,28 @@ impl PartialEq for EntityHandle {
 }
 impl Eq for EntityHandle {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Slot {
     generation: u64,
     entity: Option<EntityData>,
+    item: Option<ItemEntityState>,
     previous: Option<usize>,
     next: Option<usize>,
     next_free: Option<usize>,
+}
+
+impl Slot {
+    // Called only after the whole snapshot passes payload and aggregate checks.
+    fn snapshot_admitted(&self) -> Self {
+        Self {
+            generation: self.generation,
+            entity: self.entity,
+            item: self.item.as_ref().map(ItemEntityState::snapshot_admitted),
+            previous: self.previous,
+            next: self.next,
+            next_free: self.next_free,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -364,6 +389,8 @@ struct Bucket {
 pub struct EntityStore {
     owner: ShardId,
     capacity: usize,
+    item_byte_budget: usize,
+    item_bytes_used: usize,
     incarnation: Arc<()>,
     slots: Vec<Slot>,
     free: Option<usize>,
@@ -375,16 +402,12 @@ pub struct EntityStore {
 
 impl Clone for EntityStore {
     fn clone(&self) -> Self {
-        Self {
-            owner: self.owner,
-            capacity: self.capacity,
-            incarnation: Arc::new(()),
-            slots: self.slots.clone(),
-            free: self.free,
-            retired: self.retired,
-            by_uuid: self.by_uuid.clone(),
-            by_wire: self.by_wire.clone(),
-            buckets: self.buckets,
+        // Public setters seal this invariant. The legacy infallible trait can
+        // only fail-stop on impossible private corruption; checked callers use
+        // try_snapshot instead. Never clone or normalize a corrupt payload.
+        match self.try_snapshot() {
+            Ok(snapshot) => snapshot,
+            Err(error) => panic!("entity snapshot invariant violated: {error}"),
         }
     }
 }
@@ -403,6 +426,8 @@ impl EntityStore {
         Ok(Self {
             owner,
             capacity: capacity.get(),
+            item_byte_budget: 0,
+            item_bytes_used: 0,
             incarnation: Arc::new(()),
             slots: Vec::new(),
             free: None,
@@ -548,6 +573,27 @@ impl EntityStore {
     /// process-wide UUID/wire allocation are separate consumer contracts.
     pub fn spawn(&mut self, spawn: EntitySpawn) -> Result<EntityHandle, EntityStoreError> {
         let bucket = self.validate_spawn(spawn)?;
+        self.reserve_spawn_slot()?;
+        Ok(self.commit_spawn(spawn, None, bucket))
+    }
+
+    fn reserve_spawn_slot(&mut self) -> Result<(), EntityStoreError> {
+        if self.free.is_none() && self.slots.len() == self.slots.capacity() {
+            let target = self.slots.len().saturating_mul(2).max(4).min(self.capacity);
+            self.slots
+                .try_reserve_exact(target - self.slots.len())
+                .map_err(|_| EntityStoreError::AllocationFailed)?;
+        }
+        Ok(())
+    }
+
+    // All fallible admission and reservation precedes this ownership move.
+    fn commit_spawn(
+        &mut self,
+        spawn: EntitySpawn,
+        item: Option<ItemEntityState>,
+        bucket: usize,
+    ) -> EntityHandle {
         let entity = EntityData {
             owner: self.owner,
             uuid: spawn.uuid,
@@ -559,18 +605,14 @@ impl EntityStore {
             self.free = self.slots[index].next_free;
             self.slots[index].next_free = None;
             self.slots[index].entity = Some(entity);
+            self.slots[index].item = item;
             index
         } else {
-            if self.slots.len() == self.slots.capacity() {
-                let target = self.slots.len().saturating_mul(2).max(4).min(self.capacity);
-                self.slots
-                    .try_reserve_exact(target - self.slots.len())
-                    .map_err(|_| EntityStoreError::AllocationFailed)?;
-            }
             let index = self.slots.len();
             self.slots.push(Slot {
                 generation: 0,
                 entity: Some(entity),
+                item,
                 previous: None,
                 next: None,
                 next_free: None,
@@ -580,7 +622,7 @@ impl EntityStore {
         self.by_uuid.insert(spawn.uuid, index);
         self.by_wire.insert(spawn.wire_id, index);
         self.append(index, bucket);
-        Ok(self.handle(index))
+        self.handle(index)
     }
 
     /// Looks up immutable base data, refusing foreign/stale handles without allocation.
@@ -627,6 +669,18 @@ impl EntityStore {
         transform: EntityTransform,
     ) -> Result<(), EntityStoreError> {
         let index = self.index(handle)?;
+        if self.slots[index].item.is_some() {
+            return Err(EntityStoreError::ItemMutationRequiresTickContext);
+        }
+        self.update_transform_admitted(handle, transform)
+    }
+
+    fn update_transform_admitted(
+        &mut self,
+        handle: &EntityHandle,
+        transform: EntityTransform,
+    ) -> Result<(), EntityStoreError> {
+        let index = self.index(handle)?;
         let entity = self.slots[index]
             .entity
             .ok_or(EntityStoreError::StaleHandle)?;
@@ -649,10 +703,23 @@ impl EntityStore {
     /// forever rather than wrapping. Returned base data is not a save/delete ack.
     pub fn remove(&mut self, handle: &EntityHandle) -> Result<EntityData, EntityStoreError> {
         let index = self.index(handle)?;
+        if self.slots[index].item.is_some() {
+            return Err(EntityStoreError::PayloadRequiresOwnedRemove);
+        }
         let entity = self.slots[index]
             .entity
             .ok_or(EntityStoreError::StaleHandle)?;
         let bucket = self.bucket(entity.chunk())?;
+        Ok(self.remove_slot(index, entity, bucket).0)
+    }
+
+    fn remove_slot(
+        &mut self,
+        index: usize,
+        entity: EntityData,
+        bucket: usize,
+    ) -> (EntityData, Option<ItemEntityState>) {
+        let item = self.slots[index].item.take();
         self.detach(index, bucket);
         self.by_uuid.remove(&entity.uuid);
         self.by_wire.remove(&entity.wire_id);
@@ -664,7 +731,7 @@ impl EntityStore {
         } else {
             self.retired += 1;
         }
-        Ok(entity)
+        (entity, item)
     }
 }
 
@@ -769,7 +836,7 @@ impl<'a> EntityTickContext<'a> {
         self.store.get(handle)?;
         self.store.bucket(transform.chunk())?;
         self.require_resident(transform.chunk())?;
-        self.store.update_transform(handle, transform)
+        self.store.update_transform_admitted(handle, transform)
     }
 
     /// Removes a valid registration even if its old chunk is no longer resident.

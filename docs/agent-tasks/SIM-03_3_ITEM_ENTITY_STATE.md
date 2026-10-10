@@ -1,9 +1,11 @@
 # SIM-03.3 / SRV-02.1 — Besessener ItemEntity-Zustand und nativer Codec
 
-Status: **vollständiger Vertrag durch Root geprüft und zur Sim-Runtimeumsetzung
-freigegeben; Implementierung läuft**. Freigegebener Designstand SHA256:
+Status: **vollständiger Vertrag durch Root geprüft; Sim-Runtime implementiert,
+lokale isolierte Debug-/Release-/Clippy-/Formatprüfung grün und zur
+unabhängigen Fremdabnahme eingefroren**.
+Freigegebener Designstand SHA256:
 `0f48834af0195c42a52f89638905014e35d2d8297cbd4088352d06ec1e53a9f0`.
-Dieser Brief selbst aktiviert noch keinen Gameplay-/Appconsumer.
+Diese Runtimeetappe aktiviert noch keinen Gameplay-/Appconsumer.
 Parent `/root` besitzt Board, Integration und die anschließende Fremdabnahme.
 Agent `/root/feature_catalog` besitzt nun ausschließlich `ferrumc-sim` und
 dieses Dokument. Keine Änderung an Items, Registry, Core, Storage, App,
@@ -58,7 +60,7 @@ Live State/Stack/Properties haben ausschließlich immutable Getter; keine
 | Slotkapazität | Bestehende explizite `NonZeroUsize`, höchstens 65.536; retired Slots zählen weiter. |
 | `MAX_NATIVE_ITEM_ENTITY_BYTES` | **262.144 Byte**, gleich Storage `MAX_ENTITY_DATA_LEN`, einschließlich sämtlicher FCIE-Header- und FCIS-Bytes. |
 | `NATIVE_ITEM_ENTITY_HEADER_BYTES` | **144 Byte**, daher FCIS höchstens **262.000 Byte**. Kein Abschneiden von Komponenten, Count oder Metadaten. |
-| `MAX_ITEM_ENTITY_BYTES_PER_SHARD` | Vorschlag **16.777.216 Byte**. Explizites `NonZeroUsize`-Budget darf kleiner sein; größer wird typed verweigert. Auch ein Budget unter der kleinsten Itembodygröße ist gültig und verweigert jede echte Aufnahme. |
+| `MAX_ITEM_ENTITY_BYTES_PER_SHARD` | Freigegeben und implementiert: **16.777.216 Byte**. Explizites `NonZeroUsize`-Budget darf kleiner sein; größer wird typed verweigert. Auch ein Budget unter der kleinsten Itembodygröße ist gültig und verweigert jede echte Aufnahme. |
 | Aggregate Accounting | `item_bytes_used = Summe(144 + checked FCISlen)` aller lebenden Payloadslots. Placeholder verbrauchen null. Spawn/Restore addieren, Replace tauscht die exakte Differenz, owned Remove subtrahiert, Move/Counter/Props ändern die Summe nicht. Keine saturierende Reparatur. |
 | Scratch | Öffentlicher FCIS-Encoder allokiert nach seiner eigenen semantischen Vorprüfung höchstens `MAX_PERSISTED_STACK_BYTES = 263.168` Byte. Erst danach wird der strengere native Bodycap geprüft. Je Operation höchstens ein solcher FCIS-Scratch gleichzeitig; native Output separat höchstens 262.144 Byte. |
 
@@ -69,8 +71,13 @@ angeforderte Snapshots verbrauchen zusätzlichen, separat strukturell begrenzten
 Speicher. Ein Clone darf nicht als kostenlose Kopie gelten. OOM in den
 bestehenden Standardcontainern bzw. FCIS-Encoder ist fail-stop, keine
 recoverable Refusal; recoverable Slot-/Bodyreservation erfolgt vor Commit.
+Die großen konkreten Spawn-/Restore-Refusals halten ihr vollständiges Proposal
+privat in einer `Box`: genau eine begrenzte Structallocation nach feststehender
+Refusal, keine Stack-/Komponentenkopie. `reason`/`into_parts` und sämtliche
+öffentlichen Signaturen bleiben unverändert; OOM dieser Einzelallocation ist
+ebenfalls fail-stop. Root hat diese interne Größenkorrektur bestätigt.
 
-## Konkrete API zur Freigabe
+## Freigegebene und implementierte API
 
 Alle neuen öffentlichen Typen haben private Felder und Rustdoc. Keine
 öffentliche `Clone`-Implementierung für rohe Spawn-/Restoreproposals oder den
@@ -318,7 +325,7 @@ Lektüre oder bestandene Laufzeitabnahme):
 | `src/main/java/org/spigotmc/SpigotWorldConfig.java` | `e77256b969a12664af338470d5babaaabc84fd6f227181ef0504f8650ce1baeb` |
 | `src/main/java/io/papermc/paper/util/MCUtil.java` | `9907608da7d5a2fe9d20a3a3fc2a9afa44e46574429325ea6f18d73c51619c31` |
 
-## Geplante Abnahme der ersten Runtimeetappe
+## Abnahmekriterien der ersten Runtimeetappe
 
 - Öffentliche Tests für echte Itemaufnahme, Placeholder-WrongType-/Missing-
   Refusals, alle Admissionfehlgründe inklusive slotfull/retired/resident/
@@ -352,8 +359,60 @@ Lektüre oder bestandene Laufzeitabnahme):
   Root organisiert anschließend einen unabhängigen Review am exakten
   SHA256-Freeze. Keine Gitoperationen durch diesen Agent.
 
-Bislang durchgeführt: Quellenlektüre und Design, **keine neue Runtime-,
-Differenzial-, Client-, Plugin-, Survival- oder Performanceabnahme**. Physics,
+## Umsetzung und lokaler Prüfstand
+
+Die konkrete Runtime ist vollständig innerhalb dieser ersten Etappe umgesetzt.
+Produktionsänderungen betreffen genau neun Dateien unter
+`server/crates/ferrumc-sim/`:
+
+- `INVARIANTS.md` und `README.md` dokumentieren Zustand, Grenzen und offene Consumer.
+- `src/lib.rs` exportiert die konkreten Typen und Counterprojektionen.
+- `src/shard.rs` ergänzt die einmalige explizite Itembudgetkonfiguration.
+- `src/entity.rs` ergänzt den privaten Slotpayload, gemeinsame vorbereitete
+  Commit-/Removepfade, die Legacyguards und die checked Clonevorprüfung.
+- `src/entity/item.rs` implementiert sealed Zustand, vollständige owned
+  Refusals, Admission/Replace/Remove/Snapshot/Capture/Restore und Counterhelper.
+- `src/entity/item/codec.rs` implementiert die feste FCIE-Grammatik.
+- `src/entity/item/tests.rs` prüft sechs private Korruptions-/Retirementgrenzen.
+- `tests/item_entity.rs` prüft 18 öffentliche Verträge mit unabhängig
+  handgebauten FCIE-/FCIS-Bytes und realen Tickkontexten.
+
+Die beiden neuen Compilefail-Doctests verweigern Rawstack-/Patchmutation und
+eine öffentliche Storeitemaufnahme außerhalb des Tickkontexts. Die bestehende
+vollständige Simsuite läuft mit, einschließlich Entityowner-, Generationbinding-
+und Chunkloadinggrenzen. Es wurden keine Producer, Abhängigkeiten, Lockdateien,
+Appconsumer oder Gitobjekte geändert.
+
+Die Abnahmebasis ist das durch Root bereitgestellte isolierte Checkout
+`.codex-tmp/sim033-checkout` auf `9025c687`; ausschließlich die neun oben
+aufgeführten Simdateien wurden gezielt hineinkopiert. Parallel laufende
+World-/Storageänderungen wurden nicht übernommen. Cargo benutzt ausschließlich
+`.codex-tmp/sim033-check-target`, `--offline --locked` und höchstens `-j2`.
+
+Bereits grün auf dem finalen Runtime-/Teststand:
+
+- `cargo test -p ferrumc-sim --offline --locked -j2`: **249 Tests**,
+  davon 170 Unit-, 74 Integrations- und fünf Doctests; keine Fehler.
+  Log: `.codex-tmp/sim033-debug.log`.
+- `cargo test -p ferrumc-sim --release --offline --locked -j2`: dieselben
+  **249 Tests** grün, einschließlich Java-Wrapping-/Overflowgrenzen im
+  optimierten Build. Log: `.codex-tmp/sim033-release.log`.
+- `cargo clippy -p ferrumc-sim --all-targets --offline --locked -j2 -- -D warnings`:
+  grün ohne neue Allow-Ausnahme. Log: `.codex-tmp/sim033-clippy.log`.
+- `cargo fmt -p ferrumc-sim --check`: grün. Log: `.codex-tmp/sim033-fmt.log`.
+- Alle 14 oben dokumentierten Ganzdateihashes der gepinnten Originalreferenz
+  wurden erneut geprüft und stimmen überein.
+
+Der exakte zehn Dateien umfassende Freeze (neun Simdateien plus dieser Brief)
+steht im SHA256-Manifest `.codex-tmp/sim033-freeze.sha256`. Die neun Simdateien
+stimmen bytegenau mit der isolierten Abnahmebasis überein; eine Kopie dieses
+Briefs wird dort für den Review bereitgestellt. Der Agent hält die Produktion
+ab diesem Freeze bis zu Roots Rückmeldung an. Gitintegration und unabhängige
+Fremdabnahme gehören Root und sind noch offen. Dieser lokale Prüfstand ist
+**keine Paper-Livedifferenzial-, Client-, Plugin-, Survival- oder
+Performanceabnahme**.
+
+Physics,
 Kollision/Gravity/Buoyancy, Merge/Pickup, Dropinventartransfer, Activationrange,
 canMobPickup/frictionState und allgemeine Entityflags (onGround/noGravity/fire,
 Passengers/Tags/PDC usw.), Tracking, Javaevents, Dirty-/Save-/Deleteconsumer,

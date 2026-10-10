@@ -90,9 +90,15 @@ mod time;
 
 pub use coordinator::{TickCoordinator, TickRate};
 pub use entity::{
-    EntityChunkIter, EntityData, EntityHandle, EntitySpawn, EntityStore, EntityStoreError,
-    EntityTickContext, EntityTransform, EntityTransformComponent, MAX_ENTITIES_PER_SHARD,
-    MAX_ENTITY_HORIZONTAL_POSITION, MAX_ENTITY_VERTICAL_POSITION,
+    decode_item_entity, step_active_item_counters, step_inactive_item_counters, EntityChunkIter,
+    EntityData, EntityHandle, EntitySpawn, EntityStore, EntityStoreError, EntityTickContext,
+    EntityTransform, EntityTransformComponent, ItemCounterMode, ItemCounterStep,
+    ItemDespawnDecision, ItemEntityCounters, ItemEntityError, ItemEntityProperties,
+    ItemEntityRestoreRefusal, ItemEntitySnapshot, ItemEntitySpawn, ItemEntitySpawnRefusal,
+    ItemEntityState, ItemNativeKeyField, ItemPropertyComponent, ItemReferenceField,
+    ItemStackRefusal, RemovedEntity, RestoredItemEntity, MAX_ENTITIES_PER_SHARD,
+    MAX_ENTITY_HORIZONTAL_POSITION, MAX_ENTITY_VERTICAL_POSITION, MAX_ITEM_ENTITY_BYTES_PER_SHARD,
+    MAX_NATIVE_ITEM_ENTITY_BYTES, NATIVE_ITEM_ENTITY_HEADER_BYTES,
 };
 pub use error::{SimError, SimResult};
 pub use generation::{GenerationBinding, VerifiedGenerationBinding};

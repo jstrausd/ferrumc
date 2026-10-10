@@ -451,6 +451,29 @@ impl SimShard {
         Ok(())
     }
 
+    /// Initializes the existing owner store with an explicit native item budget.
+    ///
+    /// Refusal preserves initialization and every existing handle. This is
+    /// configuration, not item admission or an active gameplay consumer.
+    pub fn initialize_entities_with_item_budget(
+        &mut self,
+        capacity: NonZeroUsize,
+        item_bytes: NonZeroUsize,
+    ) -> Result<(), crate::ItemEntityError> {
+        if self.entities.is_some() {
+            return Err(EntityStoreError::AlreadyInitialized.into());
+        }
+        let owner =
+            crate::ShardId::try_new(self.chunks.world(), self.chunks.dimension(), self.shard_pos)
+                .map_err(|_| EntityStoreError::InvalidOwner {
+                position: self.shard_pos,
+            })?;
+        self.entities = Some(EntityStore::with_item_byte_budget(
+            owner, capacity, item_bytes,
+        )?);
+        Ok(())
+    }
+
     /// Returns immutable opt-in registrations, independent of chunk/tick lifetime.
     ///
     /// No raw mutable store accessor is exposed. `Clone` of this shard uses a
