@@ -632,7 +632,7 @@ fn assert_exact_request_encodings(requests: &[OwnedHostRequest]) {
         .find(|request| request.kind() == FcHostRequestKind::DIMENSION)
         .expect("dimension request");
     assert_eq!(dimension.target(), FcResourceHandle::INVALID);
-    assert!(dimension.payload().is_empty());
+    assert_eq!(dimension.payload().len(), 0);
 
     let chunk = requests
         .iter()
@@ -680,7 +680,7 @@ fn assert_exact_request_encodings(requests: &[OwnedHostRequest]) {
         .iter()
         .find(|request| request.kind() == FcHostRequestKind::STORAGE_KEYS)
         .expect("storage keys request");
-    assert!(storage_keys.payload().is_empty());
+    assert_eq!(storage_keys.payload().len(), 0);
 
     for request in requests {
         assert_binary_not_json(request.payload());
@@ -979,8 +979,8 @@ fn assert_missing_dimension_capability_fails_closed(plugin: &LoadedAbiPlugin) {
         .requests
         .iter()
         .any(|request| request.kind() == FcHostRequestKind::DIMENSION));
-    assert!(host.commands.is_empty());
-    assert!(!host.diagnostics.is_empty());
+    assert_eq!(host.commands.len(), 0);
+    assert_ne!(host.diagnostics.len(), 0);
     assert_eq!(
         instance
             .shutdown(&mut host)
@@ -1005,8 +1005,8 @@ fn assert_no_unwind_for_plugin_panic(
         callback.expect("host-side callback validation"),
         FC_PLUGIN_PANIC
     );
-    assert!(host.commands.is_empty());
-    assert!(!host.diagnostics.is_empty());
+    assert_eq!(host.commands.len(), 0);
+    assert_ne!(host.diagnostics.len(), 0);
 }
 
 fn assert_initialize_panic(plugin: &LoadedAbiPlugin) {
@@ -1033,7 +1033,7 @@ fn assert_shutdown_panic(plugin: &LoadedAbiPlugin) {
             .expect("host-side shutdown validation"),
         FC_PLUGIN_PANIC
     );
-    assert!(!host.diagnostics.is_empty());
+    assert_ne!(host.diagnostics.len(), 0);
 }
 
 #[test]
