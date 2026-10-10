@@ -68,6 +68,7 @@ final class BridgeEngine implements AutoCloseable {
         JsonObject response = new JsonObject();
         response.addProperty("id", id);
         String error = null;
+        JsonArray completions = null;
         try {
             String op = Requests.string(request, "op", 16);
             switch (op) {
@@ -94,6 +95,19 @@ final class BridgeEngine implements AutoCloseable {
                     PlayerState player = player(Requests.player(request), false);
                     recipient = player.spec.uuid().toString();
                     dispatch(player.proxy, label, args);
+                }
+                case "complete" -> {
+                    completions = new JsonArray();
+                    Requests.fields(request, "id", "op", "command", "args", "player");
+                    requireReady();
+                    String label = Requests.string(request, "command", 130).toLowerCase(Locale.ROOT);
+                    if (!label.matches("[a-z0-9_\\-.]{1,64}(:[a-z0-9_\\-.]{1,64})?"))
+                        throw new IllegalArgumentException("invalid command label");
+                    String[] args = Requests.strings(request, "args", 64, 1024).toArray(String[]::new);
+                    if (args.length == 0) throw new IllegalArgumentException("completion requires the current argument, including an empty trailing argument");
+                    PlayerState player = player(Requests.player(request), false);
+                    recipient = player.spec.uuid().toString();
+                    completions = complete(player.proxy, label, args);
                 }
                 case "join", "quit" -> {
                     Requests.fields(request, "id", "op", "player");
@@ -130,10 +144,19 @@ final class BridgeEngine implements AutoCloseable {
         }
         response.addProperty("ok", error == null);
         response.add("messages", messages.deepCopy());
+        if (completions != null) response.add("completions", completions);
         if (error == null) response.add("error", JsonNull.INSTANCE);
         else response.addProperty("error", error);
         if (request.has("op") && "load".equals(request.get("op").isJsonPrimitive() ? request.get("op").getAsString() : "")
                 && !response.has("plugins")) response.add("plugins", new JsonArray());
+        // JSON escaping expands control characters; raw text-byte caps alone
+        // cannot guarantee that the combined callback result fits one frame.
+        if (new Gson().toJson(response).getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 65_536) {
+            response.addProperty("ok", false);
+            response.addProperty("error", "IllegalArgumentException: serialized callback output exceeds 65536 UTF-8 bytes");
+            response.add("messages", new JsonArray());
+            if (completions != null) response.add("completions", new JsonArray());
+        }
         return response;
     }
 
@@ -328,6 +351,34 @@ final class BridgeEngine implements AutoCloseable {
         if (command == null) throw new IllegalArgumentException("unknown plugin command: " + label);
         if (!command.getPlugin().isEnabled()) throw new IllegalStateException("command plugin is disabled");
         return command.execute(sender, label, args);
+    }
+
+    private JsonArray complete(CommandSender sender, String label, String[] args) {
+        PluginCommand command = commands.get(label);
+        if (command == null) throw new IllegalArgumentException("unknown plugin command: " + label);
+        if (!command.getPlugin().isEnabled()) throw new IllegalStateException("command plugin is disabled");
+        JsonArray result = new JsonArray();
+        // PluginCommand.tabComplete itself does not check permissions.
+        if (!command.testPermissionSilent(sender)) return result;
+        List<String> values = command.tabComplete(sender, label, args);
+        if (values.size() > 64) throw new IllegalArgumentException("completion limit exceeded (64 suggestions)");
+        for (String value : values) {
+            if (value == null || value.indexOf('\0') >= 0 || value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 256)
+                throw new IllegalArgumentException("completion must be a non-null string of at most 256 UTF-8 bytes without NUL");
+            for (int i = 0; i < value.length(); i++) {
+                char code = value.charAt(i);
+                if (Character.isHighSurrogate(code)) {
+                    if (++i >= value.length() || !Character.isLowSurrogate(value.charAt(i)))
+                        throw new IllegalArgumentException("completion contains an unpaired surrogate");
+                } else if (Character.isLowSurrogate(code)) {
+                    throw new IllegalArgumentException("completion contains an unpaired surrogate");
+                }
+            }
+            result.add(value);
+        }
+        if (new Gson().toJson(result).getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 16_384)
+            throw new IllegalArgumentException("serialized completions exceed 16384 UTF-8 bytes");
+        return result;
     }
 
     private PlayerState player(Requests.PlayerSpec spec, boolean joining) {

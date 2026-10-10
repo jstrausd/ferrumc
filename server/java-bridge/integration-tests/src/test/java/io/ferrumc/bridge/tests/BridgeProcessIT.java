@@ -44,6 +44,12 @@ class BridgeProcessIT {
         for (JsonElement message : response.getAsJsonArray("messages")) result.add(message.getAsJsonObject().get("text").getAsString());
         return result;
     }
+    private JsonObject complete(JsonObject player, String name, String... args) {
+        JsonObject request = command(player, name, args); request.addProperty("op", "complete"); return request;
+    }
+    private List<String> suggestions(JsonObject response) {
+        return response.getAsJsonArray("completions").asList().stream().map(JsonElement::getAsString).toList();
+    }
     private void fixture() throws IOException { Files.copy(FIXTURE, directory.resolve("fixture.jar")); }
     private void ok(JsonObject response) { assertTrue(response.get("ok").getAsBoolean(), response.toString()); assertTrue(response.get("error").isJsonNull()); }
     private void error(JsonObject response, String fragment) {
@@ -105,6 +111,34 @@ class BridgeProcessIT {
             JsonObject broad = player("Broadcaster", UUID_B, true);
             error(child.call(event("join", broad)), "broadcasting is not implemented");
             error(child.call(command(faulty, "bridgefixture", "previous")), "cross-player messaging");
+            ok(child.call(request("shutdown"))); child.finished(0); counters(1, 1);
+        }
+    }
+
+    @Test void completersUseAliasesSenderArgumentsPermissionsAndBoundOutput() throws Exception {
+        fixture();
+        try (Child child = new Child(directory)) {
+            ok(child.load());
+            JsonObject denied = child.call(complete(player("Tester", UUID_A, false), "bfixture", "fail"));
+            ok(denied); assertTrue(suggestions(denied).isEmpty());
+            JsonObject spec = player("Tester", UUID_A, false, "fixture.use");
+            JsonObject explicit = child.call(complete(spec, "BFIXTURE", "explicit")); ok(explicit);
+            assertEquals(List.of("explicit:bfixture:Tester"), suggestions(explicit));
+            JsonObject inherited = child.call(complete(spec, "bridgefixture:bfixture", "probe", "")); ok(inherited);
+            assertEquals(List.of("probe:bridgefixture:bfixture:" + UUID_A + ":2:"), suggestions(inherited));
+            JsonObject prefix = child.call(complete(spec, "bridgefixture", "a")); ok(prefix);
+            assertEquals(List.of("alpha"), suggestions(prefix));
+            JsonObject unicode = child.call(complete(spec, "bridgefixture", "")); ok(unicode);
+            assertEquals(List.of("alpha", "beta", "Grüße Ω", "🌍"), suggestions(unicode));
+            for (String bad : List.of("fail", "large", "many", "nul", "surrogate", "escaped", "null-entry", "fallback", "combined")) {
+                JsonObject failed = child.call(complete(spec, "bridgefixture", bad));
+                assertFalse(failed.get("ok").getAsBoolean(), failed.toString());
+                assertTrue(suggestions(failed).isEmpty(), failed.toString());
+            }
+            error(child.call(complete(spec, "bridgefixture")), "current argument");
+            error(child.call(complete(spec, "absent", "")), "unknown plugin command");
+            error(child.call(command(spec, "bridgefixture", "escaped-message")), "serialized callback output");
+            ok(child.call(command(spec, "bfixture", "unicode")));
             ok(child.call(request("shutdown"))); child.finished(0); counters(1, 1);
         }
     }

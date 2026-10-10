@@ -51,6 +51,14 @@ and run in Maven's `verify` lifecycle.
   to the same object. `getCommand`, `Bukkit.getPluginCommand`, and command-map
   lookup work. Runtime command registration and dynamic name/alias changes are
   unsupported. Mutations during startup are validated before metadata export.
+- Plugin argument completion invokes the real `PluginCommand.tabComplete`:
+  explicit `TabCompleter`, then executor completion when the explicit callback
+  returns `null`. Rust declares `minecraft:ask_server` on these argument nodes
+  and checks the command permission before sending a callback. Aliases and
+  namespaces, current sender context, trailing empty arguments and UTF-16
+  replacement ranges are supported. Default online-player-name completion
+  remains unsupported: a callback returning `null` through both paths reports
+  the missing roster API. Suggestions have no hover tooltip.
 - The current request's `Player` / `CommandSender` name, UUID, operator status,
   `hasPermission`, `isPermissionSet`, `getServer` and `sendMessage`; strings,
   string arrays and text components return bounded text messages. Components
@@ -124,9 +132,14 @@ snapshot; Maven obtains it from the official Paper repository.
 | Permission request context | 256 nodes; each 128 UTF-16 code units, restricted ASCII |
 | Callback output | 64 messages; each 1024 UTF-16 code units and at most 4096 UTF-8 bytes; 32,768 total text bytes |
 | Error | 2048 UTF-8 bytes, truncated at code-point boundary; NUL sanitized |
+| Completions | 64 strings; each at most 256 UTF-8 bytes; 16,384 serialized UTF-8 bytes total |
 
 NUL is rejected in metadata and outgoing text. Oversized output becomes an
 explicit bounded error response; it cannot become an oversized frame.
+Completion strings also reject null entries and unpaired UTF-16 surrogates.
+The combined response is checked after JSON escaping; oversized callback output
+returns a correlated error with empty messages/completions, keeping the next
+request usable.
 
 ## Exact RPC schema
 
@@ -138,7 +151,7 @@ Malformed framing/JSON, duplicate JSON fields or an invalid/missing ID terminate
 the process with a stderr diagnostic because safe correlation is impossible.
 EOF performs the normal disable/close path.
 
-Player fields are required in command, join and quit requests:
+Player fields are required in command, complete, join and quit requests:
 
 ```json
 {"name":"Tester","uuid":"12345678-1234-5678-1234-567812345678","op":false,"permissions":["fixture.use"]}
@@ -156,6 +169,7 @@ Requests:
 {"id":3,"op":"join","player":{"name":"Tester","uuid":"12345678-1234-5678-1234-567812345678","op":false,"permissions":[]}}
 {"id":4,"op":"quit","player":{"name":"Tester","uuid":"12345678-1234-5678-1234-567812345678","op":false,"permissions":[]}}
 {"id":5,"op":"shutdown"}
+{"id":6,"op":"complete","command":"bfixture","args":["probe",""],"player":{"name":"Tester","uuid":"12345678-1234-5678-1234-567812345678","op":false,"permissions":["fixture.use"]}}
 ```
 
 `load` runs exactly once and creates a missing plugin directory. All JARs are
@@ -164,6 +178,15 @@ rolls back already-enabled plugins. Further command/event requests reject an
 inactive bridge. Command matching is case-insensitive; the executor receives
 the matched lowercase label. Commands/events require successful load. A quit
 requires a prior join for the same UUID; duplicate joins are rejected.
+`complete` requires at least one argument, including an empty current token after
+trailing whitespace. Permission denial yields an empty successful completion
+response without invoking a plugin. Callback failures yield an error and empty
+completions. Completion responses require the `completions` array; it is absent
+on other operations.
+
+```json
+{"id":6,"ok":true,"messages":[],"completions":["alpha","beta"],"error":null}
+```
 
 Successful load response:
 
