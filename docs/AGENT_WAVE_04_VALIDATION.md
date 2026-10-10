@@ -2,7 +2,8 @@
 
 Stand: 10.10.2026. Minecraft Java1.21.8 / Protokoll772 / DataVersion4440.
 Ausgangspunkt `fb0e96e0`; kombiniert geprüfte Runtimebasis **`62a5b74d`**.
-Danach separat geprüfte Entitygrundlage als **`916251da`** integriert.
+Danach separat geprüfte Entitygrundlage als **`916251da`** und originale
+kubische Splines als **`245134eb`** integriert.
 Root orchestriert Review, Tests und Git; Produktionscode schreiben die Agents.
 Branch bleibt ausschließlich `main`.
 
@@ -20,6 +21,7 @@ keinen Nether-/Endfortschritt und keine vollständige Java-/Paper-API.
 | GEN-04.2, `09fd6657` | Normal-, Simplex- und BlendedNoise mit originaler Auswertungsreihenfolge und RNG. 153 Worldtests; Releasebestand134 und strictchecks grün. 16.974 tatsächliche Original-JAR-Records. Root Python-`-O`-Reexport von Fixture/Manifest bytegleich und Publiccontracts7 grün. Fremdreview CLEAN, Freeze12/12 identisch. | Zusätzliche explizite FerrumC-Ressourcengrenzen. Noch keine Densityrouter, Aquifers, Surface/Biome oder natürliche Chunkgenerierung. |
 | WG-004, `62a5b74d` | Produktiver Format4-Start, gespeicherte Seedautorität, überprüfte Generatorbindung vor Import/Spawn/Connections. Verifizierte Tickcapture und Storezuordnung, Retry-/Unload-/Stopbarrieren sowie explizite Offline-Migration. Fremdreview CLEAN; sieben Rootclientharnesses und zusätzliche echte Migration/Read-only-Restartprobe grün. Freeze26/26 identisch. | Nur Flat-v1 aktiviert. Keine automatische Migration oder Reparatur; keine gemeinsame Player-/Worldcrashtransaction und kein Prozesskillnachweis. |
 | SIM-03.2, `916251da` | Begrenzte shardbesessene Non-playerregistrierungen, UUID-/Wire-/Chunkindizes, generationaler Incarnationhandle und residenter Tickentry. 164 Unit + 56 Integration + 3 Doc beim Implementer; unabhängige Debug-/Releaseprüfung jeweils227 einschließlich vier eigener Probes. Review CLEAN nach unveränderter F1-RED→GREEN-Probe; Freeze7/7 identisch. | Noch keine Appaktivierung, Living-/Itemkomponenten, Speicherung, Tracking, Physik, KI oder Entityevents. |
+| GEN-04.3, `245134eb` | Immutable begrenzte originale f32-Splinegraphen, f32-Diagnostik und geordnete Callbackauswertung. Rootreview CLEAN nach dokumentarischem Clippy-F1; isoliert163 Worlddebugtests,20 Releasecontracts und frischer bytegleicher Originalreexport. Zusätzlich32 Graphen/4294 tatsächliche Original-JAR-Records, darunter3462 finiteSamples und160 Sourceexceptiontraces. | Zusätzliche eigene Caps/nonfinite Fehlerpolicy; noch kein Densitycompiler, Router oder aktiver Naturalgenerator. |
 
 Originalreferenz: Minecraft1.21.8, Paper Build60/Commit
 `29c8822d90899c89d2689338e81a98f690bcba12`. Vollständige Methoden,
@@ -136,8 +138,12 @@ Die erfolgreiche CI aus Welle3 für `fb0e96e0` ist kein Nachweis für diese Basi
 GitHub-CI für **`ba50369e`**, dieselbe Runtime wie `62a5b74d`, ist erfolgreich:
 [CI-Lauf38073935031](https://github.com/jstrausd/ferrumc/actions/runs/38073935031).
 Alle Rust-/Java-/Tool-/Generator-/Claims- und sieben Clientgates bestanden.
-Dieser Lauf enthält den späteren SIM-03.2-Commit noch nicht. Eine CI für den
-neuen veröffentlichten Gesamtstand folgt getrennt.
+Dieser Lauf enthält den späteren SIM-03.2-Commit noch nicht.
+GitHub-CI für **`b4c88476`**, einschließlich SIM-03.2, ist ebenfalls erfolgreich:
+[CI-Lauf38075509053](https://github.com/jstrausd/ferrumc/actions/runs/38075509053).
+Alle Rust-/Java-/Tool-/Generator-/Claims- und sieben Clientgates bestanden.
+GEN-04.3 ist in diesem zweiten Lauf noch nicht enthalten; CI für den neuen
+veröffentlichten Gesamtstand folgt getrennt.
 
 ## Unabhängige Entityprüfung nach F1-Fix
 
@@ -169,10 +175,10 @@ Das belegt Typ-/Owneridentität und keine Verhaltensimplementation dieser Mobs.
 - `feature_catalog`: REG-WORLDGEN001, Originaldatenproducer für60 Noiseparameter,
   35 Densityresources und7 Noisesettings; API-/Generatorvertrag freigegeben,
   in Umsetzung. Immutable Originaldefinitionen benötigen noch einen Worldcompiler.
-- `item_transfer_primitives`: GEN-04.3 originale kubische Splines; anschließend
+- `item_transfer_primitives`: GEN-04.3 originale kubische Splines integriert;
+  read-only Design des konkreten GEN-05-Densitycompiler-/Routerconsumers.
+  Anschließend
   Densityregistry/-router, NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
-  Splineimplementation eingefroren, unabhängiger Review durch Root; parallel
-  read-only Design des konkreten Densitycompiler-/Routerconsumers.
 - `select_world_ticket`: STORAGE-ENTITY001.1 fresh/strict UUID-Storageproducer.
   API-/Mode-/Validatorvertrag freigegeben, in Umsetzung.
   Root reserviert die vier Präzisierungen des unabhängigen Designreviews;
