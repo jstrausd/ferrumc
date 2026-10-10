@@ -595,6 +595,43 @@ async function buildAndVerifyEdits(client, state) {
   // (g) break the slab -> air (proves the dig path + that a break is durable).
   await breakAndVerify(client, state, { label: 'break oak_slab', loc: [10, 64, 9] });
 
+  // Use the actual item-to-block path: direct floor-state placement tests miss
+  // a reverse snapshot that maps a standing/wall item to its wall variant.
+  // Every torch has a real stone support, and the independent Prismarine
+  // decoder checks all four wall facings as well as the standing form.
+  const torchPattern = [];
+  for (const [item, wall, anchor] of [
+    ['torch', 'wall_torch', [6, 64, 7]],
+    ['soul_torch', 'soul_wall_torch', [9, 64, 11]],
+    ['redstone_torch', 'redstone_wall_torch', [11, 64, 5]],
+  ]) {
+    const [x, y, z] = anchor;
+    await placeStateful(client, state, {
+      label: `${item} stone support`, slot: 0, item: 'stone',
+      clickLoc: { x, y: y - 1, z }, dir: 1,
+      expectLoc: anchor, expectName: 'stone',
+    });
+    torchPattern.push({ pos: anchor, name: 'stone' });
+    await placeStateful(client, state, {
+      label: `${item} on top of support`, slot: 4, item,
+      clickLoc: { x, y, z }, dir: 1,
+      expectLoc: [x, y + 1, z], expectName: item,
+    });
+    torchPattern.push({ pos: [x, y + 1, z], name: item });
+    for (const [direction, facing, dx, dz] of [
+      [2, 'north', 0, -1], [3, 'south', 0, 1],
+      [4, 'west', -1, 0], [5, 'east', 1, 0],
+    ]) {
+      await placeStateful(client, state, {
+        label: `${item} on ${facing} support face`, slot: 4,
+        clickLoc: { x, y, z }, dir: direction,
+        expectLoc: [x + dx, y, z + dz], expectName: wall,
+        expectProps: { facing },
+      });
+      torchPattern.push({ pos: [x + dx, y, z + dz], name: wall, props: { facing } });
+    }
+  }
+
   pass('Set-slot + stateful place + break all verified against the server response.');
 
   // The spawn-chunk portion of the persistence pattern.
@@ -603,6 +640,7 @@ async function buildAndVerifyEdits(client, state) {
     { pos: [11, 64, 8], name: 'oak_log', props: { axis: 'x' } },
     { pos: [10, 64, 7], name: 'oak_stairs', props: { facing: 'south', half: 'bottom' } },
     { pos: [10, 64, 9], name: 'air' }, // broken slab stays gone
+    ...torchPattern,
   ];
 }
 
@@ -709,18 +747,24 @@ async function startServer(label) {
 }
 
 async function stopServer(child) {
-  if (!child || child.exitCode !== null) return;
+  assert(child && child.exitCode === null && child.signalCode === null,
+    'managed server must still be running before graceful shutdown');
   log('Stopping server gracefully (SIGINT -> flush-on-shutdown)...');
-  const exited = new Promise((resolve) => child.once('exit', () => resolve()));
+  const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
   child.kill('SIGINT');
+  let result;
   try {
-    await withTimeout(exited, TIMEOUTS.serverStop, 'graceful server exit');
-    pass('Server stopped gracefully (edits flushed to disk).');
+    result = await withTimeout(exited, TIMEOUTS.serverStop, 'graceful server exit');
   } catch (e) {
     fail('graceful stop timed out; forcing SIGKILL:', e.message);
     try { child.kill('SIGKILL'); } catch { /* ignore */ }
-    await exited;
+    await withTimeout(exited, TIMEOUTS.serverStop, 'forced server exit');
+    // Cleanup must not convert failed flush/shutdown into a passing restart gate.
+    throw e;
   }
+  assert(result.code === 0 && result.signal === null,
+    `managed server exited unsuccessfully: code=${result.code} signal=${result.signal}`);
+  pass('Server stopped gracefully (edits flushed to disk).');
 }
 
 // ---------------------------------------------------------------------------
