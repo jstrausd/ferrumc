@@ -427,6 +427,40 @@ mod tests {
     }
 
     #[test]
+    fn play_disconnect_matches_vendored_packet_name_and_nbt_shape() {
+        use crate::packets::{Direction, State, WireType};
+
+        let spec = load_packets();
+        let packet = spec
+            .packets
+            .iter()
+            .find(|packet| packet.name == "PlayDisconnect")
+            .expect("PlayDisconnect is declared");
+        assert_eq!(packet.state, State::Play);
+        assert_eq!(packet.direction, Direction::Clientbound);
+        assert_eq!(packet.fields.len(), 1);
+        assert_eq!(packet.fields[0].name, "reason");
+        assert_eq!(packet.fields[0].ty, WireType::Nbt);
+
+        let path = pinned_manifest()
+            .parent()
+            .expect("manifest parent")
+            .join("protocol.json");
+        let root: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read pinned protocol"))
+                .expect("parse pinned protocol");
+        let types = &root["play"]["toClient"]["types"];
+        assert_eq!(
+            types["packet"][1][0]["type"][1]["mappings"][format!("0x{:02x}", packet.id)],
+            "kick_disconnect"
+        );
+        assert_eq!(
+            types["packet_kick_disconnect"],
+            serde_json::json!(["container", [{"name": "reason", "type": "anonymousNbt"}]])
+        );
+    }
+
+    #[test]
     fn output_is_lf_with_single_trailing_newline() {
         let spec = load_spec();
         let packets = load_packets();

@@ -1930,6 +1930,53 @@ impl SetContainerSlot {
     }
 }
 
+/// `PlayDisconnect`: the play clientbound packet (wire id `0x1c`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayDisconnect {
+    reason: ferrumc_nbt::NbtTag,
+}
+
+impl PlayDisconnect {
+    /// The wire packet id for `PlayDisconnect`.
+    pub const PACKET_ID: i32 = 0x1c;
+
+    /// Creates a new `PlayDisconnect` from its wire fields.
+    pub fn new(reason: ferrumc_nbt::NbtTag) -> Self {
+        Self { reason }
+    }
+
+    /// Returns the `reason` field.
+    pub fn reason(&self) -> &ferrumc_nbt::NbtTag {
+        &self.reason
+    }
+
+    /// Decodes a `PlayDisconnect` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let reason = {
+            let available = reader.remaining();
+            let bytes = reader.read_bytes(available)?;
+            let (tag, consumed) = ferrumc_nbt::read_network_root_with_consumed(
+                bytes,
+                &ferrumc_nbt::NbtLimits::default(),
+            )?;
+            *reader = BoundedReader::new(bytes.get(consumed..).unwrap_or_default());
+            tag
+        };
+        Ok(Self { reason })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        {
+            let nbt_bytes =
+                ferrumc_nbt::write_network_root(&self.reason, &ferrumc_nbt::NbtLimits::default())?;
+            wire::write_raw(buf, &nbt_bytes);
+        }
+        Ok(())
+    }
+}
+
 /// `EntityTeleport`: the play clientbound packet (wire id `0x1f`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityTeleport {
@@ -4399,6 +4446,8 @@ pub enum ClientboundPlayPacket {
     SetContainerContent(SetContainerContent),
     /// The `SetContainerSlot` packet.
     SetContainerSlot(SetContainerSlot),
+    /// The `PlayDisconnect` packet.
+    PlayDisconnect(PlayDisconnect),
     /// The `EntityTeleport` packet.
     EntityTeleport(EntityTeleport),
     /// The `UnloadChunk` packet.
@@ -4490,6 +4539,7 @@ impl ClientboundPlayPacket {
             SetContainerSlot::PACKET_ID => {
                 Ok(Self::SetContainerSlot(SetContainerSlot::decode(reader)?))
             }
+            PlayDisconnect::PACKET_ID => Ok(Self::PlayDisconnect(PlayDisconnect::decode(reader)?)),
             EntityTeleport::PACKET_ID => Ok(Self::EntityTeleport(EntityTeleport::decode(reader)?)),
             UnloadChunk::PACKET_ID => Ok(Self::UnloadChunk(UnloadChunk::decode(reader)?)),
             GameEvent::PACKET_ID => Ok(Self::GameEvent(GameEvent::decode(reader)?)),
@@ -4579,6 +4629,7 @@ impl ClientboundPlayPacket {
             Self::Commands(_) => Commands::PACKET_ID,
             Self::SetContainerContent(_) => SetContainerContent::PACKET_ID,
             Self::SetContainerSlot(_) => SetContainerSlot::PACKET_ID,
+            Self::PlayDisconnect(_) => PlayDisconnect::PACKET_ID,
             Self::EntityTeleport(_) => EntityTeleport::PACKET_ID,
             Self::UnloadChunk(_) => UnloadChunk::PACKET_ID,
             Self::GameEvent(_) => GameEvent::PACKET_ID,
@@ -4627,6 +4678,7 @@ impl ClientboundPlayPacket {
             Self::Commands(packet) => packet.encode(buf),
             Self::SetContainerContent(packet) => packet.encode(buf),
             Self::SetContainerSlot(packet) => packet.encode(buf),
+            Self::PlayDisconnect(packet) => packet.encode(buf),
             Self::EntityTeleport(packet) => packet.encode(buf),
             Self::UnloadChunk(packet) => packet.encode(buf),
             Self::GameEvent(packet) => packet.encode(buf),

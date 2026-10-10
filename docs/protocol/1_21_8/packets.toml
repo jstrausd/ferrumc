@@ -484,6 +484,16 @@ fields = [
     { name = "value", type = "f32" },
 ]
 
+# minecraft-data: play.toClient.kick_disconnect ("Disconnect"). The reason uses
+# the same anonymous-root NBT text-component type as SystemChat. It must be sent
+# in the play state; LoginDisconnect has a different id and JSON-string body.
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "PlayDisconnect"
+id = 0x1C
+fields = [{ name = "reason", type = "nbt" }]
+
 # minecraft-data: play.toClient.system_chat ("System Chat Message"). One packet
 # carries BOTH the chat box and the action bar: `content` is a text component
 # encoded as network (anonymous-root) NBT — NOT a JSON string in 1.20.3+ — and
