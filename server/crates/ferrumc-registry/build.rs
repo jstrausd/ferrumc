@@ -1,4 +1,4 @@
-//! Build-time codegen for the item and block-state registry tables.
+//! Build-time codegen for item, block-state and entity-type registry tables.
 //!
 //! The vendored `data/items.json`, `data/item_to_block_mapping.json`, and
 //! `data/blocks.json` snapshots are parsed **once at build time** and turned into
@@ -23,6 +23,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+
+#[path = "build/entity_type_codegen.rs"]
+mod entity_type_codegen;
 
 /// One item entry in `items.json`: a numeric protocol id plus its data
 /// components (we only read `max_stack_size`).
@@ -133,12 +136,16 @@ fn main() {
     let items_path = data_dir.join("items.json");
     let mapping_path = data_dir.join("item_to_block_mapping.json");
     let blocks_path = data_dir.join("blocks.json");
+    let entity_types_path =
+        manifest_dir.join("../../../docs/fixtures/minecraft-1.21.8-original/entity-types.json");
 
     // Re-run only when the vendored data (or this generator) changes.
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", items_path.display());
     println!("cargo:rerun-if-changed={}", mapping_path.display());
     println!("cargo:rerun-if-changed={}", blocks_path.display());
+    println!("cargo:rerun-if-changed=build/entity_type_codegen.rs");
+    println!("cargo:rerun-if-changed={}", entity_types_path.display());
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
@@ -154,6 +161,19 @@ fn main() {
     let blocks_dest = out_dir.join("blocks_generated.rs");
     fs::write(&blocks_dest, blocks_source)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", blocks_dest.display()));
+
+    let entity_types = match entity_type_codegen::load(&entity_types_path) {
+        Ok(types) => types,
+        Err(error) => panic!("entity-type registry admission failed: {error}"),
+    };
+    let entity_source = match entity_type_codegen::emit(&entity_types) {
+        Ok(source) => source,
+        Err(error) => panic!("entity-type registry generation failed: {error}"),
+    };
+    let entity_dest = out_dir.join("entity_types_generated.rs");
+    if let Err(error) = fs::write(&entity_dest, entity_source) {
+        panic!("failed to write {}: {error}", entity_dest.display());
+    }
 }
 
 /// One block entry in `blocks.json`: the bare resource name, its protocol id,

@@ -12,8 +12,8 @@
 ## Crate-Specific
 
 - The runtime is dependency-free and does no I/O or parsing. Block/biome/dimension
-  data is hardcoded as `const`; item data is generated at **build time** by
-  `build.rs` from the vendored `data/*.json` snapshots into static arrays emitted
+  data is hardcoded as `const`; item/block/entity-type data is generated at
+  **build time** by `build.rs` from the vendored snapshots into static arrays emitted
   to `OUT_DIR`. Either way the runtime never parses JSON and pays zero boot cost
   (no `OnceCell`/`lazy_static`). JSON/TOML parsing exists only in `build.rs` and
   under `#[cfg(test)]`.
@@ -34,6 +34,20 @@
   Source snapshots remain unchanged. Contextual attachment and support checks
   belong to placement/simulation, not registry lookup.
 - This crate may depend only on `ferrumc-core`; never on sim, net, or storage.
+- Entity-type tables derive exclusively from the unchanged CAT-02.1 original
+  `docs/fixtures/minecraft-1.21.8-original/entity-types.json`. Build admission
+  rejects inputs above 64 KiB, malformed/duplicate JSON fields, invalid names,
+  duplicate/gapped/out-of-range ids, wrong registry/default/count and absent
+  player. Its 151 static type identities do not implement entity metadata or AI.
+- `EntityTypeId` is opaque and constructed only through checked name/id lookup;
+  it has no unchecked/default/serialization path. Runtime lookups and ordered
+  iteration allocate nothing, and unknown names/ids return `None` rather than
+  defaulting to pig. Player identity is generated from the same source name.
+- The Registry oracle helper verifies independent fixture/report/manifest pins
+  using explicit requirements that remain active under Python `-O`. A write
+  requires the complete SHA-pinned original report and equality of every
+  entity-type name/id to the unchanged subset. Oracle identity comparison is
+  separate from live Paper/gameplay differential acceptance.
 - Built-in connection facts are pinned to Minecraft 1.21.8 / Paper Build 60.
   Fence families follow explicit `FENCES`/`WOODEN_FENCES` membership (including
   crimson and warped as wooden); exceptions follow the reviewed block classes,

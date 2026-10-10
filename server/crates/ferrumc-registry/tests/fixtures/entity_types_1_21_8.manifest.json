@@ -1,0 +1,59 @@
+{
+  "entry_count": 151,
+  "exporter": "server/crates/ferrumc-registry/tests/reference/export_entity_types.py",
+  "files": {
+    "entity_types_1_21_8.tsv": {
+      "bytes": 4566,
+      "sha256": "e56e7322b59e20ef74447fc0a7237f7784fe3455b308a2c4ebe7a1277bafa15d"
+    }
+  },
+  "licensing": {
+    "eula": "https://www.minecraft.net/en-us/eula",
+    "original_data": "Mojang/Microsoft data; not relicensed under repository MIT",
+    "tooling": "MIT (FerrumC)",
+    "usage_guidelines": "https://www.minecraft.net/en-us/usage-guidelines"
+  },
+  "minecraft": {
+    "data_version": 4440,
+    "protocol_version": 772,
+    "version": "1.21.8"
+  },
+  "registry": "minecraft:entity_type",
+  "schema_version": 1,
+  "scope": "complete static entity type identity only; no metadata, spawn rules or simulation",
+  "source": {
+    "entity_subset": {
+      "bytes": 9319,
+      "path": "docs/fixtures/minecraft-1.21.8-original/entity-types.json",
+      "sha256": "b65a61ac9f4346ad74ff159cb3f8be78ec96229ccfc3abe29a14a7e0063d4d6b"
+    },
+    "inner_server": {
+      "bytes": 18900451,
+      "path": "META-INF/versions/1.21.8/server-1.21.8.jar",
+      "sha256": "2bee159e4ce87ae857b4323f9f32c7a3d7d448f7f8c3f62fa6f295a72e228250"
+    },
+    "original_exporter": "scripts/minecraft-original-export.py",
+    "original_manifest": {
+      "bytes": 7061,
+      "sha256": "d5b4506f5749d114d7b54c50231ee00f6f15d14b2826f8c39489df06932ed9ee"
+    },
+    "registry_report": {
+      "bytes": 466543,
+      "path": "reports/registries.json",
+      "sha256": "177a6ad99d7b6d28f27e49231d15a5ccdb262bed9ac07f7e66dab5d32cc20c27"
+    },
+    "server_bundle": {
+      "bytes": 57555044,
+      "sha1": "6bce4ef400e4efaa63a13d5e6f6b500be969ef81",
+      "sha256": "2349d9a8f0d4be2c40e7692890ef46a4b07015e7955b075460d02793be7fbbe7",
+      "url": "https://piston-data.mojang.com/v1/objects/6bce4ef400e4efaa63a13d5e6f6b500be969ef81/server.jar"
+    },
+    "version_manifest": {
+      "bytes": 43719,
+      "sha1": "b1bb44ad769609925328838694503a8dcac7f529",
+      "sha256": "3bf5cdd444dfa89199fe4f8a92b6c79f4e4fa8977ff52029c3acd99378506fad",
+      "url": "https://piston-meta.mojang.com/v1/packages/b1bb44ad769609925328838694503a8dcac7f529/1.21.8.json"
+    }
+  },
+  "verification": "all 151 names and protocol ids equal the entity_type subset of the pinned full original report"
+}
