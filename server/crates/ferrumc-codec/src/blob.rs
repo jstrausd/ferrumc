@@ -151,7 +151,7 @@ mod tests {
         let buf = encode(&[]);
         let mut reader = BoundedReader::new(&buf);
         let blob = BoundedBytes::<16>::read(&mut reader).unwrap();
-        assert!(blob.as_slice().is_empty());
+        assert_eq!(blob.as_slice().len(), 0);
     }
 
     #[test]
