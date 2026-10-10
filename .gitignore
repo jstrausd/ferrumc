@@ -2,6 +2,7 @@
 /server/target
 /server/java-bridge/target/
 /server/java-bridge/**/target/
+/deploy/tests/__pycache__/
 /.codex-tmp/
 **/*.rs.bk
 

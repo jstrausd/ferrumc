@@ -7,7 +7,7 @@
     "exported_at": "2026-10-10T00:00:00+00:00",
     "name": "FerrumC v2 (local image)",
     "author": "36381849+jstrausd@users.noreply.github.com",
-    "description": "Minecraft Java 1.21.8 / protocol 772 offline alpha. Uses the locally built mchosting/ferrumc:v2-local image. Runtime startup is fixed by the image entrypoint; configure config.toml and the allocated SERVER_PORT.",
+    "description": "Minecraft Java 1.21.8 / protocol 772 offline alpha. Locally built Rust server image includes an optional Java 21 compatibility host for a tested Bukkit API subset. Configure config.toml and SERVER_PORT; full Paper compatibility remains in development.",
     "features": null,
     "docker_images": {
         "FerrumC v2 local (Debian bookworm)": "mchosting/ferrumc:v2-local"
@@ -22,7 +22,7 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/sh\nset -eu\n\nserver_dir=/mnt/server\ntemplate=/usr/local/share/ferrumc/config.template.toml\nmkdir -p \"$server_dir/world\" \"$server_dir/plugins\"\nif [ ! -e \"$server_dir/config.toml\" ] && [ ! -L \"$server_dir/config.toml\" ]; then\n    cp \"$template\" \"$server_dir/config.toml\"\nfi\n# Change only top-level ownership, preserving all existing data and plugin files.\nchown -h 1000:1000 \"$server_dir\" \"$server_dir/world\" \"$server_dir/plugins\" \"$server_dir/config.toml\"\nprintf '%s\\n' 'FerrumC v2 data directory ready; the executable is supplied by the image.'\n",
+            "script": "#!/bin/sh\nset -eu\n\nserver_dir=/mnt/server\ntemplate=/usr/local/share/ferrumc/config.template.toml\nmkdir -p \"$server_dir/world\" \"$server_dir/plugins\" \"$server_dir/java-plugins\"\nif [ ! -e \"$server_dir/config.toml\" ] && [ ! -L \"$server_dir/config.toml\" ]; then\n    cp \"$template\" \"$server_dir/config.toml\"\nfi\n# Change only top-level ownership, preserving all existing data and plugin files.\nchown -h 1000:1000 \"$server_dir\" \"$server_dir/world\" \"$server_dir/plugins\" \"$server_dir/java-plugins\" \"$server_dir/config.toml\"\nprintf '%s\\n' 'FerrumC v2 data directory ready; the executable is supplied by the image.'\n",
             "container": "mchosting/ferrumc-installer:v2-local",
             "entrypoint": "/bin/sh"
         }

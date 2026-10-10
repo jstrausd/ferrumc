@@ -3,6 +3,7 @@
 This deployment builds the current Rust v2 server for Minecraft Java 1.21.8
 (protocol 772). The server currently runs as an offline alpha with a flat-world
 default, optional Anvil import, native FerrumC plugins, and placeholder lighting.
+The image also includes Java 21 and the optional Bukkit compatibility host.
 Use a private or otherwise controlled network while online authentication is
 being implemented; offline player names are not authenticated identities.
 
@@ -23,7 +24,8 @@ docker logs --follow ferrumc-v2
 ```
 
 The image builds `server/` with Rust 1.99.0 using
-`cargo build --release --locked -p ferrumc-app`. The Debian bookworm runtime
+`cargo build --release --locked -p ferrumc-app` and the Java adapter with Maven
+3.9.11 and Java 21. The Debian bookworm runtime
 matches the build stage's glibc. The process runs as UID/GID 1000, so a bind
 mount must be writable by that user. First startup creates `config.toml` and
 the durable `world/` database in the mounted directory.
@@ -77,7 +79,7 @@ the image's user and entrypoint; this separate image lets that shell run directl
    Wings provides the allocation as `SERVER_PORT`; the entrypoint binds that
    port without rewriting the TOML file.
 4. Run installation and start the server. Installation uses the separate
-   `mchosting/ferrumc-installer:v2-local` image. It creates absent `world/` and `plugins/` directories
+   `mchosting/ferrumc-installer:v2-local` image. It creates absent `world/`, `plugins/`, and `java-plugins/` directories
    and copies the image's commented template to `/mnt/server/config.toml` only
    when no config exists. Reinstallation preserves existing file contents.
 
@@ -101,7 +103,7 @@ in-game according to permissions.
 
 ## Persistent configuration and plugins
 
-Keep `config.toml`, `world/`, and `plugins/` under `/home/container`. Relative
+Keep `config.toml`, `world/`, `plugins/`, and `java-plugins/` under `/home/container`. Relative
 paths resolve from that directory. For custom native bundles, uncomment
 `plugins_dir = "plugins"` in the template's top-level storage/plugins section
 and follow [`docs/plugin-authoring.md`](../docs/plugin-authoring.md). A bundle
@@ -109,6 +111,49 @@ contains its manifest and hash-pinned Linux dynamic library. Compile it for the
 node's CPU architecture and a compatible glibc, using the project's plugin ABI.
 Add any extra shared libraries it requires in a derived runtime image. Plugins
 execute trusted native code with the server process's privileges.
+
+### Java plugins
+
+Enable the adapter by adding both top-level paths to `config.toml`, above its
+first TOML table (`[world]` in the template):
+
+```toml
+java_plugins_dir = "java-plugins"
+java_bridge_jar = "/usr/local/share/ferrumc/ferrumc-java-bridge.jar"
+java_executable = "java"
+java_bridge_timeout_ms = 5000
+```
+
+Put classical `plugin.yml` JARs in `/home/container/java-plugins/` and restart.
+The adapter and Java runtime are image-owned; plugin data stays in the mount.
+The first API subset covers lifecycle, declared commands/aliases, the current
+player's identity and messages, Rust-derived command permission snapshots and
+configured operators, and join/quit listeners. Bukkit permission defaults,
+attachments, general permission plugins, cross-player messages and broadcasts
+remain unfinished. Unsupported APIs fail explicitly. World, inventory, scheduler,
+Paper bootstrap and NMS compatibility still require implementation; ordinary
+Paper plugins cannot yet be assumed to work. Read the
+[adapter contract](../server/java-bridge/README.md) before choosing a plugin.
+
+Rust remains the game server and owns all world data and client connections.
+Java logs join the container's logs. RPC frames and queued work are bounded;
+an ambiguous timeout or transport failure terminates the adapter. Restart the
+server after correcting the plugin or adapter error. Each Java plugin executes
+with the same OS permissions as the container user; process separation is no
+plugin security sandbox. Include `java-plugins/` in stopped-server backups.
+
+After building both images, the ordinary fixture and the independent client
+dependencies, run the container contract from the repository root:
+
+```sh
+python3 deploy/tests/container-java.py
+```
+
+If Docker requires sudo, prefix the command with
+`FERRUMC_DOCKER_COMMAND="sudo -n docker"`. The test uses its own temporary data
+and container, invokes the real Wings installer, checks Java/client behavior
+and packaged sources/licenses, then verifies graceful shutdown and reinstall
+preservation. It retains diagnostics and removes its test container.
 
 The dashboard stays at `127.0.0.1:9090` inside the container and is not published
 by the example or the egg. Access it through a controlled tunnel/proxy when
