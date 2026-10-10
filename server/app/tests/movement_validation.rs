@@ -8,6 +8,8 @@
 //! shard/router, or replace the valid leave-save candidate.
 
 mod common;
+#[path = "common/player_payload.rs"]
+mod player_payload;
 
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -484,27 +486,21 @@ async fn wait_for_clean_leave(
 
 /// Asserts one app-owned persisted record retained the accepted state and look.
 fn assert_saved_state(record: &PlayerRecord) {
-    let payload: serde_json::Value =
-        serde_json::from_slice(record.data()).expect("decode saved player payload");
-    let number = |field: &str| {
-        payload[field]
-            .as_f64()
-            .unwrap_or_else(|| panic!("{field} is a JSON number"))
-    };
-    let actual = Vec3::new(number("x"), number("y"), number("z"));
+    let saved = player_payload::decode(record).expect("decode saved player payload");
     assert!(
-        same_position(actual, ACCEPTED),
-        "saved position {actual:?} != accepted {ACCEPTED:?}"
+        same_position(saved.position, ACCEPTED),
+        "saved position {:?} != accepted {ACCEPTED:?}",
+        saved.position
     );
     assert!(
-        (number("yaw") - f64::from(ACCEPTED_YAW)).abs() < EPSILON,
+        (f64::from(saved.yaw) - f64::from(ACCEPTED_YAW)).abs() < EPSILON,
         "saved yaw {} != {ACCEPTED_YAW}",
-        number("yaw")
+        saved.yaw
     );
     assert!(
-        (number("pitch") - f64::from(ACCEPTED_PITCH)).abs() < EPSILON,
+        (f64::from(saved.pitch) - f64::from(ACCEPTED_PITCH)).abs() < EPSILON,
         "saved pitch {} != {ACCEPTED_PITCH}",
-        number("pitch")
+        saved.pitch
     );
 }
 

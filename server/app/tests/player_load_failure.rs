@@ -26,7 +26,8 @@ use common::{login_to_play, TestClient};
 const GUARD: Duration = Duration::from_secs(10);
 
 /// Current app-owned player payload schema.
-const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
+const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(3);
+const JSON_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
 
 /// Raw player table used only to preserve and inspect an undecodable backend row.
 const PLAYER_TABLE: TableDefinition<'_, &[u8], &[u8]> = TableDefinition::new("ferrumc:player");
@@ -275,11 +276,49 @@ fn malformed_schema_two_carried_does_not_overwrite_the_original_record() {
             payload.as_object_mut().expect("object").remove("carried");
         }
         let original = PlayerRecord::new(
-            PLAYER_SCHEMA_VERSION,
+            JSON_PLAYER_SCHEMA_VERSION,
             GameMode::Survival,
             serde_json::to_vec(&payload).expect("JSON"),
         )
         .expect("bounded record");
+        assert_typed_record_rejected_unchanged(&runtime, temp.path(), name, &original);
+    }
+}
+
+fn valid_binary_payload() -> Vec<u8> {
+    let mut out = b"FCPS".to_vec();
+    out.extend_from_slice(&3_u16.to_be_bytes());
+    for value in [21.5_f64, 70.0, 9.25] {
+        out.extend_from_slice(&value.to_be_bytes());
+    }
+    for value in [45.0_f32, -12.0] {
+        out.extend_from_slice(&value.to_be_bytes());
+    }
+    out.push(2);
+    out.extend_from_slice(&46_u16.to_be_bytes());
+    for _ in 0..47 {
+        out.extend_from_slice(&7_u32.to_be_bytes());
+        out.extend_from_slice(b"FCIS\x00\x01\x00");
+    }
+    out
+}
+
+#[test]
+fn malformed_schema_three_state_and_item_frames_preserve_original_bytes() {
+    let runtime = test_runtime();
+    for (name, offset, replacement) in [
+        ("UnsafePosition", 6, f64::NAN.to_be_bytes().to_vec()),
+        ("InvalidSelection", 38, vec![9]),
+        ("InvalidLayout", 39, 45_u16.to_be_bytes().to_vec()),
+        ("OversizedFrame", 41, u32::MAX.to_be_bytes().to_vec()),
+        ("BadItemMagic", 45, b"NOPE".to_vec()),
+        ("InvalidCarriedKind", 557, vec![2]),
+    ] {
+        let temp = temp_world();
+        let mut payload = valid_binary_payload();
+        payload[offset..offset + replacement.len()].copy_from_slice(&replacement);
+        let original = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload)
+            .expect("bounded malformed record");
         assert_typed_record_rejected_unchanged(&runtime, temp.path(), name, &original);
     }
 }

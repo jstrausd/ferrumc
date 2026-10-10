@@ -376,6 +376,56 @@ async function namedLive(connection) {
   console.log('PASS: named live stack retained through full-bag close, reopen and chest switch');
 }
 
+function persistentNamed(itemName, itemCount, name) {
+  const encoded = Buffer.from(name, 'utf8');
+  const nbt = Buffer.alloc(11 + encoded.length);
+  nbt[0] = 10; nbt[1] = 8;
+  nbt.writeUInt16BE(4, 2); nbt.write('text', 4);
+  nbt.writeUInt16BE(encoded.length, 8); encoded.copy(nbt, 10);
+  return {
+    ...stack(data.itemsByName[itemName].id, itemCount),
+    addedComponentCount: 2,
+    components: [{ type: 'custom_name', data: nbt }, { type: 'damage', data: Buffer.from([3]) }],
+    removedComponentCount: 1, removeComponents: [{ type: 'unbreakable' }],
+  };
+}
+
+function componentCheckpoint(connection, expected, label) {
+  const slots = connection.state.windows.get(0).items;
+  assert(slots.slice(9, 45).every(item => item.itemId === stoneId && item.itemCount === 64),
+    `${label}: full bag is unchanged`);
+  assert.equal(slots[1].itemCount, 0, `${label}: cursor source is empty`);
+  for (const [actual, wanted, field] of [
+    [connection.state.cursor, expected.cursor, 'cursor'],
+    [slots[5], expected.helmet, 'helmet'],
+    [slots[45], expected.offhand, 'offhand'],
+  ]) assert.deepEqual(actual, wanted, `${label}: complete ${field} count/components/removals survive`);
+}
+
+async function componentPersistence() {
+  await start('components-initial');
+  let connection = await connect();
+  await fillBag(connection);
+  const helmet = await creative(connection, 5, persistentNamed('diamond_helmet', 1, 'S02 helmet'));
+  const offhand = await creative(connection, 45, persistentNamed('emerald', 4, 'S02 offhand'));
+  const cursor = await creative(connection, 1, persistentNamed('emerald', 7, 'S02 cursor'));
+  const expected = structuredClone({ helmet, offhand, cursor });
+  await click(connection, 1); // window0 pickup leaves the full bag unable to accept it
+  componentCheckpoint(connection, expected, 'before save');
+  await disconnect(connection);
+  connection = await connect({ retryReserved: true });
+  componentCheckpoint(connection, expected, 'same-process rejoin');
+  console.log('PASS S02: named/damaged slots, removal patches and full-bag cursor survive save/rejoin');
+  await stop();
+  for (const label of ['components-restored', 'components-restored-again']) {
+    await start(label);
+    connection = await connect();
+    componentCheckpoint(connection, expected, label);
+    await stop();
+  }
+  console.log('PASS S02: independent client verifies complete player components after two process restarts');
+}
+
 function persistedBlock(connection, position) {
   const column = connection.state.columns.get(`${position.x >> 4},${position.z >> 4}`);
   return column.getBlock(new Vec3(position.x & 15, position.y, position.z & 15)).name;
@@ -466,6 +516,7 @@ async function main() {
   assert.equal(count(connection.state.windows.get(connection.state.active).items.slice(0, 27), markerId), 0);
   await disconnect(connection);
   await stop();
+  await componentPersistence();
   console.log(`INVENTORY CURSOR CLIENT TEST PASSED (${runDir})`);
 }
 

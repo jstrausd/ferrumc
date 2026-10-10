@@ -51,12 +51,15 @@
 - Normal shutdown drains every connection's save, ticket release and Leave
   acknowledgment while the driver remains alive, then stops simulation and
   awaits the final storage drain. Terminal task failures remain observable.
-- New player saves use schema 2: exactly 46 bounded slots and a required,
-  validated carried item; unknown fields and malformed cursor data reject
-  admission. Schema 1 explicitly migrates with an empty cursor and the prior
-  slot-normalization policy. Loading never rewrites records. Persisted slots
-  and carried items retain only registry IDs/counts; component persistence and
-  player/world crash-atomic transactions remain unimplemented.
+- New player saves use binary schema 3: exactly 46 slots and a required carried
+  item, each framed with the lossless bounded FCIS item codec. Typed/opaque
+  components, removals, NBT ordering and floating-point bits survive saves.
+  The aggregate payload is at most 1 MiB, checked before each append; at most
+  one temporary item buffer is retained during encoding. Malformed data refuses
+  admission. JSON schemas 1 and 2 explicitly migrate with their historical slot
+  normalization; schema 2 retains its strict cursor/layout/known-field rules.
+  Loading never rewrites records and cannot recover components omitted by old
+  saves. Player/world crash-atomic transactions remain unimplemented.
 - A bounded server-owned UUID lease is acquired before player loading and held
   through durable leave-save and acknowledged simulation Leave. Every error
   after accepted Join runs shared teardown. Save/encode/Leave-ack failure

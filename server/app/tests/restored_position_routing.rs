@@ -7,6 +7,8 @@
 //! leave, and the result survives both a same-process rejoin and a full restart.
 
 mod common;
+#[path = "common/player_payload.rs"]
+mod player_payload;
 
 use std::future::Future;
 use std::path::Path;
@@ -29,7 +31,7 @@ use common::{encode, login_to_play, TestClient};
 const GUARD: Duration = Duration::from_secs(20);
 
 /// Current app-owned player payload schema.
-const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
+const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(3);
 
 /// Default configured spawn used by this regression.
 const SPAWN: Vec3 = Vec3::new(8.0, 64.0, 8.0);
@@ -507,32 +509,26 @@ fn load_player(runtime: &Runtime, database_path: &Path, player: PlayerId) -> Pla
         .expect("player record remains present")
 }
 
-/// Asserts the position/look stored in one app-owned JSON payload.
+/// Asserts the position/look stored after a real connection's schema-3 save.
 fn assert_record_state(record: &PlayerRecord, expected: PlayerState) {
-    let payload: serde_json::Value =
-        serde_json::from_slice(record.data()).expect("decode saved player payload");
-    let coordinate = |field: &str| {
-        payload[field]
-            .as_f64()
-            .unwrap_or_else(|| panic!("{field} is a JSON number"))
-    };
-    let actual = Vec3::new(coordinate("x"), coordinate("y"), coordinate("z"));
+    let saved = player_payload::decode(record).expect("decode saved player payload");
     assert!(
-        same_position(actual, expected.position),
-        "saved position {actual:?} != expected {:?}",
-        expected.position,
+        same_position(saved.position, expected.position),
+        "saved position {:?} != expected {:?}",
+        saved.position,
+        expected.position
     );
     assert!(
-        (coordinate("yaw") - f64::from(expected.yaw)).abs() < EPSILON,
-        "saved yaw {} != expected {}",
-        coordinate("yaw"),
-        expected.yaw,
+        (f64::from(saved.yaw) - f64::from(expected.yaw)).abs() < EPSILON,
+        "saved yaw {} != {}",
+        saved.yaw,
+        expected.yaw
     );
     assert!(
-        (coordinate("pitch") - f64::from(expected.pitch)).abs() < EPSILON,
-        "saved pitch {} != expected {}",
-        coordinate("pitch"),
-        expected.pitch,
+        (f64::from(saved.pitch) - f64::from(expected.pitch)).abs() < EPSILON,
+        "saved pitch {} != {}",
+        saved.pitch,
+        expected.pitch
     );
 }
 
@@ -629,11 +625,11 @@ fn out_of_range_record_recovers_at_spawn_and_stays_healed_after_restart() {
     assert_eq!(healed.schema_version(), PLAYER_SCHEMA_VERSION);
     assert_eq!(healed.game_mode(), GameMode::Survival);
     assert_record_state(&healed, expected);
-    let payload: serde_json::Value =
-        serde_json::from_slice(healed.data()).expect("decode healed player payload");
-    assert_eq!(payload["selected_slot"], 2);
-    assert_eq!(
-        payload["slots"], original_payload["slots"],
-        "position recovery preserves the decoded inventory layout",
+    let saved = player_payload::decode(&healed).expect("decode healed player payload");
+    assert_eq!(saved.selected, 2);
+    assert!(
+        saved.slots.iter().all(|stack| stack.item().is_none()),
+        "position recovery preserves the empty decoded inventory layout"
     );
+    assert!(saved.carried.item().is_none());
 }
