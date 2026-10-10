@@ -128,6 +128,9 @@ pub(crate) fn clientbound_play_name(packet: &ClientboundPlayPacket) -> &'static 
             "update_entity_position_and_rotation"
         }
         ClientboundPlayPacket::UpdateEntityRotation(_) => "update_entity_rotation",
+        ClientboundPlayPacket::SetEntityData(_) => "set_entity_data",
+        ClientboundPlayPacket::SetEntityMotion(_) => "set_entity_motion",
+        ClientboundPlayPacket::TakeItemEntity(_) => "take_item_entity",
         ClientboundPlayPacket::SetHeadRotation(_) => "set_head_rotation",
         ClientboundPlayPacket::RemoveEntities(_) => "remove_entities",
         ClientboundPlayPacket::RemovePlayerInfo(_) => "remove_player_info",
