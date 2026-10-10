@@ -15,13 +15,16 @@ repository.workspace = true
 # in build.rs and emitted as static arrays, so the runtime
 # never parses JSON. These do not link into the runtime crate.
 serde = { workspace = true }       # derive Deserialize for the items.json schema
-serde_json = { workspace = true }  # parse the vendored items/mapping snapshots
+serde_json = { workspace = true, features = ["raw_value", "float_roundtrip"] }
+# Preserve original worldgen JSON slices and correctly rounded f64 parameters;
+# verify the immutable original export/provenance pins before generating tables.
+sha2 = "0.10"
 
 [dev-dependencies]
 # Drift guards only: parse the vendored minecraft-data snapshots and assert the
 # hardcoded constants + shipped manifest still match the real data.
 serde = { workspace = true }       # derive Deserialize for fixture schemas
-serde_json = { workspace = true }  # parse vendored blocks/biomes/version JSON
+serde_json = { workspace = true, features = ["raw_value", "float_roundtrip"] }
 toml = { workspace = true }        # parse manifest.toml for checksum verification
 sha2 = "0.10"                      # recompute fixture sha256 to verify the manifest
 

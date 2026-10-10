@@ -7,6 +7,7 @@ pub mod connection;
 pub mod dimension;
 pub mod entity_type;
 pub mod item;
+pub mod worldgen;
 
 /// Human-readable Minecraft release this registry data targets.
 pub const MINECRAFT_VERSION: &str = "1.21.8";

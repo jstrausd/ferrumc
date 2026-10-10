@@ -26,6 +26,8 @@ use serde::Deserialize;
 
 #[path = "build/entity_type_codegen.rs"]
 mod entity_type_codegen;
+#[path = "build/worldgen_codegen.rs"]
+mod worldgen_codegen;
 
 /// One item entry in `items.json`: a numeric protocol id plus its data
 /// components (we only read `max_stack_size`).
@@ -138,6 +140,7 @@ fn main() {
     let blocks_path = data_dir.join("blocks.json");
     let entity_types_path =
         manifest_dir.join("../../../docs/fixtures/minecraft-1.21.8-original/entity-types.json");
+    let original_dir = manifest_dir.join("../../../docs/fixtures/minecraft-1.21.8-original");
 
     // Re-run only when the vendored data (or this generator) changes.
     println!("cargo:rerun-if-changed=build.rs");
@@ -146,6 +149,19 @@ fn main() {
     println!("cargo:rerun-if-changed={}", blocks_path.display());
     println!("cargo:rerun-if-changed=build/entity_type_codegen.rs");
     println!("cargo:rerun-if-changed={}", entity_types_path.display());
+    for path in [
+        "build/worldgen_codegen.rs",
+        "build/worldgen_json.rs",
+        "build/worldgen_schema.rs",
+    ] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    for name in ["worldgen.json", "manifest.json", "version-manifest.json"] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            original_dir.join(name).display()
+        );
+    }
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
@@ -174,6 +190,25 @@ fn main() {
     if let Err(error) = fs::write(&entity_dest, entity_source) {
         panic!("failed to write {}: {error}", entity_dest.display());
     }
+
+    let block_properties = blocks
+        .iter()
+        .map(|block| {
+            let properties = block
+                .properties
+                .iter()
+                .map(|property| (property.name.clone(), property.values.clone()))
+                .collect();
+            (format!("minecraft:{}", block.name), properties)
+        })
+        .collect();
+    let worldgen = worldgen_codegen::load(&original_dir, &block_properties)
+        .unwrap_or_else(|error| panic!("worldgen registry admission failed: {error}"));
+    let worldgen_source = worldgen_codegen::emit(&worldgen)
+        .unwrap_or_else(|error| panic!("worldgen registry generation failed: {error}"));
+    let worldgen_dest = out_dir.join("worldgen_generated.rs");
+    fs::write(&worldgen_dest, worldgen_source)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", worldgen_dest.display()));
 }
 
 /// One block entry in `blocks.json`: the bare resource name, its protocol id,

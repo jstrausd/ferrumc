@@ -6,8 +6,8 @@ hardcoded runtime constants.
 The runtime is dependency-free and does no I/O or JSON parsing at startup: every
 value is either a `const` baked at compile time (block/biome/dimension) or a
 `static` array generated at build time from a vendored snapshot (items, blocks
-and entity types). The vendored upstream snapshots (`fixtures/protocol/1_21_8/` and this crate's
-`data/`, plus `docs/fixtures/minecraft-1.21.8-original/entity-types.json`) are
+and entity types/worldgen). The vendored upstream snapshots (`fixtures/protocol/1_21_8/` and this crate's
+`data/`, plus `docs/fixtures/minecraft-1.21.8-original/`) are
 parsed only by `build.rs` and by `#[cfg(test)]` drift guards that re-parse the
 real data and assert the generated tables still match,
 so a re-pin to a newer data version cannot silently desync them.
@@ -30,6 +30,12 @@ so a re-pin to a newer data version cannot silently desync them.
   classification and ordered borrowed iteration. Entity types are distinct from
   instance UUIDs, wire entity ids and local storage handles. This table supplies
   identity data; metadata, spawning, physics, tracking and AI need consumers.
+- `worldgen` — all 60 original noise, 35 density-function and seven noise-settings
+  resources through three distinct opaque IDs. Exact canonical/bare lookup and
+  static iteration allocate nothing. Noise supplies exact f64 parameters;
+  `OriginalDefinition` supplies the exact export JSON slice, measured limits and
+  typed dependencies. Compilation, seed binding, samplers, biomes, surfaces and
+  active terrain generation require separate World consumers.
 
 ## Data provenance
 
@@ -61,6 +67,41 @@ python3 crates/ferrumc-registry/tests/reference/export_entity_types.py --self-te
 Run from the `server/` workspace. Regeneration uses `--export --report` with
 the verified `reports/registries.json` from CAT-02.1; existing original fixtures
 remain unchanged. Data equality does not establish live Paper/gameplay parity.
+
+Worldgen uses the unchanged [original export](../../../docs/fixtures/minecraft-1.21.8-original/worldgen.json)
+and its independently pinned manifest/version metadata. Build admission checks
+duplicate decoded keys, per-family resource counts, finite codec parameters,
+reference domains, block/property validity, density cycles and unknown forms.
+The largest definition is 129853 bytes; all definitions fit the explicit
+128 KiB/4096-node/depth32/256-container/256-byte-string caps. Root depth is zero,
+and nodes count both object keys and values. Dependencies are charged before
+insertion and capped at 2048 occurrences/512 distinct values per definition.
+The complete source fixture has separate 4 MiB/131072-node/container1024 bounds.
+These are builtin producer limits, not arbitrary datapack support.
+
+Noise amplitudes are generated with `f64::from_bits`, retaining all original
+positions, including zeros. Their pinned scope is 1..16 amplitudes in 0..2,
+firstOctave -16..-1. `NoiseResourceId::parameters()` has no seed, RNG or sampler.
+Density/Noise holder names resolve fully at build time; external block/biome/
+codec types and positional RNG names remain explicitly typed. The original
+Clamp Directcodec and Shift `NoiseHolder` paths are distinct from unary
+`DensityHolder` paths. World must check its own cumulative compiler/graph/work
+limits and fail unsupported external dependencies before use.
+
+All 102 runtime definitions are tested against exact slices of the hashchecked
+export. The [offline original verifier](tests/reference/verify_builtin_worldgen.py)
+also checks every selected generated resource against the verified official
+bundle/inner JAR, exact decimal contents and all 195 noise-amplitude f64 bits:
+
+```sh
+python3 crates/ferrumc-registry/tests/reference/verify_builtin_worldgen.py
+```
+
+Run from `server/`; its default source directory is the existing CAT-02.1 local
+cache `.codex-tmp/original-1.21.8`, or pass `--original-dir`. It reads local inputs
+only. Datagen/JAR raw bytes agree; export/JAR whitespace and decimal token
+spelling can differ while exact values agree. Data/resource parity is separate
+from density evaluation, natural worldgen and seed/terrain acceptance.
 
 The extracted item-to-block snapshot is a reverse mapping and retains the wall
 variant for torch, soul torch and redstone torch. `build.rs` preserves the snapshot

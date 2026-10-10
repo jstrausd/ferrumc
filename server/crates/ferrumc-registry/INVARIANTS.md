@@ -12,7 +12,7 @@
 ## Crate-Specific
 
 - The runtime is dependency-free and does no I/O or parsing. Block/biome/dimension
-  data is hardcoded as `const`; item/block/entity-type data is generated at
+  data is hardcoded as `const`; item/block/entity-type/worldgen data is generated at
   **build time** by `build.rs` from the vendored snapshots into static arrays emitted
   to `OUT_DIR`. Either way the runtime never parses JSON and pays zero boot cost
   (no `OnceCell`/`lazy_static`). JSON/TOML parsing exists only in `build.rs` and
@@ -56,3 +56,37 @@
 - Unknown/malformed block names never become known non-exceptions. The facts
   do not include dynamic datapack tag overrides or classify full supporting
   faces: the registry's `boundingBox` flag is not support-shape evidence.
+- Worldgen resources derive only from the unchanged CAT-02.1 `worldgen.json`.
+  Build-only SHA256/byte pins admit that fixture, manifest and version manifest;
+  their original resource receipts and 1.21.8/772/4440 pins must agree. The 60
+  noise, 35 density and seven settings resources are complete for this builtin
+  scope. Other worldgen families and dynamic datapacks need separate producers.
+- JSON admission refuses duplicate decoded keys, wrong families/resource counts,
+  malformed/foreign names, unknown fields/forms, invalid codec values and cycles.
+  Whole worldgen input: 4 MiB/131072 nodes/depth32/container1024/string256 bytes.
+  Each selected definition: 128 KiB/4096 nodes/depth32/container256/string256 bytes.
+  Nodes include keys and root; depth counts keys and children from root zero.
+  Bounds are enforced while parsing, before child containers are materialized.
+- Noise parameters have immutable exact rounded f64 bits, emitted using
+  `f64::from_bits`; original signed/zero amplitude positions remain intact.
+  Builtin bounds are firstOctave -16..-1, 1..16 amplitudes, finite values 0..2
+  and at least one nonzero amplitude. These are dataset bounds, not general
+  Minecraft codec or datapack limits.
+- Resource IDs are family-separated private local slots, with no raw/default/
+  serialization constructor. Lookups accept only exact canonical or bare names;
+  unknown stays `None`. Slots are not world, wire or persisted registry IDs.
+- `OriginalDefinition` preserves the exact vendored export slice, including
+  number tokens; it is not the differently formatted JAR resource byte string.
+  Its immutable private fields expose measured stats and sorted unique typed
+  dependencies. Density/Noise references resolve fully; external block/biome/
+  codec types and synthetic RNG names remain separate categories. There are no
+  builtin tag references; unsupported tags fail admission. Dependency charging
+  precedes insertion: maximum 2048 occurrences and 512 distinct per definition.
+- Reference paths follow the original codecs: Clamp.input is Directcodec,
+  Shift*.argument is NoiseHolder, other unary.argument is DensityHolder. Missing
+  references never become zero noise. Block properties are checked against the
+  existing block producer's domains; external categories do not grant runtime
+  block/biome/surface implementation.
+- Definitions supply data only. World must independently check cumulative graph,
+  work, seed and sampler bounds before compiling/evaluating. No runtime JSON
+  parser, sampler, fallback seed, density compiler or chunk generation is added.
