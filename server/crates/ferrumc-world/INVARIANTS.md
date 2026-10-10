@@ -290,6 +290,73 @@
   Java does not implement or prove FerrumC work budgets. Existing primitive,
   composite-noise, public spline and seed-free codec corpora stay unchanged.
 
+## Fresh Paper NoiseChunk consumer
+
+- `SeededRouter::fresh_paper_noise_chunk` creates an exclusively owned session
+  for one full settings height and 16×16 chunk, with empty blending, no structures,
+  retrogen or height-accessor clamp. Immutable router/noise Arcs remain unchanged;
+  every mutable wrapper, array, preliminary cache and epoch belongs to the session.
+- Public scalar/noise/Climate consumers retain Vanilla reference behavior.
+  Only this Paper Build60 session privately copies Improved offsets through f32
+  with unchanged permutations/draw order, and uses the widened i64 End radius.
+  No random streams are sampled during runtime density evaluation.
+- Original seed/mapAll/wrap chronology, record-equality partition, actual
+  identity-bearing holder/noise/spline-array keys and mutable registration order
+  are retained. All fifteen roots are wrapped before material-helper wrapping;
+  cached Climate roots reuse the same visitor map and cache identities.
+- All graph/child/type/depth checks and resource admissions precede publication:
+  4096 vertices,8192 edges,depth96;4096 equality/map/identity entries;131072 cold
+  visits;128 wrappers;2MiB key metadata;2MiB retained graph metadata;4MiB cold
+  temporary metadata;8MiB cache arrays;4MiB simultaneous scratch. These measure
+  owned element bytes with checked arithmetic, not process RSS or a performance
+  promise. Existing immutable source Arcs are accounted separately.
+- One budget in 1..=268435456 crosses constructor, graph/equality probes,
+  density/spline/noise, cache writes, context transitions, array copies, driver
+  operations, output writes and preliminary-cache comparisons until reset.
+  Exhaustion stops before the next operation. Cache hits never bypass metering.
+- A session runs Fresh→Running→Complete exactly once. Internal driver phases
+  admit initialization, first/advanced slices, selected cell, Y→X→Z updates,
+  swap and stop in that order; advancing invalidates selected-cell state.
+  Illegal lifecycle, column, shape, index and nonfinite-delta requests reject
+  before changing caches, counters or work. Full private geometry is admitted
+  before buffers and coordinate multiplication.
+- Five wrapper paths preserve distinct own/foreign semantics. Cache2D initially
+  hits its actual sentinel with +0 and ignores Y. CacheOnce checks array epoch
+  and logical length before scalar epoch; fixed reserved capacity is never a
+  valid length. Failure publishes the original key/counter timing but no value
+  or successful array epoch. Flatcache includes its 5×5 grid; outside reads
+  delegate. Cell cache indexes descending-Y/X/Z only for owned active contexts.
+- Slice-forIndex increments the scalar epoch and exposes index i. Cell-forIndex
+  leaves the scalar epoch unchanged. Cell direct-fill exposes i+1 to compute
+  because Java evaluates arrayIndex++ before its RHS; the index128 CacheOnce
+  refusal is preserved. Interpolator cell-fill uses original X→Y→Z lerp3;
+  normal updates use Y→X→Z without reassociation or deliberate FMA.
+- Array dispatch preserves ADD left-all/right-all, MUL ±0 skip to +0,
+  MulOrAdd input evaluation even with zero, strict MIN/MAX bounds, selected
+  RangeChoice child and context-transformer provider requests. Scratch leases
+  return on every error. Nonfinite completed children/results fail immediately;
+  Java's subsequent NaN requests are not a finite request-parity claim.
+- Complete material-density output is ascending-Y/X/Z, exactly256×height finite
+  f64s. A separately bounded bitmap proves every destination is written once;
+  no partial output escapes. No aquifer, material block/fluid, biome, surface,
+  chunk storage or natural-generator identity is selected by these samples.
+- Horizontal caller/corner positions include ±30000000; Y includes all i32.
+  Preliminary level ignores Y, aligns X/Z to quarts, compares strict0.390625
+  from top through minY, and returns i32::MAX when none passes. Its2048-entry
+  cache admits hits even when full, never evicts, and publishes only success.
+  Cached Climate computes six roots in original order, casts f64→f32 before
+  quantization and reports typed axis failure on finite-double/f32 overflow.
+- Executed public query errors poison the session; rejected admission/lifecycle
+  requests leave it unchanged. Reset constructs and validates a complete new
+  candidate before swapping; a failed reset preserves every prior cache,
+  counter, lifecycle and used-work value. Successful owned outputs remain valid
+  after their source session/router is dropped.
+- Actual-JAR complete bits, constructor equality/sharing, wrapper/provider/
+  array traces, diagnostic arrays, Surface/Climate and End seams are tested
+  independently from Rust-only caps, budgets, poison/reset and publication.
+  These establish the tested numerical context, not a playable Survival server,
+  complete natural generation, Java-plugin compatibility or RAM/TPS improvement.
+
 ## Block-entity persistence
 
 - `try_encode_block_entity` is the checked, versioned storage writer. Its

@@ -20,7 +20,7 @@ use crate::spline::{CubicSpline, SplineCoordinateId, SplineNodeId, SplineNodeSpe
 use crate::WorldSeed;
 pub(super) use origin::{PreparedGraph, SourceConstruction, SourceOrigin};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) enum BoundKind {
     Original(NodeKind),
     // An actual visitor removed a holder/marker; this is not a compute entry.
@@ -32,7 +32,7 @@ pub(super) enum BoundKind {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct BoundSpline {
     pub spline: CubicSpline,
     pub coordinates: Box<[usize]>,
@@ -44,7 +44,7 @@ pub(super) enum VisitorPass {
     Climate,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct BoundNode {
     #[cfg_attr(
         not(test),
@@ -72,11 +72,13 @@ pub(super) struct BoundView {
         )
     )]
     pub pass: VisitorPass,
-    pub nodes: Box<[BoundNode]>,
+    pub nodes: Vec<BoundNode>,
 }
 
 #[derive(Debug)]
 pub(super) struct BoundRouter {
+    pub source: Arc<PreparedGraph>,
+    pub metadata: super::graph::RouterMetadata,
     pub resource: NoiseSettingsResourceId,
     pub seed: WorldSeed,
     pub router: BoundView,
@@ -190,6 +192,8 @@ pub(super) fn bind(
             end,
             aquifer_random,
             ore_random,
+            metadata: template.metadata,
+            source: Arc::new(prepared),
         }),
     })
 }
@@ -419,8 +423,7 @@ fn lower(
         nodes: nodes
             .into_iter()
             .map(|node| node.ok_or_else(|| invalid("bound_view")))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_boxed_slice(),
+            .collect::<Result<Vec<_>, _>>()?,
     })
 }
 

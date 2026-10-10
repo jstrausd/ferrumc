@@ -149,13 +149,13 @@ pub(super) enum NodeKind {
     },
 }
 impl NodeKind {
-    fn is_density(&self) -> bool {
+    pub(super) fn is_density(&self) -> bool {
         !matches!(
             self,
             Self::Coordinate { .. } | Self::SplineConstant(_) | Self::SplineMultipoint { .. }
         )
     }
-    fn valid_child(&self, index: usize, child: &Self) -> bool {
+    pub(super) fn valid_child(&self, index: usize, child: &Self) -> bool {
         match self {
             Self::Spline(_) => matches!(
                 child,

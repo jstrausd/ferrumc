@@ -89,8 +89,7 @@ fn probe_router(kinds: Vec<(BoundKind, &'static str)>, root: usize) -> SeededRou
         nodes: kinds
             .into_iter()
             .map(|(kind, label)| probe_node(kind, label, origin))
-            .collect::<Vec<_>>()
-            .into_boxed_slice(),
+            .collect::<Vec<_>>(),
     };
     data.fields = [root; 15];
     data.climate_fields = [root; 6];

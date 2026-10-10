@@ -312,6 +312,26 @@ enum NodeKind {
 }
 
 impl CubicSpline {
+    // Additional consumer metadata admission, distinct from caller RSS.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        Self::retained_bytes_for_shape(
+            self.graph.nodes.len(),
+            self.graph.coordinates.len(),
+            self.graph.point_count,
+        )
+    }
+    // Counts are already admitted by the spline's independent shape caps.
+    pub(crate) fn retained_bytes_for_shape(
+        nodes: usize,
+        coordinates: usize,
+        points: usize,
+    ) -> usize {
+        std::mem::size_of::<Graph>()
+            + 2 * std::mem::size_of::<usize>()
+            + nodes * std::mem::size_of::<Node>()
+            + coordinates * std::mem::size_of::<SplineCoordinateRange>()
+            + points * std::mem::size_of::<SplinePoint>()
+    }
     /// Checks every specification, including unused nodes, before allocating
     /// the owned graph. Limits are 1024 nodes, 64 coordinates, 64 points per node,
     /// 16384 total points and depth 32 (constant leaf = 1). Cycles and unknown

@@ -86,6 +86,27 @@ pub struct BlendedNoise {
 }
 
 impl BlendedNoise {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.min_limit_noise.retained_bytes()
+            + self.max_limit_noise.retained_bytes()
+            + self.main_noise.retained_bytes()
+            - 3 * std::mem::size_of::<PerlinNoise>()
+    }
+    pub(crate) fn paper_build60_basis(
+        &self,
+        work: &mut SampleWork,
+    ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        Ok(Self {
+            min_limit_noise: self.min_limit_noise.paper_build60_basis(work)?,
+            max_limit_noise: self.max_limit_noise.paper_build60_basis(work)?,
+            main_noise: self.main_noise.paper_build60_basis(work)?,
+            parameters: self.parameters,
+            xz_multiplier: self.xz_multiplier,
+            y_multiplier: self.y_multiplier,
+            max_value: self.max_value,
+        })
+    }
     /// Builds original 16/16/8-octave legacy stacks from an explicit RNG.
     /// The validated codec domain guarantees finite derived factors; returned
     /// constructor errors preserve the caller's entire random state.

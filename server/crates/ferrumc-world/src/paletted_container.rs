@@ -310,7 +310,7 @@ impl<const CAPACITY: usize> PalettedContainer<CAPACITY> {
     /// shift every following byte and desync the client's section parse.
     ///
     /// - [`ContainerKind::Single`]: `bits_per_entry = 0`, one `VarInt` palette
-    ///   value, and no longs (see [`write_single_value_container`]).
+    ///   value, and no longs (see `write_single_value_container`).
     /// - [`ContainerKind::Indirect`]: `bits_per_entry` is the palette-index width,
     ///   followed by a `VarInt` palette length, that many `VarInt` ids, then the
     ///   non-spanning words ([`PackedArray::words`]) with no count.

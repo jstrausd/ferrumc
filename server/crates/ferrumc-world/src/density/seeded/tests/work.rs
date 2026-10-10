@@ -227,8 +227,7 @@ fn one_meter_crosses_density_spline_density_multiple_times_and_climate_and_batch
             ),
             probe_node(original(NodeKind::Spline(0)), "inner", origin),
             probe_node(original(NodeKind::Spline(0)), "outer", origin),
-        ]
-        .into_boxed_slice(),
+        ],
     };
     data.climate.nodes[1].spline = Some(crate::density::bind::BoundSpline {
         spline: two_point_spline(),

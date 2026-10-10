@@ -113,6 +113,32 @@ pub struct ImprovedNoise {
 }
 
 impl ImprovedNoise {
+    // Build 60 recompiles nextDouble through f32 for both random algorithms.
+    // Scaling by 256 is an exact power of two, so rounding the original offset
+    // reproduces that constructor without new draws or permutation changes.
+    pub(crate) fn paper_build60_basis(
+        &self,
+        work: &mut crate::sample_work::SampleWork,
+    ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        let mut permutation = [0; 256];
+        for (slot, &value) in permutation.iter_mut().zip(&self.permutation) {
+            work.charge()?;
+            *slot = value;
+        }
+        let mut offsets = [0.0; 3];
+        for (slot, value) in
+            offsets
+                .iter_mut()
+                .zip([self.offsets.x, self.offsets.y, self.offsets.z])
+        {
+            work.charge()?;
+            *slot = f64::from(value as f32);
+        }
+        Ok(Self {
+            permutation,
+            offsets: Vec3::new(offsets[0], offsets[1], offsets[2]),
+        })
+    }
     /// Consumes three original doubles and the original 256 bounded shuffle draws.
     pub fn new(random: &mut WorldgenRandomSource) -> Self {
         let offsets = Vec3::new(
@@ -274,6 +300,33 @@ pub struct PerlinNoise {
 }
 
 impl PerlinNoise {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.octaves.len() * std::mem::size_of::<Octave>()
+    }
+    pub(crate) fn paper_build60_basis(
+        &self,
+        work: &mut crate::sample_work::SampleWork,
+    ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        let mut octaves = Vec::with_capacity(self.octaves.len());
+        for octave in &self.octaves {
+            work.charge()?;
+            octaves.push(Octave {
+                amplitude: octave.amplitude,
+                noise: octave
+                    .noise
+                    .as_ref()
+                    .map(|n| n.paper_build60_basis(work))
+                    .transpose()?,
+            });
+        }
+        Ok(Self {
+            octaves,
+            first_octave: self.first_octave,
+            input_factor: self.input_factor,
+            value_factor: self.value_factor,
+            max_value: self.max_value,
+        })
+    }
     /// Builds modern named-octave noise via one original positional fork.
     /// All configuration validation precedes allocation and parent consumption.
     pub fn new(

@@ -118,8 +118,8 @@ impl ClimateAxis {
 /// This is not a biome lookup, spawn finder or climate parameter search.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClimateSample {
-    values: [f32; 6],
-    quantized: [i64; 6],
+    pub(super) values: [f32; 6],
+    pub(super) quantized: [i64; 6],
 }
 impl ClimateSample {
     /// The six f32 values in [`ClimateAxis::ALL`] order.

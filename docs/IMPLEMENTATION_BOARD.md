@@ -129,7 +129,7 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | REG-WORLDGEN001 | `feature_catalog`, Review Root | `server/crates/ferrumc-registry/**`, eigenes Taskdoc | CLEAN geprüft und auf main integriert555ee2aa:60 Noiseparameter,35 Densityresources und7 Noisesettings. Root Debug/Release jeweils69,4 eigene negative/Bitproben, strictchecks und102 Originalressourcen normal/-O grün. Statische Daten; Worldcompiler/Terrainaktivierung bleiben offen. |
 | GEN-05.1 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Unabhängig CLEAN und integriert `c4e3dc76`: alle35 Definitionen/7 Router,128 tatsächliche Original-JAR-Records, Debug/Release je177 und3 eigene Probes grün. Frischer Originalreexport normal/-O bytegleich, Freeze17/17 und strictchecks grün. [Review](agent-tasks/GEN-05_1_DENSITY_COMPILER_REVIEW.md); Seed-/Sample-/Chunkconsumer folgen. |
 | GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN und integriert `290e5343`: Debug/Release je188, drei zusätzliche unabhängige Debug-/Releaseprobes, strictchecks und29/29 Freezehashes grün. Frischer normal/-O Originalreexport bytegleich;17.213 tatsächliche JAR-Records. [Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md). Chunk-/Terrainconsumer bleiben offen. |
-| GEN-05.3 | `item_transfer_primitives`, Designreview Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Vollständiger konkreter NoiseChunkentwurf geprüft und intern freigegeben; Runtimeimplementierung begonnen. Originale Wrapperidentitäten, Arraydispatch/Interpolation, Preliminary Surface und Climate; explizite PaperBuild60-Endarithmetik im neuen Chunkpfad, bestehende .2-Vanillaverträge unverändert. Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
+| GEN-05.3 | `item_transfer_primitives`, Runtime-Review `feature_catalog` und Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängige Finalprüfung grün:126 Chunks/7.077.888 tatsächliche Paperdichten, Wrapper/Provider/Constructor/Climate; Root Debug/Release je232 Tests und strictchecks,118/118 Autorenpins geprüft. Zwei Lifecyclefindings korrigiert und unabhängig gegengetestet. [Review](agent-tasks/GEN-05_3_NOISE_CHUNK_REVIEW.md); Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
 | DUR-03.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Unabhängig CLEAN und integriert `eaedabd2`: Debug/Release jeweils280 Tests einschließlich zwei zusätzlicher Rootprobes, strictchecks und21/21 Freezehashes grün. Tatsächliche joint redb-Transaction, Memoryauthority, CAS/Tombstone/Receipts, Cutpoints/Uncertainty und Grenzen. [Review](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md); Onlineconsumer folgt. |
 | DUR-04.1 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener [Consumerbrief](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) | Vollständigen konkreten46-Slot-/Cursor-/FCPS3-Entwurf gelesen und intern freigegeben; Runtimeimplementierung beginnt. Versiegelte echte Store-/Receipt-/Currentpostimageevidence, SnapshotOnly-Clone und volle Playerreservation; Bypassguards für Legacywriter. Appdriver folgt DUR-05. |
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
@@ -145,7 +145,7 @@ prüft jetzt die Worldruntime unabhängig, ohne deren Dateien zu verändern.
 Root hat alle117 Oraclefreezehashes und den Briefhash unabhängig geprüft.
 GEN-05.3 und DUR-04.1 sind nach vollständigem Entwurfsreview intern zur
 Umsetzung freigegeben. Vorhandene Format-/Scalarverträge bleiben erhalten.
-GEN-05.2 ist CLEAN auf `main`; nach .3
+GEN-05.2 ist CLEAN auf `main`; GEN-05.3 hat die finale unabhängige Prüfung bestanden. Nach .3
 folgen direkt Aquifer/Material/Ore und Biome/Surface/Bedrock bis zu echter
 Chunkgeneration. Die Vergabe überschreitet drei Childslots nicht.
 
@@ -187,6 +187,16 @@ Ressourcenplanung ausgeführt; normal/-O bytegleich. Das ist keine Rust- oder
 Spielabnahme. DUR-04.1 berücksichtigt die tatsächliche verbleibende Lücke:
 das aktive Inventar gehört derzeit der Appconnection und muss für bestätigte
 Player↔Entitytransfers in dieselbe besessene Simauthority gelangen.
+
+Für die anschließende Biomephase liegt außerdem ein tatsächlicher Paper-
+Parameterexport vor:7593 geordnete Overworldbereiche/54Biomes und5 Netherbereiche.
+Originale quantisierte long-Grenzen und Reihenfolge erhalten;19 tatsächliche
+Klassenursprünge, frischer Helper und120 JAR-Artefakte geprüft. Normal/-O liefert
+bytegleiche Parameter und vollständige Manifeste. DatenSHA
+`4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971`,
+10-Dateienfreeze `.codex-tmp/gen05_5-root-biome-census.freeze.json`, SHA
+`95deae4a95856a4a80cb3ec71c1c251e1852b6ecc0a1506d6aa811433e28729b`.
+Noch kein Rustselector, Surface- oder Clientpass.
 
 ## Orchestrierung
 

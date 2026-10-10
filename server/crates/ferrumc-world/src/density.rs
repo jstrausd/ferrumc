@@ -5,11 +5,17 @@
 //! identity. Seed binding and `NoiseChunk` contexts are subsequent consumers.
 
 mod bind;
+mod chunk;
 mod compile;
 mod evaluate;
 mod graph;
 mod json;
 mod seeded;
+
+pub use chunk::{
+    ChunkDensitySamples, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit, NoiseChunkSession,
+    NoiseChunkWorkBudget, MAX_NOISE_CHUNK_WORK,
+};
 
 pub use seeded::{
     ClimateAxis, ClimateQuartPos, ClimateSample, DensityBatchBudget, DensityBindError,

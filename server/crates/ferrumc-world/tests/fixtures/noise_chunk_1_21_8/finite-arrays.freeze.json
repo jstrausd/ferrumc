@@ -1,0 +1,192 @@
+{
+  "file_count": 42,
+  "files": {
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/FiniteNoiseChunkArrays.java": {
+      "bytes": 5687,
+      "sha256": "0d466e3b74bcf6e0f4324eff66b36492588376716dfb574eb2e13a03368fa0c6"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/README.md": {
+      "bytes": 3938,
+      "sha256": "805a9cddd4db9356fc824ef1ecd298dc41b1f39d712d8ae8888e87b53c45664c"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/classes/ferrumc/independent/FiniteNoiseChunkArrays.class": {
+      "bytes": 9834,
+      "sha256": "5406756c8546c7ef02ff27d17992ccf1dc1d27b329dbfbf5660bf3cb9cffc2fc"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/classes/ferrumc/independent/NoiseChunkIndependentOracle$Action.class": {
+      "bytes": 359,
+      "sha256": "e45eb0c7b9c4e3ffa57b0b6a6c0a049383326cea0ac42afc732be76db3bada03"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/classes/ferrumc/independent/NoiseChunkIndependentOracle$Probe.class": {
+      "bytes": 4768,
+      "sha256": "973205faa9edf21ca92157737b877ecb6bd3f1a3b3d0b487ca0b08babce837ba"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/classes/ferrumc/independent/NoiseChunkIndependentOracle$ProbeFailure.class": {
+      "bytes": 389,
+      "sha256": "706392fd4b6ea3cd78641585547fbaafcd1501892845bca4b622fc19449a41c9"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/classes/ferrumc/independent/NoiseChunkIndependentOracle.class": {
+      "bytes": 63143,
+      "sha256": "08a84560fe4266c1ce63f861dd5f39ee35b3170e57592ac0d0086d62e11b8550"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/logs/2026-10-10-1.log.gz": {
+      "bytes": 166,
+      "sha256": "a02e99472d7bf9fef38449c3668ec15a462a049d54e223a56386fe2bcb3556c2"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/logs/latest.log": {
+      "bytes": 234,
+      "sha256": "14c68f5da1dce93c1c14e9908c34f4ce56898ec70fc34bd46caa7be9897cc7b1"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/manifest.json": {
+      "bytes": 57439,
+      "sha256": "7781715eefd8c4f9a7fa8897ec461b2b10563717ca0acaf4116d7b662857102e"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/paper-code-sources.json": {
+      "bytes": 4252,
+      "sha256": "392fc4cd3a69a9fb4b35f125b307158c126ed6795e0f6c2f142cf509ad85e34b"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/paper-finite-addendum.jsonl": {
+      "bytes": 12159,
+      "sha256": "615f6313ec15be94ca86c2d488db6522b5c47779f632c28a37a0ab3f51438d82"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/paper-full.jsonl": {
+      "bytes": 19131,
+      "sha256": "e4292350cc48690a6c58521ed53c1c46ea8034c5e78d74ecc2a0a1f5162aac09"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/paper-library-origins.json": {
+      "bytes": 1095,
+      "sha256": "c5b29cbd0dad3baf2523660e466c286cfb5f0cb764da9b8c9d1c38b08016dbdc"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/paper.log": {
+      "bytes": 8905,
+      "sha256": "5e3711179004b2d4f890d25479fe0fb9ec59d64d011489918acbd3575b054a21"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/vanilla-code-sources.json": {
+      "bytes": 4064,
+      "sha256": "039a0ea8871cb1c738242b046171db18011882fff073a0f688935bc1c7cda457"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/vanilla-finite-addendum.jsonl": {
+      "bytes": 12159,
+      "sha256": "615f6313ec15be94ca86c2d488db6522b5c47779f632c28a37a0ab3f51438d82"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/vanilla-full.jsonl": {
+      "bytes": 18943,
+      "sha256": "f1eadb71f2cce93d9ffbec6c770daa2d5d5a9ea47e339f325d69ee798cce8a37"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/vanilla-library-origins.json": {
+      "bytes": 1047,
+      "sha256": "2c5926cd251d421c13229150831123c068ecf79cb3c581a4c9644b9fb7141d4a"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-normal/vanilla.log": {
+      "bytes": 6632,
+      "sha256": "9934c1f01117d894ba4cc9428afe096b74216ef52f227ec65f234d0919f15280"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/classes/ferrumc/independent/FiniteNoiseChunkArrays.class": {
+      "bytes": 9834,
+      "sha256": "5406756c8546c7ef02ff27d17992ccf1dc1d27b329dbfbf5660bf3cb9cffc2fc"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/classes/ferrumc/independent/NoiseChunkIndependentOracle$Action.class": {
+      "bytes": 359,
+      "sha256": "e45eb0c7b9c4e3ffa57b0b6a6c0a049383326cea0ac42afc732be76db3bada03"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/classes/ferrumc/independent/NoiseChunkIndependentOracle$Probe.class": {
+      "bytes": 4768,
+      "sha256": "973205faa9edf21ca92157737b877ecb6bd3f1a3b3d0b487ca0b08babce837ba"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/classes/ferrumc/independent/NoiseChunkIndependentOracle$ProbeFailure.class": {
+      "bytes": 389,
+      "sha256": "706392fd4b6ea3cd78641585547fbaafcd1501892845bca4b622fc19449a41c9"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/classes/ferrumc/independent/NoiseChunkIndependentOracle.class": {
+      "bytes": 63143,
+      "sha256": "08a84560fe4266c1ce63f861dd5f39ee35b3170e57592ac0d0086d62e11b8550"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/logs/2026-10-10-1.log.gz": {
+      "bytes": 166,
+      "sha256": "a02e99472d7bf9fef38449c3668ec15a462a049d54e223a56386fe2bcb3556c2"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/logs/latest.log": {
+      "bytes": 234,
+      "sha256": "14c68f5da1dce93c1c14e9908c34f4ce56898ec70fc34bd46caa7be9897cc7b1"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/manifest.json": {
+      "bytes": 57439,
+      "sha256": "7781715eefd8c4f9a7fa8897ec461b2b10563717ca0acaf4116d7b662857102e"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/paper-code-sources.json": {
+      "bytes": 4252,
+      "sha256": "392fc4cd3a69a9fb4b35f125b307158c126ed6795e0f6c2f142cf509ad85e34b"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/paper-finite-addendum.jsonl": {
+      "bytes": 12159,
+      "sha256": "615f6313ec15be94ca86c2d488db6522b5c47779f632c28a37a0ab3f51438d82"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/paper-full.jsonl": {
+      "bytes": 19131,
+      "sha256": "e4292350cc48690a6c58521ed53c1c46ea8034c5e78d74ecc2a0a1f5162aac09"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/paper-library-origins.json": {
+      "bytes": 1095,
+      "sha256": "c5b29cbd0dad3baf2523660e466c286cfb5f0cb764da9b8c9d1c38b08016dbdc"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/paper.log": {
+      "bytes": 8908,
+      "sha256": "c3f74924c158ce505ab84c6587869db51dc76543c3a2ec9570fa4166e7790cf1"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/vanilla-code-sources.json": {
+      "bytes": 4064,
+      "sha256": "039a0ea8871cb1c738242b046171db18011882fff073a0f688935bc1c7cda457"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/vanilla-finite-addendum.jsonl": {
+      "bytes": 12159,
+      "sha256": "615f6313ec15be94ca86c2d488db6522b5c47779f632c28a37a0ab3f51438d82"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/vanilla-full.jsonl": {
+      "bytes": 18943,
+      "sha256": "f1eadb71f2cce93d9ffbec6c770daa2d5d5a9ea47e339f325d69ee798cce8a37"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/vanilla-library-origins.json": {
+      "bytes": 1047,
+      "sha256": "2c5926cd251d421c13229150831123c068ecf79cb3c581a4c9644b9fb7141d4a"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/final-optimized/vanilla.log": {
+      "bytes": 6635,
+      "sha256": "2fe2de98e72fc51cf286743ae045565d3792b61927af48764c9f0de8b8b47d6c"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/guards-normal.log": {
+      "bytes": 488,
+      "sha256": "b6bae3729f77ec22c97af1cbbb539c1bfc21ea3022460a94105a41305032510d"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/guards-optimized.log": {
+      "bytes": 488,
+      "sha256": "b6bae3729f77ec22c97af1cbbb539c1bfc21ea3022460a94105a41305032510d"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/run_finite.py": {
+      "bytes": 6956,
+      "sha256": "d8f6b6e9b4aa38d8cbf13c661cd3f03f602ad5323764390c8787eb896751620c"
+    },
+    ".codex-tmp/gen05_3-independent-review/finite-array-addendum/test_guards.py": {
+      "bytes": 2668,
+      "sha256": "933794879ac52f77a93dbb76c1088925320f3b0f489e24ff9d1139615bf5355e"
+    }
+  },
+  "negative_guards_per_mode": 8,
+  "normal_optimized_compared": [
+    "vanilla-library-origins.json",
+    "vanilla-full.jsonl",
+    "vanilla-finite-addendum.jsonl",
+    "vanilla-code-sources.json",
+    "paper-library-origins.json",
+    "paper-full.jsonl",
+    "paper-finite-addendum.jsonl",
+    "paper-code-sources.json",
+    "manifest.json",
+    "logs/2026-10-10-1.log.gz",
+    "classes/ferrumc/independent/NoiseChunkIndependentOracle$ProbeFailure.class",
+    "classes/ferrumc/independent/NoiseChunkIndependentOracle$Probe.class",
+    "classes/ferrumc/independent/NoiseChunkIndependentOracle$Action.class",
+    "classes/ferrumc/independent/NoiseChunkIndependentOracle.class",
+    "classes/ferrumc/independent/FiniteNoiseChunkArrays.class"
+  ],
+  "original117filefreeze_reverified_unchanged": "0ece7c737a023744d6124aa5fb3cf5b7d6bf9c53f9af094cf9466ba21dcf4582"
+}

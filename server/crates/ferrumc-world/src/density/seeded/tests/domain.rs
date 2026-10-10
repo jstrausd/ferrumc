@@ -195,8 +195,7 @@ fn finite_policy_preserves_metadata_and_stops_f32_overflow_without_partials() {
             original(NodeKind::Constant(f64::MAX)),
             "value",
             origin,
-        )]
-        .into_boxed_slice(),
+        )],
     };
     let pos = BlockPos::new(-1, 0, 1);
     assert_eq!(

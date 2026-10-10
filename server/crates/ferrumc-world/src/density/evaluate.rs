@@ -9,6 +9,66 @@ use crate::noise::ConsumerNoiseError;
 use crate::sample_work::{SampleWork, SampleWorkExceeded};
 use crate::spline::SplineSampleError;
 
+/// Numerical reference belongs to the consumer context, never a global option.
+#[derive(Clone, Copy)]
+pub(super) enum EndRadialReference {
+    Vanilla1_21_8,
+    Paper1_21_8Build60,
+}
+
+/// Private hook for exclusively owned `NoiseChunk` caches. Point evaluation keeps
+/// its original identity-marker behavior and unchanged meter charges.
+pub(super) trait MarkerEvaluator {
+    #[cfg(test)]
+    fn declared_sample(
+        &mut self,
+        _root: usize,
+        _pos: BlockPos,
+    ) -> Option<Result<f64, DensitySampleError>> {
+        None
+    }
+    fn end_reference(&self) -> EndRadialReference;
+    fn normal_sampler<'a>(
+        &'a self,
+        data: &'a BoundRouter,
+        index: usize,
+    ) -> Option<&'a crate::noise::NormalNoise> {
+        data.noises.get(index).map(|(_, noise)| noise)
+    }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "The hook preserves the existing checked graph, position and shared-meter context."
+    )]
+    fn sample_marker(
+        &mut self,
+        data: &BoundRouter,
+        view: &BoundView,
+        root: usize,
+        input: usize,
+        pos: BlockPos,
+        work: &mut SampleWork,
+        field: &'static str,
+    ) -> Result<f64, DensitySampleError>;
+}
+struct PointEvaluator;
+impl MarkerEvaluator for PointEvaluator {
+    fn end_reference(&self) -> EndRadialReference {
+        EndRadialReference::Vanilla1_21_8
+    }
+    fn sample_marker(
+        &mut self,
+        data: &BoundRouter,
+        view: &BoundView,
+        _root: usize,
+        input: usize,
+        pos: BlockPos,
+        work: &mut SampleWork,
+        field: &'static str,
+    ) -> Result<f64, DensitySampleError> {
+        visit_with(data, view, input, pos, work, field, self)
+    }
+}
+
 pub(super) fn sample(
     data: &BoundRouter,
     view: &BoundView,
@@ -17,20 +77,21 @@ pub(super) fn sample(
     work: &mut SampleWork,
     field: &'static str,
 ) -> Result<f64, DensitySampleError> {
-    visit(data, view, root, pos, work, field)
+    visit_with(data, view, root, pos, work, field, &mut PointEvaluator)
 }
 
 #[expect(
     clippy::too_many_lines,
     reason = "One exhaustive dispatch keeps original request and arithmetic order auditable."
 )]
-fn visit(
+pub(super) fn visit_with(
     data: &BoundRouter,
     view: &BoundView,
     mut root: usize,
     pos: BlockPos,
     work: &mut SampleWork,
     field: &'static str,
+    evaluator: &mut impl MarkerEvaluator,
 ) -> Result<f64, DensitySampleError> {
     // Actual removed holders/markers are identity aliases, not compute calls.
     // Combined depth admission bounds this traversal without recursion.
@@ -58,226 +119,264 @@ fn visit(
         .map_err(|source| budget(node, field, pos, source))?;
     #[cfg(test)]
     work.record_density(node.resource);
-    let value = match &node.kind {
-        BoundKind::Alias(_) => {
-            return Err(error(node.resource, field, pos, ErrorKind::InvalidGraph))
-        }
-        BoundKind::MulOrAdd {
-            operation,
-            input,
-            argument,
-        } => {
-            let value = visit(data, view, *input, pos, work, field)?;
-            match operation {
-                Binary::Add => value + argument,
-                Binary::Mul => value * argument,
-                _ => return Err(error(node.resource, field, pos, ErrorKind::InvalidGraph)),
+    #[cfg(test)]
+    let declared = evaluator.declared_sample(root, pos).transpose()?;
+    #[cfg(not(test))]
+    let declared: Option<f64> = None;
+    let value = if let Some(value) = declared {
+        value
+    } else {
+        match &node.kind {
+            BoundKind::Alias(_) => {
+                return Err(error(node.resource, field, pos, ErrorKind::InvalidGraph))
             }
-        }
-        BoundKind::Original(kind) => match kind {
-            NodeKind::Constant(value) => *value,
-            NodeKind::Holder { target, .. } => visit(data, view, *target, pos, work, field)?,
-            NodeKind::Marker { input, .. } | NodeKind::BlendDensity(input) => {
-                visit(data, view, *input, pos, work, field)?
-            }
-            NodeKind::Binary {
+            BoundKind::MulOrAdd {
                 operation,
-                left,
-                right,
+                input,
+                argument,
             } => {
-                let a = visit(data, view, *left, pos, work, field)?;
-                let right_bounds = view.nodes[*right].bounds;
+                let value = visit_with(data, view, *input, pos, work, field, evaluator)?;
                 match operation {
-                    Binary::Add => a + visit(data, view, *right, pos, work, field)?,
-                    Binary::Mul => {
-                        if a == 0.0 {
-                            0.0
-                        } else {
-                            a * visit(data, view, *right, pos, work, field)?
+                    Binary::Add => value + argument,
+                    Binary::Mul => value * argument,
+                    _ => return Err(error(node.resource, field, pos, ErrorKind::InvalidGraph)),
+                }
+            }
+            BoundKind::Original(kind) => match kind {
+                NodeKind::Constant(value) => *value,
+                NodeKind::Holder { target, .. } => {
+                    visit_with(data, view, *target, pos, work, field, evaluator)?
+                }
+                NodeKind::Marker { input, .. } => {
+                    evaluator.sample_marker(data, view, root, *input, pos, work, field)?
+                }
+                NodeKind::BlendDensity(input) => {
+                    visit_with(data, view, *input, pos, work, field, evaluator)?
+                }
+                NodeKind::Binary {
+                    operation,
+                    left,
+                    right,
+                } => {
+                    let a = visit_with(data, view, *left, pos, work, field, evaluator)?;
+                    let right_bounds = view.nodes[*right].bounds;
+                    match operation {
+                        Binary::Add => {
+                            a + visit_with(data, view, *right, pos, work, field, evaluator)?
                         }
-                    }
-                    Binary::Min => {
-                        if a < right_bounds.min {
-                            a
-                        } else {
-                            java_min(a, visit(data, view, *right, pos, work, field)?)
+                        Binary::Mul => {
+                            if a == 0.0 {
+                                0.0
+                            } else {
+                                a * visit_with(data, view, *right, pos, work, field, evaluator)?
+                            }
                         }
-                    }
-                    Binary::Max => {
-                        if a > right_bounds.max {
-                            a
-                        } else {
-                            java_max(a, visit(data, view, *right, pos, work, field)?)
+                        Binary::Min => {
+                            if a < right_bounds.min {
+                                a
+                            } else {
+                                java_min(
+                                    a,
+                                    visit_with(data, view, *right, pos, work, field, evaluator)?,
+                                )
+                            }
+                        }
+                        Binary::Max => {
+                            if a > right_bounds.max {
+                                a
+                            } else {
+                                java_max(
+                                    a,
+                                    visit_with(data, view, *right, pos, work, field, evaluator)?,
+                                )
+                            }
                         }
                     }
                 }
-            }
-            NodeKind::Unary { operation, input } => {
-                unary(*operation, visit(data, view, *input, pos, work, field)?)
-            }
-            NodeKind::Clamp { input, min, max } => {
-                clamp(visit(data, view, *input, pos, work, field)?, *min, *max)
-            }
-            NodeKind::RangeChoice {
-                input,
-                min,
-                max,
-                inside,
-                outside,
-            } => {
-                let value = visit(data, view, *input, pos, work, field)?;
-                visit(
-                    data,
-                    view,
-                    if value >= *min && value < *max {
-                        *inside
-                    } else {
-                        *outside
-                    },
-                    pos,
-                    work,
-                    field,
-                )?
-            }
-            NodeKind::Gradient {
-                from_y,
-                to_y,
-                from_value,
-                to_value,
-            } => {
-                let delta = (f64::from(pos.y()) - f64::from(*from_y))
-                    / (f64::from(*to_y) - f64::from(*from_y));
-                clamped_lerp(*from_value, *to_value, delta)
-            }
-            NodeKind::Noise { xz, y, .. } => normal(
-                data,
-                node,
-                Vec3::new(
-                    f64::from(pos.x()) * xz,
-                    f64::from(pos.y()) * y,
-                    f64::from(pos.z()) * xz,
+                NodeKind::Unary { operation, input } => unary(
+                    *operation,
+                    visit_with(data, view, *input, pos, work, field, evaluator)?,
                 ),
-                pos,
-                work,
-                field,
-            )?,
-            NodeKind::Shift { shift, .. } => {
-                let (x, y, z) = match shift {
-                    Shift::All => (pos.x(), pos.y(), pos.z()),
-                    Shift::A => (pos.x(), 0, pos.z()),
-                    Shift::B => (pos.z(), pos.x(), 0),
-                };
-                normal(
+                NodeKind::Clamp { input, min, max } => clamp(
+                    visit_with(data, view, *input, pos, work, field, evaluator)?,
+                    *min,
+                    *max,
+                ),
+                NodeKind::RangeChoice {
+                    input,
+                    min,
+                    max,
+                    inside,
+                    outside,
+                } => {
+                    let value = visit_with(data, view, *input, pos, work, field, evaluator)?;
+                    visit_with(
+                        data,
+                        view,
+                        if value >= *min && value < *max {
+                            *inside
+                        } else {
+                            *outside
+                        },
+                        pos,
+                        work,
+                        field,
+                        evaluator,
+                    )?
+                }
+                NodeKind::Gradient {
+                    from_y,
+                    to_y,
+                    from_value,
+                    to_value,
+                } => {
+                    let delta = (f64::from(pos.y()) - f64::from(*from_y))
+                        / (f64::from(*to_y) - f64::from(*from_y));
+                    clamped_lerp(*from_value, *to_value, delta)
+                }
+                NodeKind::Noise { xz, y, .. } => normal(
                     data,
                     node,
                     Vec3::new(
-                        f64::from(x) * 0.25,
-                        f64::from(y) * 0.25,
-                        f64::from(z) * 0.25,
+                        f64::from(pos.x()) * xz,
+                        f64::from(pos.y()) * y,
+                        f64::from(pos.z()) * xz,
                     ),
                     pos,
                     work,
                     field,
-                )? * 4.0
-            }
-            NodeKind::ShiftedNoise {
-                shift_x,
-                shift_y,
-                shift_z,
-                xz,
-                y,
-                ..
-            } => {
-                let x = f64::from(pos.x()) * xz + visit(data, view, *shift_x, pos, work, field)?;
-                let y = f64::from(pos.y()) * y + visit(data, view, *shift_y, pos, work, field)?;
-                let z = f64::from(pos.z()) * xz + visit(data, view, *shift_z, pos, work, field)?;
-                normal(data, node, Vec3::new(x, y, z), pos, work, field)?
-            }
-            NodeKind::Weird { input, rarity, .. } => {
-                let value = visit(data, view, *input, pos, work, field)?;
-                let rarity = rarity_value(*rarity, value);
-                rarity
-                    * normal(
+                    evaluator,
+                )?,
+                NodeKind::Shift { shift, .. } => {
+                    let (x, y, z) = match shift {
+                        Shift::All => (pos.x(), pos.y(), pos.z()),
+                        Shift::A => (pos.x(), 0, pos.z()),
+                        Shift::B => (pos.z(), pos.x(), 0),
+                    };
+                    normal(
                         data,
                         node,
                         Vec3::new(
-                            f64::from(pos.x()) / rarity,
-                            f64::from(pos.y()) / rarity,
-                            f64::from(pos.z()) / rarity,
+                            f64::from(x) * 0.25,
+                            f64::from(y) * 0.25,
+                            f64::from(z) * 0.25,
                         ),
                         pos,
                         work,
                         field,
-                    )?
-                    .abs()
-            }
-            NodeKind::Blended { .. } => {
-                work.charge()
-                    .map_err(|source| budget(node, field, pos, source))?;
-                let sampler = node
-                    .blended
-                    .as_ref()
-                    .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
-                sampler
-                    .sample_consumer(pos, work)
-                    .map_err(|source| noise_error(node, field, pos, source))?
-            }
-            NodeKind::Unit(unit) => match unit {
-                Unit::BlendAlpha => 1.0,
-                Unit::BlendOffset | Unit::Beardifier => 0.0,
-                Unit::EndIslands => end_islands(data, node, pos, work, field)?,
-            },
-            NodeKind::Spline(_) => {
-                let spline = node
-                    .spline
-                    .as_ref()
-                    .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
-                let value = spline
-                    .spline
-                    .sample_shared(work, &mut |coordinate, work| {
-                        let id = spline
-                            .coordinates
-                            .get(coordinate.index() as usize)
-                            .ok_or_else(|| {
+                        evaluator,
+                    )? * 4.0
+                }
+                NodeKind::ShiftedNoise {
+                    shift_x,
+                    shift_y,
+                    shift_z,
+                    xz,
+                    y,
+                    ..
+                } => {
+                    let x = f64::from(pos.x()) * xz
+                        + visit_with(data, view, *shift_x, pos, work, field, evaluator)?;
+                    let y = f64::from(pos.y()) * y
+                        + visit_with(data, view, *shift_y, pos, work, field, evaluator)?;
+                    let z = f64::from(pos.z()) * xz
+                        + visit_with(data, view, *shift_z, pos, work, field, evaluator)?;
+                    normal(data, node, Vec3::new(x, y, z), pos, work, field, evaluator)?
+                }
+                NodeKind::Weird { input, rarity, .. } => {
+                    let value = visit_with(data, view, *input, pos, work, field, evaluator)?;
+                    let rarity = rarity_value(*rarity, value);
+                    rarity
+                        * normal(
+                            data,
+                            node,
+                            Vec3::new(
+                                f64::from(pos.x()) / rarity,
+                                f64::from(pos.y()) / rarity,
+                                f64::from(pos.z()) / rarity,
+                            ),
+                            pos,
+                            work,
+                            field,
+                            evaluator,
+                        )?
+                        .abs()
+                }
+                NodeKind::Blended { .. } => {
+                    work.charge()
+                        .map_err(|source| budget(node, field, pos, source))?;
+                    let sampler = node
+                        .blended
+                        .as_ref()
+                        .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
+                    sampler
+                        .sample_consumer(pos, work)
+                        .map_err(|source| noise_error(node, field, pos, source))?
+                }
+                NodeKind::Unit(unit) => match unit {
+                    Unit::BlendAlpha => 1.0,
+                    Unit::BlendOffset | Unit::Beardifier => 0.0,
+                    Unit::EndIslands => end_islands_with_reference(
+                        data,
+                        node,
+                        pos,
+                        work,
+                        field,
+                        evaluator.end_reference(),
+                    )?,
+                },
+                NodeKind::Spline(_) => {
+                    let spline = node
+                        .spline
+                        .as_ref()
+                        .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
+                    let value = spline
+                        .spline
+                        .sample_shared(work, &mut |coordinate, work| {
+                            let id = spline
+                                .coordinates
+                                .get(coordinate.index() as usize)
+                                .ok_or_else(|| {
+                                    error(node.resource, field, pos, ErrorKind::InvalidGraph)
+                                })?;
+                            Ok(visit_with(data, view, *id, pos, work, field, evaluator)? as f32)
+                        })
+                        .map_err(|source| match source {
+                            SplineSampleError::CoordinateSource { source, .. } => source,
+                            SplineSampleError::BudgetExceeded { limit } => error(
+                                node.resource,
+                                field,
+                                pos,
+                                ErrorKind::WorkExceeded {
+                                    limit,
+                                    used: work.used(),
+                                },
+                            ),
+                            SplineSampleError::NonFiniteCoordinate { bits, .. } => error(
+                                node.resource,
+                                field,
+                                pos,
+                                ErrorKind::NonFiniteCoordinate { bits },
+                            ),
+                            SplineSampleError::NonFiniteResult { bits, .. } => error(
+                                node.resource,
+                                field,
+                                pos,
+                                ErrorKind::NonFiniteSpline { bits },
+                            ),
+                            SplineSampleError::InvalidBudget { .. } => {
                                 error(node.resource, field, pos, ErrorKind::InvalidGraph)
-                            })?;
-                        Ok(visit(data, view, *id, pos, work, field)? as f32)
-                    })
-                    .map_err(|source| match source {
-                        SplineSampleError::CoordinateSource { source, .. } => source,
-                        SplineSampleError::BudgetExceeded { limit } => error(
-                            node.resource,
-                            field,
-                            pos,
-                            ErrorKind::WorkExceeded {
-                                limit,
-                                used: work.used(),
-                            },
-                        ),
-                        SplineSampleError::NonFiniteCoordinate { bits, .. } => error(
-                            node.resource,
-                            field,
-                            pos,
-                            ErrorKind::NonFiniteCoordinate { bits },
-                        ),
-                        SplineSampleError::NonFiniteResult { bits, .. } => error(
-                            node.resource,
-                            field,
-                            pos,
-                            ErrorKind::NonFiniteSpline { bits },
-                        ),
-                        SplineSampleError::InvalidBudget { .. } => {
-                            error(node.resource, field, pos, ErrorKind::InvalidGraph)
-                        }
-                    })?;
-                f64::from(value)
-            }
-            NodeKind::Coordinate { .. }
-            | NodeKind::SplineConstant(_)
-            | NodeKind::SplineMultipoint { .. } => {
-                return Err(error(node.resource, field, pos, ErrorKind::InvalidGraph))
-            }
-        },
+                            }
+                        })?;
+                    f64::from(value)
+                }
+                NodeKind::Coordinate { .. }
+                | NodeKind::SplineConstant(_)
+                | NodeKind::SplineMultipoint { .. } => {
+                    return Err(error(node.resource, field, pos, ErrorKind::InvalidGraph))
+                }
+            },
+        }
     };
     if value.is_finite() {
         Ok(value)
@@ -293,21 +392,23 @@ fn visit(
     }
 }
 
-fn normal(
+pub(super) fn normal(
     data: &BoundRouter,
     node: &BoundNode,
     position: Vec3,
     pos: BlockPos,
     work: &mut SampleWork,
     field: &'static str,
+    evaluator: &impl MarkerEvaluator,
 ) -> Result<f64, DensitySampleError> {
     work.charge()
         .map_err(|source| budget(node, field, pos, source))?;
     let index = node
         .noise
         .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
-    data.noises[index]
-        .1
+    evaluator
+        .normal_sampler(data, index)
+        .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?
         .sample_consumer(position, work)
         .map_err(|source| noise_error(node, field, pos, source))
 }
@@ -382,7 +483,7 @@ pub(super) fn unary(operation: Unary, value: f64) -> f64 {
     }
 }
 
-fn clamp(value: f64, min: f64, max: f64) -> f64 {
+pub(super) fn clamp(value: f64, min: f64, max: f64) -> f64 {
     if value < min {
         min
     } else {
@@ -399,7 +500,7 @@ fn clamped_lerp(start: f64, end: f64, delta: f64) -> f64 {
     }
 }
 
-fn rarity_value(rarity: Rarity, value: f64) -> f64 {
+pub(super) fn rarity_value(rarity: Rarity, value: f64) -> f64 {
     match rarity {
         Rarity::Type1 => {
             if value < -0.5 {
@@ -428,12 +529,13 @@ fn rarity_value(rarity: Rarity, value: f64) -> f64 {
     }
 }
 
-fn end_islands(
+fn end_islands_with_reference(
     data: &BoundRouter,
     node: &BoundNode,
     pos: BlockPos,
     work: &mut SampleWork,
     field: &'static str,
+    reference: EndRadialReference,
 ) -> Result<f64, DensitySampleError> {
     let x = pos.x() / 8;
     let z = pos.z() / 8;
@@ -443,8 +545,15 @@ fn end_islands(
     let rem_z = z % 2;
     // Vanilla's first distance wraps i32 before its float sqrt. Paper widens
     // this distance; actual Vanilla goldens cannot prove that separate branch.
-    let distance = x.wrapping_mul(x).wrapping_add(z.wrapping_mul(z));
-    let mut height = 100.0_f32 - java_sqrt(distance as f32) * 8.0_f32;
+    let distance = match reference {
+        EndRadialReference::Vanilla1_21_8 => {
+            x.wrapping_mul(x).wrapping_add(z.wrapping_mul(z)) as f32
+        }
+        EndRadialReference::Paper1_21_8Build60 => {
+            (i64::from(x) * i64::from(x) + i64::from(z) * i64::from(z)) as f32
+        }
+    };
+    let mut height = 100.0_f32 - java_sqrt(distance) * 8.0_f32;
     height = clamp_f32(height, -100.0, 80.0);
     for dx in -12..=12 {
         for dz in -12..=12 {

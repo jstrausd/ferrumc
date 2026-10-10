@@ -1,12 +1,12 @@
 # GEN-05 — Originale Densitydefinitionen, Seedrouter und Chunkinterpolation
 
-Status: **GEN-05.1 unabhängig CLEAN; GEN-05.2 implementiert und für unabhängiges Review eingefroren**.
+Status: **GEN-05.1/.2 unabhängig CLEAN integriert; GEN-05.3 implementiert, lokale Abnahme grün, finale unabhängige Runtimeprüfung läuft**.
 Compiler und echte Originalcodec-Strukturabnahme fertig; [Rootreview](GEN-05_1_DENSITY_COMPILER_REVIEW.md)
 mit Debug/Release je177 Tests, drei eigenen Zusatzprobes und frischem
 bytegleichem Original-JAR-Reexport grün. GEN-05.2 hat die genehmigte
-Seedbindung und direkte Auswertung vollständig geliefert; unabhängiges
-Runtime-Review und Integration stehen noch aus. GEN-05.3 benötigt separate
-Folgefreigabe. GEN-04.3 ist unabhängig CLEAN und als
+Seedbindung und direkte Auswertung vollständig geliefert und unabhängig
+CLEAN als `290e5343` integriert. GEN-05.3 folgt seinem freigegebenen privaten
+Paper-Chunkvertrag. GEN-04.3 ist unabhängig CLEAN und als
 `245134eb` integriert. REG-WORLDGEN001 ist CLEAN als `555ee2aa` integriert; sein unveränderter
 APIproducer ist die geprüfte Basis dieser Worldcompilation.
 
@@ -738,3 +738,662 @@ Arbeitskappen sowie echte NoiseChunk-JAR-Abnahme. Kein .3-Runtimecode wird vor
 Rootfreigabe geschrieben. Aquifer/Material/Orevein, Biome/Surface/Bedrock und
 konkrete Noisechunkblöcke folgen danach; Carvers, Features und Structures
 bleiben weiterhin eigenständige reale Generationsstages.
+
+
+## GEN-05.3 — konkrete interne Produktionsfreigabe (2026-10-10)
+
+GEN-05.2 ist nach unabhängigem CLEAN-Review als `290e5343` integriert. Root hat
+den folgenden vollständigen Proposal gelesen und zur Runtimeimplementierung
+freigegeben, SHA256 `4d943e796734ffe1231b9d95271205deec5ab457b45b753445517e88731f8cff`. Der .2-Dateifreeze wird ausschließlich für
+diese dokumentierten .3-Änderungen freigegeben. Die öffentlichen .2-Scalar-/
+Climate-Vanillaverträge bleiben byte-/bitgleich; PaperBuild60 ist die explizite
+neue Chunkpolicy, ohne globalen Endcache. Scope bleibt Worldcrate und dieser
+Brief; kein Git, Cargo/Lock oder andere Crates. Root prüft den tatsächlichen
+Consumer unabhängig vor Integration. Widersprechende Sharing-/Array-/Capdaten
+werden konkret gemeldet, nicht semantisch vereinfacht. Nach Abnahme folgt
+unmittelbar Aquifer/Material. Das nachfolgende vollständige Originalproposal
+ist unverändert archiviert; geplante Acceptance ist noch keine Abnahme.
+
+# GEN-05.3 — konkrete Paper-NoiseChunk-Session
+
+Stand: 2026-10-10. **Vollständiger Implementierungsvorschlag an Root; keine
+.3-Rustproduktion geschrieben.** GEN-05.2 bleibt während seines unabhängigen
+Reviews unverändert. Der gemeinsame GEN-05-Brief gehört zu dessen Freeze und
+wird durch diesen separaten Vorschlag nicht nachträglich geändert.
+
+## Ergebnis und exakter Scope
+
+Ein ausschließlich besessener, synchroner Worldconsumer führt die tatsächliche
+NoiseChunk-Wrapperbindung, Arrayfüllung und vollständige Interpolationsschleife
+für alle sieben gepinnten Settings aus. Er liefert die originale Dichte, die der
+NoiseChunk-Konstruktor seinem Aquifer übergibt:
+`cacheAllInCell(add(wrappedRouter.finalDensity(), BeardifierMarker)).mapAll(wrap)`.
+Im ausdrücklich frischen Kontext bleibt der Beardifier der echte Nullmarker.
+Die Addition und das zweite `mapAll` werden trotzdem ausgeführt: `finalDensity`
+und `finalDensity + +0.0` sind keine allgemein austauschbaren Bitverträge.
+
+Zusätzlich liefert derselbe Consumer die originale Preliminary-Surface-Abfrage
+und die sechs gecachten Climateachsen. Dies ermöglicht danach unmittelbar den
+Aquifer-/Ore-/Materialconsumer und Biome/Surface/Bedrock. Dieser Schritt erzeugt
+noch keine Blöcke, keine Flüssigkeit, keine Erze, keine Biome und keinen fertigen
+Naturalgenerator. Keine weitere allgemeine Frameworkrunde wird vorgeschaltet.
+
+Scope ausschließlich `server/crates/ferrumc-world/**` und nach Rootfreigabe der
+gemeinsame GEN-05-Brief. Keine neue Crate, keine Dependencies/Lockmutation,
+kein App-/Storage-/Sim-/Configumbau, kein Generatoridentitätswechsel und keine
+Gitmutation durch den Implementer. Root besitzt unabhängiges Review/Integration.
+
+## Explizite Referenz- und Kontextentscheidung
+
+Root hat für neue Chunkauswertung **Paper 1.21.8 Build 60** ausgewählt, Commit
+`29c8822d90899c89d2689338e81a98f690bcba12`. Öffentlicher Konstruktor heißt
+ausdrücklich `fresh_paper_noise_chunk`. Der einzige zulässige Kontext ist:
+
+- frisch generiertes, vollständiges 16×16-Noisechunk;
+- `Blender.empty()`, keine alten Blendingdaten, kein Retrogen;
+- keine Structure-Beardifierbeiträge;
+- ursprüngliche vollständige Settingsnoisegeometrie, kein HeightAccessorclamp;
+- die bestehenden geprüften, JSON-decodierten Builtinsettings aus GEN-05.1/.2
+  mit ihren tatsächlichen nativen registrierten Densityreferenzzielen.
+
+Der Name und die Rustdocs stellen diese Voraussetzungen klar. Es gibt keine
+öffentlichen Blender-/Structurehandles oder einen stillen Fallback für deren
+spätere aktive Consumer. Native registrierte Settings sind zusätzliche
+Source-/Sharingkontrollen des Oracles, nicht heimlich dieselbe Factoryherkunft.
+Der spätere Appgenerator muss seine HeightAccessor-/Structure-/Blendinginputs
+vor Aktivierung ausdrücklich an einen dann implementierten Vertrag binden.
+
+GEN-05.2s öffentliche Scalar-/Named-/Climateproben behalten **exakt** ihren
+Vanilla-Pointvertrag. Dieselbe immutable Simplexpermutation ist als Zahlenbasis
+nutzbar; der neue Chunkconsumer wählt privat die Paper-Endradialdistanz. Alle
+neuen Chunkpfade einschließlich SinglePoint-Fallbacks, Preliminary Surface,
+Arraycorners und Climate verwenden diese Paperpolicy. Keine bekannte endliche
+Vanilla-Endabweichung wird als Paperterrain angeboten.
+
+Minimale private numerische Seam in `density/evaluate.rs`:
+
+```text
+enum EndRadialReference { Vanilla1_21_8, Paper1_21_8Build60 }
+end_islands(...): existierender Einstieg -> Vanilla1_21_8
+end_islands_with_reference(..., reference): gemeinsam geprüfter Rechenkern
+```
+
+Nur die erste radiale Summe unterscheidet sich: Vanilla wrapping-i32,
+Paper i64-Multiplikation und i64-Summe. Paper konvertiert diese Summe zuerst
+nach f32 für `Mth.sqrt(float)`; danach double-sqrt und f32-Cast. Der übrige
+625-Kandidatenloop, signed Div/Rem, f32-Arithmetik und Seed/RNG bleiben erhalten.
+Die Chunkpolicy ist kein öffentlicher frei konfigurierbarer Bool und verändert
+keine bestehenden Defaults. Leafarithmetik/Noise-/Splinehelper werden privat
+geteilt, während Wrapper und echte Arraydispatch im Chunkconsumer liegen.
+
+Papers Threadlocal-/WeakHashMap-Endcache wird in dieser Stufe **nicht** kopiert.
+Der Paper-Numericalpfad wird ohne zusätzlichen Endcache berechnet; sämtliche
+625 Kandidaten und ausgeführten Simplexaufrufe bleiben im gemeinsamen Meter.
+Die eigene Workmenge darf daher von Papers Optimierung abweichen. Es gibt
+keinen behaupteten Cachetrace-/CPU-/TPS-Gleichheitsvertrag für diesen Patch.
+Root hat bereits echte fresh/reverse Paper-Endbitstabilität nachgewiesen.
+
+Root-Endbasis unverändert: `.codex-tmp/gen05_2-root-paper-end/`, Freeze SHA256
+`d27d4bac9ec5870eba58eabf4919cc6382a1846c928d1790b720f7d714bb10ad`.
+658 Paare ergeben 392 gleiche und 266 unterschiedliche Antworten, darunter
+210 Vanilla-NaNs und 56 endliche Drifts. Paperinner SHA256
+`c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507`.
+Die neue Abnahme ruft zusätzlich tatsächliche Paper-NoiseChunkmethoden auf.
+
+## Öffentliche API und Lebensdauer
+
+Alle Felder privat, jedes öffentliche Item mit Rustdoc. Konkrete Oberfläche:
+
+```text
+NoiseChunkWorkBudget::new(u32) -> Result<Self, NoiseChunkError>
+    // 1..=268_435_456
+SeededRouter::fresh_paper_noise_chunk(ChunkPos, NoiseChunkWorkBudget)
+    -> Result<NoiseChunkSession, NoiseChunkError>
+
+NoiseChunkSession::{seed, resource, chunk_pos, geometry, work_used}
+NoiseChunkSession::sample_chunk_densities(&mut self)
+    -> Result<ChunkDensitySamples, NoiseChunkError>
+NoiseChunkSession::preliminary_surface_level(&mut self, BlockPos)
+    -> Result<i32, NoiseChunkError> // y ignored, original MAX_VALUE sentinel
+NoiseChunkSession::sample_climate(&mut self, ClimateQuartPos)
+    -> Result<ClimateSample, NoiseChunkError>
+NoiseChunkSession::reset(&mut self, NoiseChunkWorkBudget)
+    -> Result<(), NoiseChunkError>
+
+ChunkDensitySamples::{seed, resource, chunk_pos, geometry}
+ChunkDensitySamples::density_at(BlockPos) -> Option<f64>
+ChunkDensitySamples::values() -> &[f64]
+```
+
+`NoiseChunkSession` hat weder `Clone` noch öffentliches Cell-/Counter-/Node-
+Manipulieren. Sie teilt ausschließlich immutable Router-/Samplerarcs; ihre
+Wrapperwerte, slices, Scratcharrays und Epochs gehören genau einer Session.
+`ChunkDensitySamples` besitzt die vollständig erfolgreiche Ausgabe. Es ist
+keine `Chunk`, `ChunkGenerator`-Implementierung oder neue GenerationIdentity.
+
+Die Konstruktion setzt genau einen Workmeter. Eager FlatCacheprecompute,
+Coldvisitor, Driver, spätere Preliminary-/Climateabfragen benutzen diesen
+Meter bis zum Reset; keine lokale budgetlose Arbeit und keine Budgetaddition
+bei einer späteren Methode. Shape-/Koordinatenadmission wird vor Berechnung
+beziehungsweise Ausgabeallocation abgeschlossen.
+
+Lifecycle: Fresh → Running → Complete. `sample_chunk_densities` ist genau einmal
+je erfolgreichem Reset erlaubt. Preliminary/Climate sind in Fresh und Complete
+zulässig. Ein Ausführungsfehler führt nach Poisoned; dann erlaubt ausschließlich
+`reset` eine weitere Auswertung. Reine vorab abgewiesene falsche Positions-/
+Lifecycleanfragen verändern keine Caches. Reset baut eine vollständig geprüfte
+Candidate-Session und tauscht erst bei Erfolg; fehlgeschlagener Reset lässt
+den bisherigen Zustand unverändert. Bereits ausgegebene Ergebnisse bleiben
+owned und werden durch Reset nicht verändert. Kein Rollbackclaim für vorher
+geänderte private Caches bei einem Driverfehler.
+
+Horizontaler Chunkcheck mit checked i64: alle 16×16 Innenblöcke und der positive
+Corner-/Quartgridrand `origin+16` müssen in ±30.000.000 liegen. Zulässige
+Chunkkoordinaten je Achse deshalb -1.875.000 bis 1.874.999. Kein shift-/multiply-
+Wrap für Chunks. Y kommt aus der geprüften vollständigen Settingsgeometrie.
+Einzelne Preliminary-/Climate-Singlepoints behalten .2s geprüftes X/Z- und
+i32-Y-Domain; es gibt keinen unbemerkten Clamp zum Chunkrand.
+
+## Datenbereich, Ausgabe und spätere direkte Consumer
+
+Der Driver erstellt genau **eine** f64-Ausgabe für die tatsächliche
+Konstruktor-Materialdichte. Keine zusätzlichen initial-/climate-/vein-
+Fieldrequests werden in dessen hot loop eingefügt. Originale bare finalDensity
+und initialDensity werden in getrennten privaten Acceptance-Sessions geprüft;
+deren Observationsrequests verändern nicht die Produktionsrequestspur.
+
+Ausgabe index = `((y-minY)*16 + localX)*16 + localZ`, also aufsteigendes Y,
+X, Z. Berechnung erfolgt trotzdem im originalen Cell-/Blockloop. Der aktuelle
+Ausgabeindex wird vor Schreiben aus der tatsächlichen absoluten Blockposition
+geprüft; kompletter Driver muss jeden Slot genau einmal schreiben. Anzahl:
+256×height, bei Overworld 98.304 f64 = 786.432 Bytes. `density_at` verweigert
+fremde Chunkpositionen/ungeprüfte Y mit `None`. Height, MinY, Seed und Resource
+begleiten jede Ausgabe; bestehende Flat-Overworldgeometrie wird nicht vorausgesetzt.
+
+Private für den nächsten konkreten Materialconsumer behalten:
+
+- alle 15 vollständig gewrappten Routerroots in originaler Reihenfolge;
+- actual Konstruktor-Materialroot mit zweitem Wrap;
+- die initialDensityroot und sechs gecachte Climatesamplerroots;
+- Noisegeometrie/sea level/Aquifer-/Oref flags und bestehende immutable
+  Aquifer-/Ore-Positionalfactories;
+- aktuellen own FunctionContext und einen einzigen Meter.
+
+Der anschließende Materialdriver ersetzt am **selben** Blockpunkt nur den
+Ausgabesink: erst materialDensity im own Context, dann Aquifer.computeSubstance;
+bei null weiter OreVeinifier, bei null Settingsdefaultblock. Ore konsumiert
+VeinToggle, VeinRidged, VeinGap in seinen tatsächlich gelesenen Branches;
+es wird keine spekulative Evaluate-all-Auswertung dieser Fields eingeführt.
+Aquifer kann in seinen Druckbranches denselben aktuellen own Context für
+BarrierNoise und in seinen Fluid-/Surfacebranches die originalen fremden
+SinglePointcontexts verwenden. Die .3-Arraysamplingmethode liefert hierfür
+keine öffentliche frei manipulierbare Zwischenstate-API. Der konkrete neue
+Aquifer-/Materialcode benötigt anschließend eigene Source-/JAR-Abnahme.
+
+## Tatsächlich gemessener Paper-Census als Kappenbasis
+
+Planninghelper `.codex-tmp/gen05_3-planning-census/NoiseChunkPlanningCensus.java`
+konstruiert **echte** gepinnte Paper-NoiseChunkobjekte. 98 Constructorfälle:
+7 Settings × 2 tatsächliche Origins (decoded/registered) × 7 Seeds. Danach
+actual `cachedClimateSampler`; bei Seed0 je Origin/Setting ein kompletter
+originaler Cell-/Blockloop, insgesamt **14 vollständige Materialdensityloops**.
+Der Helper liest die Dichte aus dem tatsächlichen ersten MaterialRuleList-
+Lambda-Capture, nicht aus einer nachträglich von Hand gebauten Root.
+FluidPicker verweigert tatsächliche Fluidberechnung; es werden keine Blöcke,
+Aquifercompute- oder Orepfade ausgeführt. Die Materialroot kommt dennoch aus
+dem vollständigen echten Konstruktor mit zweitem `mapAll(wrap)`.
+
+| Settings | Interpolator / Flat / 2D / Once / Cell | Insgesamt inkl. 2 Blendflatcaches | Actual wrapped Map: decoded / registered | Eigene f64-Cachearrays |
+| --- | --- | ---: | ---: | ---: |
+| overworld, large_biomes, amplified | 8 / 10 / 6 / 6 / 1 | 31 | 254 / 150 | 34.384 Bytes |
+| caves | 1 / 6 / 4 / 0 / 1 | 12 | 60 / 30 | 4.224 Bytes |
+| floating_islands | 1 / 6 / 4 / 0 / 1 | 12 | 60 / 30 | 6.368 Bytes |
+| nether | 1 / 6 / 4 / 0 / 1 | 12 | 60 / 30 | 3.584 Bytes |
+| end | 1 / 2 / 1 / 0 / 1 | 5 | 63 / 19 | 4.032 Bytes |
+
+Alle sieben Seeds behalten diese Counts. Der gecachte Climatepass ergänzt im
+Corpus weder Wrapper noch Arrays. In allen 14 vollständigen Builtinloops
+bleiben CacheOnce.lastArray null; tatsächliche Synthetic-arraycases sind
+deshalb Pflicht. Dieser Census ist eine konkrete Ressourcenmessung des echten
+JARs, keine .3-Rust-, Terrain-/Gameplay-/Paper-Server-Abnahme.
+
+Normale und optimierte hardened Reproduktion:
+
+```text
+python3 .codex-tmp/gen05_3-planning-census/run_census.py NEW_OUTPUT
+python3 -O .codex-tmp/gen05_3-planning-census/run_census.py OTHER_NEW_OUTPUT
+```
+
+Die jeweiligen JSONL **und** Manifests müssen bytegleich sein. Der Runner
+prüft OriginalworldgenSHA, alle 120 gehashten Paperclasspathartefakte gegen
+Roots Inputpins, elf actual Classorigins, den frisch kompilierten Helperorigin,
+Classpathshadow und Javaagent-/Classpathenvinjection, Inputs vor/nachher.
+Genaue finale Hashes stehen im separaten Planningfreeze, der zusammen mit
+diesem Proposal übergeben wird.
+
+## Getrennte Ressourcen- und Arbeitsgrenzen
+
+Alle Rechnungen checked, alle Arena-/Array-/Map-Erweiterungen prüfen vor
+Wachstum. Keine totalRSS-Zusage aus Arraybytes.
+
+| Bereich | Konkrete Grenze und Admission |
+| --- | --- |
+| Sourcegraph/Visitor | Bestehende private source/prepared Graphcaps 4096 Vertices, 8192 Edges, depth96. Coldvisitor maximal 131.072 tatsächliche Density-/Splinevisitsteps; vor Descension charge/admit. |
+| Chunkgraph | Höchstens 4096 Runtimevertices, 8192 Edges, depth96 einschließlich wrapper/materialhelper. Joint validator vor Veröffentlichung. Childindices/Shape/Lifecycle nicht nur nach Zahlen prüfen. |
+| Wrapperbindings | Höchstens128 einschließlich Blendflatcaches und materialhelper. Tatsächlicher Max31. Append/Listenregistrierung checked und original chronologisch. |
+| Equality/Hashkeys | Höchstens4096 Equalitykeys, höchstens4096 visitor-map Entries und4096 identity tokens. Vor Append checked. Eigene Key-/Child-/Identityarenen höchstens2MiB; keine rekursiven unbounded String-/Treekeys. Recordtags/typed resource IDs und primitive/child IDs. |
+| Graphmetadaten | Eigene zusätzliche Runtimegraph-/Spline-/Origin-/Listarenen höchstens2MiB retained; getrennt von vorhandenen immutable Router/noise Arcs. Cold temporäre Maps/Orders/Keys/Stacks höchstens4MiB, vor Allocation preflight. Beide Limits messen tatsächliche element counts × size_of plus owned slices. |
+| Cachearrays | Eigene f64-Slices, Flatgrids, Cellcache und vorreservierte CacheOnce-array storage zusammen höchstens8MiB. Sliceeach `(countXZ+1)*(countY+1)`; Cell `width²*height`; Flat `(noiseSizeXZ+1)²`. CacheOnce reserve max(cellvolume, slicelength) je realem Binding, valid length ist zunächst None. |
+| Driverausgabe | Genau256×height f64; höchstens1MiB undhöchstens131.072 Samples. Builtinmax786.432B. Separate Ausgabe/Scratchresult wird erst vollständig zurückgegeben; dieser Cap ist kein Cachearraycap. |
+| fillArray temporär | Eigener nach maximal gleichzeitig lebenden ADD-right-arrays vermessener Scratchpool, höchstens4MiB. Länge exakt aktueller Providerarray; checked take/release, DAGdepthbound. Keine pro-Blockallocation; Fehler gibt alle Leases wieder frei oder poisoned Session besitzt sie bis Reset/drop. |
+| Preliminarycache | Höchstens2048 einzigartige quartaligned Columns; feste vorreservierte Key-/Value-/Occupancyarrays, höchstens128KiB. Vor neuem Schlüssel checked. Hits bleiben zulässig bei voller Map; kein Evict, Sentineloverwrite oder Nullfallback. Für späteren Aquifer tatsächliche Offsets einschließlich -3Chunk X ausdrücklich abgedeckt. |
+| Meter | Ein gemeinsamer1..=268.435.456 Workwert. Kein Reset in Spline/Noise/Arraybranch. Alle echten NoiseOctaves und Endkandidaten wie .2; Wrapperentry auch bei Hit, fillArrayentry, Contextselection, Bufferwrite/-copy pro Slot, ausgeführte Lerp-/Slice-/Celloperationen vor Ausführung charge. Cold keycompare/visitsteps ebenfalls metered. |
+
+Die 8MiB beziehen sich nur auf eigene Sample-/Cachearrays. Keymetadata,
+Ausgabe, temporärer Fillpool und vorhandener Router/Samplerbestand zählen
+separat. Bei Construction/Reset kann gleichzeitig die alte und die Candidate-
+Session leben; das wird dokumentiert und nicht als einfacher Sessionpeak
+ausgegeben. Coldtemporaries werden vor Freigabe zurückgegeben. Tatsächliche
+Builtin-Rustcounts/Array-/Key-/Graphbytes und Workused aus kompletten Goldenloops
+werden im Ergebnisbericht aufgeführt; reicht eine Kappe nicht, gibt es einen
+typisierten Fehler und eine konkrete Datenbegründung für Root, keine stille
+Capaufhebung oder Referenzvereinfachung.
+
+## Tatsächlicher Coldvisitor und Java-Gleichheit
+
+.2Noisepool ist eine Zahlenbasis, kein Beweis gleicher Javaobjektidentität.
+.3 ergänzt privat im BoundRouter ein immutable `Arc` des bereits geprüften
+PreparedGraph/Fabrikursprungs und eine Kopie der vorhandenen RouterMetadata.
+Der Konstruktor zieht keine JSON-/I/O-/Registrydaten nach. Diese Ergänzung
+ändert keine .2-public Sample-/Budget-/Boundsverträge. Sie wird erst nach
+.2-CLEAN und Rootfreigabe implementiert, nicht in dessen eingefrorenen Stand.
+
+Der konkrete Consumer rekonstruiert die tatsächlich relevanten Seedvisitor-
+Objektgleichheiten aus diesem admitted Ursprung, anschließend NoiseChunkwrap
+in originaler Reihenfolge. Maximal begrenzte Factory-/Equal-IDinternierung
+vermeidet expanded string/tree keys. Sie ist keine beliebige mathematische
+Densitydeduplication und kein Runtimevaluecache.
+
+1. Alle 15 Seedrouterroots werden wie NoiseRouter.mapAll von Barrier bis
+   VeinGap traversiert. Children zuerst, originale Builderbounds/actual
+   MulOrAdd-Form verwenden. Clamp, Mapped und MulOrAdd rufen in ihrem echten
+   mapAll **keinen** visitor.apply auf; diese Ausnahme bleibt erhalten.
+2. Java-record Equality benutzt Class, primitive Komponenten und rekursive
+   Child-Equality, inklusive tatsächlicher Diagnosefelder. f32/f64 behandeln
+   NaNs canonical wie Float/Double.compare und unterscheiden ±0. Arrays
+   vergleichen Identität, Lists ihre Elemente. Resource- und enum-Familien
+   werden nicht anhand zufällig gleicher Zahlen verschmolzen.
+3. Holder.Reference bleibt tatsächliche Registryidentität; mapAll erzeugt
+   Holder.Direct mit Value-Equality. HolderHolder wird erst durch actual wrap
+   entfernt. Keine pauschale Herkunfts-/Wrapperstripregel auf Native/Decoded.
+4. NoiseHolder trägt echte Noiseparemeterholderidentität **und** Sampleridentität.
+   Modern getOrCreateNoise teilt resourceweise. Legacy Temperatur/Vegetation/
+   Offset konstruiert je tatsächlich ausgeführtem visitNoise eigene immutable
+   virtuelle Identity, selbst wenn der Zahlenpool dieselben Bits liefert.
+5. Blended und End sind identity-bearing Java-Klassen. Sourcefactorytokens
+   unterscheiden actual Nativeinstanzen und actual Codec-unit singletons;
+   wiederholter Seedvisitor.apply folgt dessen Map. Sourceindex allein wird
+   nicht als Gleichheitsbeweis eingesetzt. Originales Source-/Identitycensus
+   aus dem neuen JARhelper prüft diese Tokens explizit.
+6. CubicSpline.Multipoint ist ein record, aber locations/derivatives sind
+   identitätsgleiche Arrays. mapAll behält deren Originalarrays; gleiche
+   Floatinhalte von zwei verschiedenen Sourcearrays dürfen nicht zu einem
+   Gleichheitskey werden. Values-List vergleicht Element-Equality und Bounds
+   sind Komponenten. Nestedarrays/coordinates vollständig berücksichtigen.
+7. NoiseChunk.wrapped canonicalisiert nur tatsächliche visitor.apply Keys.
+   Jeder echte mutable Wrapper besitzt eine eigene identity ID. Seine
+   registration in interpolators/cellCaches passiert bei erster Neuerzeugung.
+   Re-mapAll von NoiseChunk-Wrappern baut Marker aus deren wrapped child,
+   sodass der zweite Materialwrap vorhandene richtige Wrapper wiederfindet.
+8. Danach den tatsächlichen materialhelper bauen und erneut mapAll/wrap;
+   danach cachedClimateSampler über dieselbe Map. Immutable numerische
+   Recorddaten dürfen intern geteilt werden, ohne einen behaupteten Java-==
+   Vertrag für nicht gecachte Records. Relevant sind die originale equals-
+   Relation, identity-bearing Leaves/Arrays und tatsächliche mutable Wrapper-
+   Sharingpartition samt Reihenfolge/Requests.
+
+Die komplette Gegenprobe vergleicht echte Keyclasses/Equalrelation und
+Wrapperidentitypartition; der bloße Zahlen-Census31/12/5 genügt nicht.
+
+## Die fünf Wrapperverträge
+
+| Wrapper | compute / fillArray / Kontext |
+| --- | --- |
+| NoiseInterpolator | Eigenes Context ohne laufende Interpolation -> Fehler. Fremder SinglePoint -> noiseFiller.compute ohne Lerp. Bei fillingCell original Mth.lerp3 mit X→Y→Z-rechenordnung; normal gespeichertes Y→X→Z-Updatevalue. Zwei Slices, acht originale Cornerfelder; `fillArray` bei fillingCell provider direct, sonst wrapped.fillArray. |
+| FlatCache | Eager inclusive Quartgrid bei Y0, X außen/Z innen. Für16×16 exakt5×5. Compute arithmetic>>2 und relative Quartindices; in-grid Value ignoriert Y, out-grid echter Childcontext. fillArray provider direct. Zwei Blendflatcaches werden auch bei empty Blender genau als Konstruktorarrays angelegt/befüllt, obwohl BlendAlpha/Offsetenum dann nicht zu diesen Wrappern ersetzt wird. |
+| Cache2D | Genau letzter gepackter Block-X/Z-Key. Anfang ist **ChunkPos.INVALID_CHUNK_POS = asLong(1875066,1875066)** und lastValue+0. Ein erster Compute an diesen gültigen Koordinaten gibt daher tatsächlich+0 ohne Child. Kein Option-Schlüssel als vermeintliche Korrektur. Key wird vor Child gesetzt; Childfehler poisoned Session. fillArray delegiert direkt an function und hat keinen eigenen Mehrkeycache. |
+| CacheOnce | Own Context: erst lastArray && gleiche arrayCounter, dann gleiche scalarCounter, sonst Child. Fremder Context delegiert. Initialcounter0/lastValue+0 beibehalten. fillArray: bei gleicher Arrayepoch copy Originalprefix, sonst vollständig wrapped.fillArray, gleiche Länge copy oder neue logical storage length, danach epoch. Vorreservierte Kapazität darf None/valid length nicht voreilig verändern. Counterassignment-/Failuretiming beachten. |
+| CacheAllInCell | Array width²×height, registriert bei Konstruktion. Fremder Context delegiert. Eigen ohneInterpolation Fehler. Eigene in-cell coordinates lesen `((height-1-inY)*width+inX)*width+inZ`; außerhalb Cell delegiert. fillArray provider direct. Cellfill läuft für cellCaches in echter registration order; kein paralleles oder dependency-sortiertes Valuecachefill. |
+
+## fillArray und Provider: eigene vollständige Dispatch
+
+Keine Ersetzung von originalem fillArray durch einen universellen Pointloop.
+Auf Scalarparität allein lässt sich die Arrayrequestfolge nicht schließen.
+
+- Constant/BlendAlpha/BlendOffset/Beardifier füllen das gesamte Array direkt.
+- Holder/ursprünglicher Marker delegieren; gewrappte Formen wie oben.
+- PureTransformer füllt zuerst den Childarray vollständig und transformiert
+  danach slots aufsteigend. MulOrAdd verwendet diesen Pfad und überspringt
+  sein Input bei argument0 ausdrücklich nicht.
+- Ap2.ADD: linkes Array vollständig, rechtes vollständiges Scratcharray,
+  danach slotweise Addition. Ap2.MUL/MIN/MAX: links ganz, dann nur für tatsächlich
+  erforderliche Slots rechts `compute(provider.forIndex(i))`. Rechtes fillArray
+  ist dabei falsch. Signedzero/strict bounds wie .2.
+- RangeChoice: Inputarray ganz, dann pro Slot genau ausgewählten Childcompute
+  über forIndex; keine zwei Candidatearrays.
+- TransformerWithContext: Childarray ganz, danach forIndex je transformiertem
+  Slot; dies betrifft BlendDensity und WeirdScaledSampler.
+- Noise/Shift/ShiftedNoise/Spline/YGradient/End und SimpleFunction fallback:
+  provider.fillAllDirectly mit der tatsächlichen Function. Finitepolicy gilt
+  auch jedem berechneten/geschriebenen Arraychild; refusal stoppt den nächsten
+  Slot statt einen stillen endlichen Ersatz zu schreiben.
+
+Sliceprovider forIndex/directfill setzt Y `(i+cellNoiseMinY)*cellHeight`, erhöht
+scalar interpolationCounter je Index, setzt inY0 und arrayIndex=i. Cellprovider
+forIndex: Z=i%width, X=(i/width)%width, Y=height-1-i/(width²), setzt arrayIndex=i
+und erhöht den Scalarcounter **nicht**. Cell fillAllDirectly beginnt arrayIndex0
+und loopt Y absteigend, X aufsteigend, Z aufsteigend. Java evaluiert in
+`values[this.arrayIndex++] = function.compute(this)` den Arrayindex und dessen
+Postincrement **vor** dem RHS-compute: der Child sieht i+1, nicht i. Slice-direct
+und Cell-forIndex sehen weiterhin i. Dies ist das durch actual-JAR-Providertrace
+bestätigte, von Root freigegebene interne Evaluation-order-Amendment; der
+frühere Proposaltext mit compute vor Postincrement war falsch.
+Current provider object identity entscheidet own vs foreign.
+Arraylength/-indexlimits werden vor Dispatch geprüft. Provider ist privat,
+kein Callercallback kann Counter oder Contextidentity einschleusen.
+
+## Interpolationsdriver: genaue private Statefolge
+
+1. `initializeForFirstCellX`: interpolating=true, scalarCounter=0; slice0 bei
+   firstCellX füllen. Für jede Zcornerspalte arrayCounter++ vor allen
+   InterpolatorfillArrays, anschließend nochmals arrayCounter++.
+2. CellX aufsteigend: advanceX füllt slice1 bei firstCellX+cellX+1 mit derselben
+   Sliceproviderfolge; dann cellStartX auf tatsächliches linkes Cell setzen.
+3. CellZ aufsteigend, CellY absteigend: selectYZ kopiert zuerst die acht
+   Cornerwerte sämtlicher Interpolatoren. fillingCell=true, cellStartY/Z setzen,
+   arrayCounter++; registrierte Cellcaches durch ihren noiseFiller.fillArray
+   füllen; arrayCounter++; fillingCell=false.
+4. inCellY absteigend: updateY setzt inY und vier Lerps; inCellX aufsteigend:
+   updateX setzt inX und zwei Lerps; inCellZ aufsteigend: updateZ setzt inZ,
+   scalarCounter++ und finalen Lerp. Jetzt materialdensity.compute(ownContext)
+   und an überprüftem Ausgabeindex schreiben.
+5. Nach sämtlichen Z/Y-Zellen swapSlices nur einmal für diese Xsäule; nach
+   letzter Xsäule stopInterpolation. Alle illegalen private Sequences erhalten
+   typed Lifecyclefehler. Kein zweites initialize oder stale selectedCell.
+
+Originaler normaler Updatepfad ist Y→X→Z, originaler fillingCell Mth.lerp3
+rechnet X→Y→Z. Beide werden separat bitweise geprüft; algebraische Gleichheit
+erlaubt keine gemeinsame umsortierte Lerpimplementierung. Counters sind private
+i64 mit Java-wrap semantics; im realen capped Driver sind deren Overflows
+unreachable. Near-overflow ist eine private Syntheticoraclekontrolle, keine
+öffentliche Manipulationsmöglichkeit.
+
+## Preliminary Surface und gecachtes Climate
+
+Preliminary x/z arithmetic>>2 und checked×4 zum Quartursprung. Lookup per
+originalem ColumnPos32/32-Packing. On miss: von minY+height **inklusive** abwärts
+in cellHeight-Schritten bis minY; tatsächliche wrapped initialDensityroot mit
+fremdem SinglePointcontext. Erste density >0.390625 ergibt dieses Y, andernfalls
+Integer.MAX_VALUE. Gleichheit0.390625 genügt nicht. Erst erfolgreicher kompletter
+Scan veröffentlicht den cache Entry. Out-grid Flatcachefallback und letzte
+Cache2D-Keys sind deshalb für diese Abfrage relevant.
+
+CachedClimate bildet originale sechs Seedrouterfields nochmals mapAll(wrap)
+über die bestehende session Map ab. Es benutzt ausdrücklich nicht den .2-
+Climateview, dessen separater Visitor Holder/Marker entfernt. sample(Quart)
+ist ein fremder SinglePoint am checked Quartursprung, sechs Fields in originaler
+Reihenfolge, f64→f32→originale 10.000f32-Quantisierung. Keine Biome-/Spawnsuche;
+deferred spawnTarget wird nicht als fertiger Resolver ausgegeben.
+
+## Original-JAR-Oracle und konkrete Acceptance
+
+Neue Files `tests/reference/noise_chunk_oracle.java`,
+`generate_noise_chunk.py`, `noise_chunk.md`,
+`tests/fixtures/noise_chunk_1_21_8.jsonl`, `...manifest.json` und ein begrenztes
+Bigendian-u64-Datafile mit vollständigen Paper-Materialdensitybits. Keine neue
+Rustdependency: erwartete f64-Bits unmittelbar mit acht Fixturebytes vergleichen.
+Fixtureoffsets/-lengths vor Zugriff prüfen; Manifest pinnt SHA256 und Bytegröße.
+
+Der Helper ruft tatsächliche Constructor-/wrap-/fillArray-/initialize-/advance-/
+select-/update-/swap-/stop-/Preliminary-/Climate-Methoden aus Vanilla und Paper
+auf. Keine kopierte Wrapper-/Noise-/Lerpformel. Reference-only synthetische
+DensityFunction-Proxies loggen Inputs/Arrayrequests und liefern deklarierte
+Werte oder Fehler; Javaoriginal entscheidet sämtliche Branches und Caches.
+ reflection liest actual MaterialRuleList-Lambdacapture und tatsächliche
+Wrapper-/Counter-/Slice-/Cachefelder. Traceprobes und vollständige Numerical-
+Runs laufen getrennt, damit zusätzliche Observations keine Hotlooprequests
+verändern. Counter-/wrapper IDs sind traversalgebundene fixturelokale Ordinals.
+
+Konkrete Mindestmatrix:
+
+- 98 Constructor-/sharing/resource Fälle wie Planningcensus, beide Origins
+  gegen actual constructor/mapAll, sämtliche15roots, materialhelper und cached
+  climate roots. Produktions-Rustabnahme verwendet den freigegebenen decoded
+  Ursprung; native Registryfälle kontrollieren Herkunft separat.
+- Vollständige Materialdensityarrays für7Settings ×2Seeds (0 und asymmetrischer
+  0x0123456789abcdef) ×6Chunks `(0,0),(1,0),(0,1),(-1,0),(0,-1),(-1,-1)`:
+  **84 vollständige Chunks**, alle Blockbits, actual ownDriver counters,
+  wrapperslices vor/nach jedem Xswap und Cellcachearrays. Vanilla/Paper dieser
+  nahen Numericalfälle zusätzlich gegeneinander festhalten.
+- Zusätzlich tatsächlicher Paper-End: alle7Seeds ×6 ferne Chunkfälle bei
+  sign-/i32overflowgrenzen und ±30M, darunter der Rootgegenbeleg(-524289,0,0):
+  **42 vollständige Endchunks**. Endcorner-/SinglePointfallbackseam gegen alle
+  658 vorhandenen Rootpositionspaare; Vanillaabweichungen ausdrücklich erhalten.
+- Datafilegröße für84+42Chunks:7.077.888 Werte /56.623.104Bytes; nur ein
+  festgelegter Materialdensitywert pro Block. Trace/corner/root diagnostics
+  separat und bounded. Keine doppelte Komplettausgabe je Observationsfeld.
+- Alle7Seeds/7Settings: ausgewählte Cellcorner, Boundary-/Nextafter-Lerps,
+  sliceProviderforIndex und directfill, cellProviderforIndex und directfill,
+  initial/bare-final Values in separaten Acceptance-Sessions; tatsächliche
+  wrapped Bounds und request order. Alle kompletten Arrays zusätzlich bei
+  fresh Session und reordered Chunkrequests, reset/clone Seedrouter/droporigin.
+- Preliminary: alle25 inclusive Quartgridcolumns plus mindestens32 outside-
+  grid/Aquifer-offset columns je7Settings/7Seeds, negative unaligned Adressen,
+  Grenze0.390625 mit Nextafter, min/topY und MAX_VALUE; miss/hit/poison/refusal.
+- CachedClimate: alle ursprünglichen294 Quartproben in echten NoiseChunk-
+  Samplern, mindestens je Setting Grid-/Outgridfälle und Yextrema; actual
+  resource/key equality und quantized longs, keine Biomesuche.
+- Jeder Wrapper isoliert und verschachtelt: Hit/Miss, foreign/own, in/outcell,
+  inclusive/outgrid, repeated/shared child und material secondwrap. Cache2D
+  erster Sentinelhit mit +0 und ohne Child, Yänderung und fillArraybypass.
+- CacheOnce tatsächliche arraycounterhit/miss, prefixcopy, gleiche/geänderte
+  logical Länge, forIndexindex, counter0/scalarcache, near wrap und Childfailure;
+  builtinlastArray=null ist kein Ersatz für diese Abnahme.
+- Actual Java equals controls für f64/f32±0 undNaNs, Holderdirect/reference,
+  moderne shared gegenüber frischen LegacyNoiseidentitäten, gleiche/verschiedene
+  Splinearrayobjekte bei gleichen Bytes, Blended-/Endidentity, gleichwertige
+  getrennte Marker versus wiederholte Native Namedreferences.
+- Vollständige fillArray-Branchrequestspuren: ADD-links-all/rechts-all,
+  MUL-±0-skip gegenüber MulOrAddzero, MIN/MAX strict Bounds, RangeChoice-
+  selectedchild, contextual TransformforIndex, OriginalLerp3 gegenüber normalen
+  Updates. Failureprefix/nonfinite Policy separat von Javaexceptionsemantik.
+- Rust N/N-1 Meter an construction, slicefill, cellfill, Noise/Splinecallbacks,
+  Driveroutput, preliminary und climate; kein lokaler allowance Reset.
+  Vertex/edge/depth/visit/key/wrapper/array/output/temp/surfacecaps genau an
+  Grenze/+1. Callerresult bleibt bei failure unveröffentlicht, bestehender
+  Router und getrennte Session bleiben unverändert. Fehler/reset Lifecycle.
+
+Finalgenerator übernimmt die bestehenden Vanilla Bundle/Inner/43-Library-
+Mappingspins und Paper Bundle/Inner/119-Librarypins. Jeder actual verwendete
+Originalcallee bekommt einen geprüften CodeSource. Frischer Helper zuletzt
+im Classpath, shadow/envinjection refusal, Inputs vor/nach, normale/-O
+byteidentische Fixture **und** Manifest. Negativeguards für falsche Bundle/
+Inner/Library/Mapping/source/helper-origin/shadow/env auch unter `-O`; keine
+Pythonassert-Pinguards. Serverboot/Client/Gameplay bleiben separate Gates.
+
+Eigene Abschlusschecks: vollständige World-Debug und-Release, strict
+all-targets Clippy, fmt, Scope diffcheck, unveränderte alte Fixtures/Oracles und
+Dependencyinputs, Source-/Calleematrix, vollständiger Filefreeze. Root führt
+isoliertes unabhängiges Runtime-/API-/Errorreview und Zusatzprobes aus.
+
+## Gelesene Quellen und Paperänderungen
+
+Vollständig gelesen: NoiseChunk790, NoiseBasedChunkGenerator428,
+DensityFunction119, DensityFunctions1365, RandomState154, NoiseSettings59,
+NoiseRouter68, Holder einschließlich Gleichheit und der tatsächlichen
+Paperänderung, CubicSpline-Multipoint mapAll/create/apply und Constant;
+Aquifer komplett einschließlich realer PreliminarySurface-Offsets. Mth.sqrt,
+lerp/lerp2/lerp3, clamp und floorDiv sowie QuartPos, ColumnPos und
+Climate.Sampler vollständig in ihrem relevanten Vertrag gelesen.
+Blender/Beardifier-/Noise-/Splinecallees wurden bereits vollständig in .2
+gelesen; der neue Consumer bleibt bewusst empty/no-structure.
+
+NoiseChunk Base/Applied bytegleich SHA256
+`e3c872cf3f6a15a063d255f1188296ea841ef012b01959d35ca7e0012d97c863`.
+DensityFunctions Base
+`3f1002ec0d0d8047fec58fa256c1625c7291f8fa47b96a429ff8687f58e88693`,
+Applied `62b4422976740e5ea5115b7675cfb404bec6887c15ca232e79bbeaf35480a749`:
+vollständiger Endpatch oben berücksichtigt.
+NoiseBasedChunkGenerator Base
+`1aee1be9952d347975d2a464da06ee330dc0980aba1a979ceca9d18e6d89dc71`,
+Applied `2b586e7fca9059b65d214f33f6b84fcc7ae3de90285ad7cd9c8a56edc319f2d8`.
+Sourcepatch verändert spätere Bedrock-/Carvercontexts; vollständiger relevanter
+Moonrisehunk macht Executors Runnable::run und verändert nicht die geprüfte
+Interpolation. Kein Rust-Thread-/Schedulingclaim daraus. Streams-Beardifier-
+Patches betreffen den hier explizit ausgeschlossenen Structurebeitrag.
+Holder-Paperänderung benutzt für Tagkeys reference Set, verändert weder
+Directrecord-Equality noch Referenceobjektidentität des konkreten Consumers.
+
+## Implementierungsreihenfolge nach Rootfreigabe
+
+### Freigegebenes internes Paper-Build-60-Amendment: nextDouble
+
+Der erste vollständige actual-Paper-Dichtevergleich hat einen zusätzlichen
+numerischen Unterschied konkret nachgewiesen. Paper Build 60 berechnet
+`XoroshiroRandomSource.nextDouble` **und** `BitRandomSource.nextDouble`
+(damit auch LegacyRandomSource) mit `l2f`, `1.110223E-16F`, `fmul`, `f2d`.
+Vanilla verwendet `l2d`, double-Multiplikation. Die vollständigen Paper-Base-
+und Appliedquellen sind jeweils bytegleich: Xoroshiro SHA256
+`76a1af8439d57038d3e80ea41dc7b38ca3d9cbfe3a8db8bd87982b5aa363e70f`,
+BitRandomSource SHA256
+`726528fb348082c248218899112a2d6fba1a1897dad719aa41939eff643ff2c1`.
+Actual JAR-Bytecode wurde von Root unabhängig geprüft: Paper-Dump SHA256
+`d6a7cb7499dc0bed7c8519ec0d5d3eefc6f0e5af75dadd748af2f2d48d1743e4`,
+Vanilla-Dump
+`430611872a9bca2b68e115264103f962c30c81903b04d9df1c3de74e777b8e5e`.
+ImprovedNoise Base/Applied SHA256
+`f522c414939fe6ca27b94a1e758d2ab644d3ba43cbad201dd4368fb9fa0abc10`.
+
+Root hat ausdrücklich ausschließlich für die neuen .3-Pfade die konkrete
+Paper-Zahlenbasis freigegeben. `density/evaluate.rs::MarkerEvaluator` wählt
+privat den Session-Samplerpool; `noise.rs` und `noise/{normal,blended}.rs`
+kopieren die bestehenden Immutable-Permutationen und runden die drei
+Improved-Offsets über f32. Dies ist exakt zur tatsächlichen Java-Konstruktion:
+nextDouble-Skalierung und Offsetmultiplikation mit 256 sind Zweierpotenzen,
+Draworder und alle 256 Shufflewerte bleiben erhalten. Ein durch Rundung
+entstandener Offset 256 wird ausdrücklich nicht geclampt. Auch Legacy-
+Normal- und Blended-Stacks verwenden diese private Basis. End-Simplexoffsets
+sind im tatsächlichen sampler irrelevant; seine unveränderte Permutation
+wird weiterhin mit der freigegebenen Paper-i64-Radialpolitik verwendet.
+
+Alle Offset-/Permutationkopien verbrauchen denselben .3-Meter und werden vor
+Allocation im zusätzlichen 2MiB-Runtime-Metadatencap zugelassen. Keine globale
+RNG-Option, keine Änderung an öffentlichem RNG/Noise/Scalar/Climate-Verhalten
+von .2, keine Vermischung von Vanilla-/Paper-Sampleridentitäten. Unabhängige
+actual-noise-/Legacy-/Materialgoldens und sämtliche .2-Regressionen bleiben
+Abnahmepflicht. Die Beobachtung impliziert keine zusätzliche Gameplay- oder
+Performance-Abnahme.
+
+1. Neue echte Oracleconstructor-/Identity-/Wrapper-/Array-/Driverfälle und Pins
+   exportieren; tatsächliche Key-/visit-/resource Counts gegen freigegebene
+   Caps aufnehmen. Bestehende .2-Fixtures bleiben unverändert.
+2. Metadata-/Sourcearc ergänzen, kleine private Paper-Endnumericalseam mit
+   unverändertem .2-Nachweis; bounded Coldvisitor und five-wrapper binding.
+3. Originale fillArraydispatch und Provider implementieren, synthetic actual
+   Request-/Failureprefixnachweise zuerst. Danach kompletter Driver/Sink.
+4. Preliminarycache und gecachtes Climate; vollständige84+42Numericalarrays,
+   Caps/Meter/poison/reset. Concrete bytes/Workused im Bericht festhalten.
+5. Debug/Release/Clippy/fmt, unveränderte Inputs, Freeze und unabhängiges Review.
+   Danach direkt Aquifer/Ore/Material → Biome/Surface/Bedrock → echte Noise-
+   Blockausgabe mit passender Generatoridentität und späterer aktiver Adoption.
+
+Carvers, Features, normale Oreplacements, Vegetation, Structures, Licht,
+Gameplay/Survival und vollständige Paper-/Java-Pluginfähigkeit werden durch
+dieses Numericalticket nicht als erledigt markiert. RAM-/TPS-Vorteile werden
+erst bei gleicher aktiver Funktionalität gemessen.
+
+## GEN-05.3 — gelieferter Worldconsumer und konkrete Abnahmematrix
+
+Der neue `SeededRouter::fresh_paper_noise_chunk` besitzt seine mutable Session
+exklusiv. Seine öffentliche Ausgabe ist ein vollständiges endliches
+Materialdichtearray **vor** Aquifer oder Block-/Fluidauswahl. Die Runtime
+implementiert originale seed/mapAll/wrap-Chronologie, alle fünf Wrapper,
+Arraydispatch, Slice-/Cellprovider, originalen vollständigen Driver, Preliminary
+und cached Climate; immutable Quellen und der öffentliche .2-Vanillavertrag
+bleiben erhalten. Die beiden vorstehenden konkreten Amendments sind umgesetzt.
+Papers Threadlocal-/WeakHashMap-Endcache bleibt ausdrücklich außerhalb dieser
+Stufe; alle625 Kandidaten und tatsächlich ausgeführten Simplexproben sind metered.
+
+| Direkte Runtimeabnahme | Tatsächlich verglichener Umfang |
+| --- | --- |
+| Vollständige Paperdichten | Alle126 eingefrorenen vollständigen Chunks /7.077.888f64-Werte bitgenau; sieben Settings, signed Seeds,84 nahe und42 entfernte Endchunks. Ein Datafile56.623.104B, SHA`9dd6827609a0a6b65968b239a588fd60e21121097520501ff5828eb19655a9db`. |
+| Constructor/Sharing | Alle49 decoded Settings/Seedfälle: vollständige zweite Traversallänge/-reihenfolge, Keyclasses und Java-equals-Partition, Valueclasses, mutable Wrapperidentitäten/Registrierungsreihenfolge, alle15 Roots, Materialroot und6 shared Climateroots. Native49 Oraclefälle bleiben Originaldiagnosen; die Worldsession konsumiert decoded Settings mit tatsächlichen registered Densitytargets. |
+| Getrennte Sessiondiagnostik |49 Fälle: echte Initial-/bare-Final-Fremdpunkte, vollständige Slice0/1-, Cellcache- und Cornerarrays, vier ausgewählte Driverproben samt tatsächlichem Kontext, getauschte Slices und tatsächliche Counter. Keine erfundene Counterformel für komplette Chunks. |
+| Alle fünf Wrapper | Sämtliche55 tatsächlichen Controls direkt mit Ergebnisbits/Fehler, Sessionzustand und exakter Child-/Providertrace; isolierte, nested und shared Pfade, Sentinel, counter0, logical Arraylängen/Prefixe, scalar/array-overflow und Failuretiming. |
+| Provider | Alle12 originalen Slice-/Cell-forIndex/directfill-, Cellregistrierungs- und scalarCounterwrapcontrols; exakte Computecontexts/-order und Arrays. Cell-direct i+1 und one-past-end CacheOnceprefix separat geprüft. |
+| Arraydispatch | Vollständige23-Familienkontrollen mit7 unveränderten endlichen Original-Failureprefixen und16 neuen tatsächlichen endlichen Addendumrows, dazu9 originale SharedOnce-/Unit-/Gradient-/Weird-/own-directcontrols. Child-/Providerrequests, ±0-Bits, strict MIN/MAX, selected RangeChoice, context-transformers und Failureprefixe stimmen. |
+| Preliminary und Climate |49×57 Preliminaryspalten inklinclusive25grid/offgrid32 und cached Hits;49×22 Quartproben: alle6f32-Bits und quantized longs. Grenzwerte/Min-/Top-/Sentinel/2048cap/fehlendes Cachepublish/finite f64→infinite f32 sind zusätzliche gezielte Rustprobes. |
+| Random/Noisebasis |14 actual-JAR RNGcases: private f32-rounded nextDouble-/Improvedoffsets und alle256Permutationbytes. Alle erreichbaren named-noise-Stacks aus7 tatsächlichen Normaloffsetinventaren bitgenau; private legacy Temperature/Vegetation/zerooffsetsampler fehlen im Java-named-Mapinventar und werden durch die vollständigen Dichte-/Climatediagnosen geprüft. |
+| Paper Endseam | Alle658 tatsächlichen Interpolator-Foreignfallbackwerte in frischen pro-Seed-Sessions und umgekehrter Reihenfolge bitgenau. Die42 Far-End-Cornercases sind zusätzlich in vollständigen Dichtechunks abgedeckt; Original-Vanilladrifts bleiben unverändert erhalten. |
+| Eigene checked Policy | N/N−1 für Constructor, Surface/Climate, Slice/Cell und Driver mit einem Meter; public Poison/Reset und keine Teilpublikation; volle-/übervolle Key-/Identity-/Graph-/Wrapper-/Visit-/Depth-/Bytesarenen; child-before/type/cycle; private Lifecycle/shape/index/x/deltaadmission vor Mutation. |
+
+Die ursprünglichen Java-NaN-Fälle bleiben unverändert im Corpus. Rust stoppt
+bereits am ersten angeforderten nichtendlichen Child/Arraywrite; spätere
+Java-Requests und Exceptions sind deshalb **kein** erfolgreicher Tracevergleich.
+Das endliche Addendum ersetzt ausschließlich den letzten deklarierten NaN-Wert
+mit6.0 und ruft weiterhin dieselben tatsächlichen Originalfactories/methods auf.
+Immutable Java-record-Identitydiagnosen und23 originale equalsControls sind
+retained; gleiche Rustallocationidentity wird nicht behauptet. Die tatsächliche
+vollständige Constructor-equals-Partition und mutable Sharing sind verglichen.
+
+Die Originalquellen/Callees sind in
+`server/crates/ferrumc-world/tests/reference/noise_chunk_sources.md` samt vollständigen
+Base/Appliedpins dokumentiert: tatsächliche NoiseChunkconstructor/wrap/wrapNew,
+alle Wrappercompute/fillArray, initialize/advance/select/update/swap/stop,
+Preliminary/Climate sowie DensityFunctions Ap2/MulOrAdd/RangeChoice/
+PureTransformer/TransformerWithContext, Mth.lerp3 und originale RNG/noises.
+`source-pins.json` und die Manifeste pinnen zusätzlich Bibliotheken, JDKmodule,
+offizielle Mappings und vollständige reconstructed sources/featurepatches.
+Quellenbytegleichheit ersetzt wegen des konkret nachgewiesenen nextDouble-
+Bytecodedrifts keine tatsächliche JARabnahme.
+
+Das unabhängige Review fand zwei private Lifecyclelücken, die gezielt korrigiert
+wurden: Update-/Selectaufrufe konnten vor initialisierten Slices laufen; der
+Materialeintritt konnte nach swap stale Cellwerte lesen. Private DriverPhase/
+Columntracking verweigern illegale Übergänge vor Arbeit/Cachemutation. Der enge
+`sample_material`-Eintritt verlangt Running/ZUpdated, und drive verwendet ihn.
+Rohe Originalmarker-/Providerseams bleiben in ihren Sentinel-/selektiven Probes
+unverändert; es wird keine exhaustive private Cellzählung erfunden. Publicdrive
+führt vollständig X/Z/descending-Y/descending-inY/inX/inZ aus und prüft genau
+eine Publikation je Outputslot über ein separates maximal16KiB-Bitmap.
+
+Die Budget-/Speicherkategorien entsprechen der freigegebenen Tabelle. Beispiel
+Seed0/Origin im Messharness vor test-only Tracefeldern: Overworld822Vertices,
+31Wrapper,254Visitorentries,40.528Cachebytes,9.216Scratchbytes und570.916
+Constructorworkunits; Amplified825Vertices und563.000Units, End105Vertices/
+5Wrapper/63Entries/4.032Cachebytes/10.240Scratchbytes/47.196Units. Retained
+Graph-/samplermetadaten werden als tatsächliche `size_of`-Elementbytes mit
+getrennten Limits geprüft. Test-only DeclaredLeaf/Foreignproviderfields erhöhen
+Messharnessmetadaten; daraus folgt keine Prozess-RSS- oder TPSmessung.
+
+Owned Dateien liegen unter `tests/fixtures/noise_chunk_1_21_8/`, Runner und
+Reproduktionsbeschreibung unter `tests/reference/`. Die immutable Exporte sind
+vollständig gehasht: Hauptoracle117files SHA
+`0ece7c737a023744d6124aa5fb3cf5b7d6bf9c53f9af094cf9466ba21dcf4582`,
+Root126 SHA`80e17003c7229cf769bda08a3b90094f27fc9bded97032d1991a294813f6bb20`,
+finiteAddendum42files SHA
+`a111bf5647885c643e8cbdde4b950f6342430ef5191daeca6f02b25a014f163f`.
+Die umgezogenen eigenen Originalrunners bestehen normal und Python−O je27
+konkrete ENV/Bundle/Inner/Library/Source/Mapping/Helper/JDK/Shadow/CodeSource-
+Refusals; das finite Addendum separat je8. Alle26 alten Producer-/Referenceinputs,
+alle5 ursprünglichen .2Oraclefiles und sämtlichen gepinnten Dependencyinputs
+wurden unverändert gehasht (`.codex-tmp/gen05_3-input-check-final.json`).
+
+Wholecrate Debug/Release bestehen jeweils229Tests ohne ignoredTests; Strict
+Clippy und Formatierung bestehen. Die abschließende unabhängige Runtimeprüfung
+und Rootintegration bleiben bis zu ihrer ausdrücklichen CLEAN-Meldung offen.
+Aquifer/materialblocks/fluids/ores folgen erst mit GEN-05.4; Biome/Surface/
+Carvers/Features/Structures, natürliche Generatoridentität/aktive Adoption,
+Licht, Survival/Clients und Java-/Paperplugins bleiben eigene offene Tickets.
+Keine Spielbarkeits-, Vollständigkeits-, RAM- oder TPSverbesserung wird aus
+GEN-05.3 abgeleitet.

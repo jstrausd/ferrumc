@@ -11,8 +11,10 @@ graph metadata. They validate all 35 definitions, including unused graphs.
 explicit seeds. It samples the fifteen original router fields, all 35 named
 definitions and six climate axes in the original empty-Blender point context.
 The executable server still uses the flat generator described below; block
-chunks, interpolation, aquifers, materials, biomes and surfaces need their own
-consumers.
+chunks, aquifers, materials, biomes and surfaces need their own consumers.
+The separately bounded `SeededRouter::fresh_paper_noise_chunk` now executes
+original Paper interpolation, cache wrappers and one complete material-density
+loop, before any aquifer or block selection.
 
 Admission retains both direct/reference `HolderHolder` nodes and distinct raw
 spline-coordinate holders. Bounds are 2 MiB distinct original source bytes,
@@ -58,6 +60,15 @@ compared separately. Vanilla's overflow-prone distant End density is retained
 as this oracle's numerical reference; Paper's widened End path needs separate
 acceptance before an active terrain generator claims Paper parity. No RAM/TPS
 improvement or Survival/plugin completion follows from scalar parity.
+
+The [fresh Paper noise-chunk corpus](tests/reference/noise_chunk.md) compares
+126 complete density arrays and original constructor/cache/provider/Climate
+traces. Sessions own all mutable caches, share one explicit construction/query
+work budget, reject illegal phases before mutation, poison after query failures,
+and rebuild a complete candidate before reset. Public point/noise streams keep
+their original Vanilla policy; the chunk consumer privately follows Paper
+Build 60's widened End radius and float-rounded random offsets. Neither
+consumer creates terrain blocks or activates a natural-world identity.
 
 This crate owns the world's block-storage value types and a flat-world
 generator:

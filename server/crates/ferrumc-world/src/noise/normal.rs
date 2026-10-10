@@ -22,6 +22,21 @@ pub struct NormalNoise {
 }
 
 impl NormalNoise {
+    pub(crate) fn retained_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.first.retained_bytes() + self.second.retained_bytes()
+            - 2 * std::mem::size_of::<PerlinNoise>()
+    }
+    pub(crate) fn paper_build60_basis(
+        &self,
+        work: &mut SampleWork,
+    ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        Ok(Self {
+            first: self.first.paper_build60_basis(work)?,
+            second: self.second.paper_build60_basis(work)?,
+            value_factor: self.value_factor,
+            max_value: self.max_value,
+        })
+    }
     /// Builds original modern named-octave stacks, consuming two positional forks.
     /// All predictable configuration errors precede allocation and RNG mutation.
     pub fn new(
