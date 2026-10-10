@@ -203,7 +203,7 @@ mod tests {
     fn descriptor_metadata_and_capabilities_are_pinned() {
         assert_eq!(FixtureBridge::ID, "ferrumc-fixture-dynamic");
         assert_eq!(FixtureBridge::NAME, "FerrumC Dynamic Fixture");
-        assert!(!FixtureBridge::TARGET.is_empty());
+        assert_ne!(FixtureBridge::TARGET.len(), 0);
         assert_eq!(FixtureBridge::VERSION, FcSemanticVersion::new(1, 0, 0));
         assert_eq!(
             FIXTURE_CAPABILITIES,

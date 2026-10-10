@@ -231,7 +231,7 @@ fn exercise_denied_event(
     assert_eq!(services.requests.len(), 1);
     assert_eq!(services.requests[0].kind(), FcHostRequestKind::DIMENSION);
     assert_eq!(services.requests[0].target(), FcResourceHandle::INVALID);
-    assert!(services.requests[0].payload().is_empty());
+    assert_eq!(services.requests[0].payload().len(), 0);
 }
 
 fn exercise_malformed_and_panic_events(
@@ -258,7 +258,7 @@ fn exercise_malformed_and_panic_events(
                 .expect("invoke malformed player-join fixture event"),
             FC_INVALID_ARGUMENT
         );
-        assert!(services.commands.is_empty());
+        assert_eq!(services.commands.len(), 0);
     }
 
     let panic_status = OwnedEvent::new(
