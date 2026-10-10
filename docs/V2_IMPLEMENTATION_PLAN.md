@@ -19,6 +19,12 @@ und die grobe Aufwandsschätzung stehen im
 die untenstehenden technischen Aufgaben; die bisherige Kapitelnummerierung
 ist keine Vorgabe, erst Minigame-Plugins und später Survival zu implementieren.
 
+Der [Minecraft-Gesamtfeaturekatalog](MINECRAFT_FEATURE_CATALOG.md) ist jetzt der
+kanonische vollständige Zielbacklog mit Inhaltsmatrizen, one-crate Untertickets
+und Agentenboard. Die hier vorhandenen Ticket-IDs und Prüfnachweise bleiben
+referenziert; eine neue Katalogzeile erklärt bestehende Funktionen nicht erneut
+für unimplementiert und erklärt große Gameplay-/API-Pakete nicht vorschnell für fertig.
+
 ## Ziel und Reihenfolge
 
 Das Betreiberziel ist ein speicherschonender, performanter Rust-Spielserver

@@ -6,6 +6,11 @@ Arbeitsbranch: `main`. Dies ist der priorisierte Lieferplan zum Betreiberbericht
 Bogen/PvP, Befehle und fehlerhafte Blockplatzierung. Der technische Einzelbacklog
 bleibt im [v2-Implementierungsplan](V2_IMPLEMENTATION_PLAN.md).
 
+Der neue [Minecraft-Gesamtfeaturekatalog](MINECRAFT_FEATURE_CATALOG.md) ist der
+kanonische Inhalts-/Featurebacklog mit versionsfesten Matrizen, one-crate Tickets,
+Abhängigkeiten, Abnahme und Agentenboard. Dieser Lieferplan bleibt die Grundlage
+für Phasen, kritischen Pfad und die bisherige grobe Aufwandsschätzung.
+
 ## Einordnung des aktuellen Stands
 
 FerrumC ist derzeit eine Entwicklungsgrundlage mit Anmeldung, Chunk-Streaming,
