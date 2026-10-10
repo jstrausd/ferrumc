@@ -1587,7 +1587,7 @@ mod tests {
         let before = watchdog.snapshot();
         assert_eq!(before.health(), WatchdogHealth::Healthy);
         assert_eq!(before.soft_warning_count(), 0);
-        assert!(before.recent_diagnostics().is_empty());
+        assert_eq!(before.recent_diagnostics().len(), 0);
 
         tokio::time::advance(Duration::from_millis(1)).await;
         drive_and_wait(&watchdog, &clock, Duration::from_millis(50));
@@ -1613,7 +1613,7 @@ mod tests {
         assert_eq!(unhealthy_diagnostic.plugin_id(), &PluginId::new("fixture"));
         assert_eq!(unhealthy_diagnostic.hook(), "on_event");
         assert_eq!(unhealthy_diagnostic.shard(), "0,-1");
-        assert!(!unhealthy_diagnostic.callback_thread().is_empty());
+        assert_ne!(unhealthy_diagnostic.callback_thread().len(), 0);
         assert_eq!(unhealthy_diagnostic.elapsed(), Duration::from_secs(1));
 
         tokio::time::advance(Duration::from_secs(9)).await;
@@ -1651,7 +1651,7 @@ mod tests {
         assert_eq!(guard.finish(), WatchdogThreadDisposition::Retire);
         let recovered = watchdog.snapshot();
         assert_eq!(recovered.health(), WatchdogHealth::Healthy);
-        assert!(recovered.active().is_empty());
+        assert_eq!(recovered.active().len(), 0);
         assert_eq!(recovered.recent_diagnostics().len(), 3);
     }
 

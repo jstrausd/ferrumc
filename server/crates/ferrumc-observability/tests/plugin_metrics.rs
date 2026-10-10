@@ -144,7 +144,7 @@ fn plugin_metrics_are_exposed_by_metric_dump_and_server_snapshot_surfaces() {
         .remove("plugin_metrics");
     let legacy: ServerSnapshot =
         serde_json::from_value(legacy_json).expect("legacy server snapshot");
-    assert!(legacy.plugin_metrics.entries().is_empty());
+    assert_eq!(legacy.plugin_metrics.entries().len(), 0);
 
     let round_trip: ServerSnapshot =
         serde_json::from_value(server_json).expect("server snapshot round trip");
