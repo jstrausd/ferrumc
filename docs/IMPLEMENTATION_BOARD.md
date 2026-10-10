@@ -142,7 +142,11 @@ drei Childslots nicht; Root überwacht, prüft und integriert die Ergebnisse.
 
 Root hat die integrierte Runtime `62a5b74d` in einem detached Checkout
 geprüft: 2.304 Tests, 38 Doctests, strict Clippy/fmt und Generatorcheck grün,
-getrennt von aktiven Agentänderungen. Ergebnisse der vierten Welle stehen im
+getrennt von aktiven Agentänderungen. Gesamt-CI für `9025c687`, einschließlich
+UUID-Storageproducer und Densitycompiler, ist erfolgreich:
+[Lauf38080572897](https://github.com/jstrausd/ferrumc/actions/runs/38080572897).
+Die drei laufenden Folgeconsumer sind darin noch nicht enthalten.
+Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.
 

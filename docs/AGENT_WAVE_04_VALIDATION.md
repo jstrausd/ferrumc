@@ -216,8 +216,24 @@ Manifest bytegleich. Die Union misst3102 Vertices/3435 Edges/Depth87.
 Dies ist Struktur-/Codecabnahme und aktiviert noch keine Terrainberechnung.
 
 Diese beiden integrierten Runtimeänderungen sind im älteren CI-Lauf
-`9c35e769` noch nicht enthalten. Ein neuer Lauf muss den tatsächlichen
-veröffentlichten Head prüfen; bis dahin bleibt seine Gesamt-CI offen.
+`9c35e769` noch nicht enthalten. Gesamt-CI für `5ad5f655`,
+[Lauf38079802426](https://github.com/jstrausd/ferrumc/actions/runs/38079802426),
+scheiterte beim Workspace-Clippy: die bisher untypisierte leere Payload-
+Assertion im UUID-Storageintegrationstest wurde durch das gemeinsame
+serde_json-Feature mehrdeutig. Die Crate-Einzelprüfungen hatten diesen
+kombinierten Fehler nicht erfasst. Root reproduzierte ihn auf detached5ad5,
+Log `.codex-tmp/main-ci-repro-red.log`.
+
+Der ausschließlich einzeilige Testfix **`9025c687`** typisiert die leere
+RHS als `&[u8]`; keine Runtimeänderung oder Lintausnahme. Danach unabhängig
+vollständiges Workspace-Alltargetclippy, Workspace-fmt und alle7 UUID-
+Storageintegrationstests grün. Logs
+`.codex-tmp/main-ci-repro-green-{clippy,fmt,uuid}.log`. Gesamt-CI für den
+veröffentlichten Head **`9025c6876100d24d4508f3ca7fab223c0f2cedd1`** ist
+erfolgreich: [Lauf38080572897](https://github.com/jstrausd/ferrumc/actions/runs/38080572897).
+Rust-Workspace, Java-/Plugincontracts, Generator-/Originaldaten-/Claimchecks
+und alle sieben Client-/Neustartgates grün. Die bewegten GEN-05.2-, SIM-03.3-
+und STORAGE-ENTITY001.2-Implementierungen gehören noch nicht zu diesem Lauf.
 
 ## Laufende Folgearbeit
 

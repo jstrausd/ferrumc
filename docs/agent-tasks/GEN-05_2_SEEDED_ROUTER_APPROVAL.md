@@ -13,6 +13,12 @@ den gemeinsamen [GEN-05-Brief](GEN-05_DENSITY_COMPILER_ROUTER.md).
 Die folgenden APIs, Grenzen und Abnahmen sind verbindlich. Produktionscode,
 Seed-/Scalar-/Climate-Goldens und ihre unabhängige Abnahme sind noch offen.
 
+Nach der Freigabe hat Root die getrennte tatsächliche Vanilla-/Paper-
+EndIsland-Helferprobe abgeschlossen:658 Paare,266 Unterschiede, normal/-O
+bytegleich. Der [Referenznachweis](../PAPER_REFERENCE.md#tatsächliche-endisland-helferprobe)
+ergänzt die folgende ursprünglich offene Paper-Evidenz; er verändert den
+freigegebenen Vanilla-Consumeralgorithmus oder seine Finitepolicy nicht.
+
 ## Ergebnis und begrenzter Scope
 
 Die echten Minecraft-1.21.8-Definitionen werden erstmals mit einem expliziten

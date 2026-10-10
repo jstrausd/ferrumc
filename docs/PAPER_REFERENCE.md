@@ -13,6 +13,7 @@ Tests bedeuten nicht, dass die entsprechenden Funktionen bereits laufen.
 | Minecraft | Java Edition 1.21.8, Protokoll 772; dieselbe Version wie FerrumC. |
 | Paper-Server | **1.21.8 Build 60**, Commit `29c8822d90899c89d2689338e81a98f690bcba12`. Die [offiziellen Build-Metadaten](https://fill.papermc.io/v3/projects/paper/versions/1.21.8/builds/60) ordnen diesen Commit dem Build zu. |
 | Paper-Serverartefakt | `paper-1.21.8-60.jar`, 52.811.717 Bytes, SHA-256 `8de7c52c3b02403503d16fac58003f1efef7dd7a0256786843927fa92ee57f1e`. In der dritten Welle vom offiziellen Build-Endpunkt heruntergeladen und Größe/Hash geprüft; lokale Referenz unter `.codex-tmp/paper-runtime-1.21.8-60/`. Noch kein gestarteter Paper-Vergleichslauf. |
+| Gepatchtes Paper-Serverinner | `versions/1.21.8/paper-1.21.8.jar`, SHA-256 `c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507`. Mit tatsächlichem Paperclip `paperclip.patchonly=true` vorbereitet; Inner und119 Libraries gegen Bundle-Metadaten gehasht. Echte EndIsland-Helferproben unten, weiterhin kein Server-/Gameplay-Vergleichslauf. |
 | Bridge-API | `io.papermc.paper:paper-api:1.21.8-R0.1-20250906.215025-55`, festgelegt in [pom.xml](../server/java-bridge/pom.xml). Der API-Pin ersetzt keinen Server-Pin. |
 | Bridge-API-Quellen | [Offizielles Sources-JAR](https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/1.21.8-R0.1-SNAPSHOT/paper-api-1.21.8-R0.1-20250906.215025-55-sources.jar), lokal geprüfte SHA-256 `f9ecfe790b21408eb0c108bc27daab63b104dbb5eb644776f4ca5f270c19050d`. |
 | Basis und Werkzeugkette | Im gepinnten [Server-Build](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/paper-server/build.gradle.kts): Mache `1.21.8+build.2`, Spigot BuildData `436eac9815c211be1a2a6ca0702615f995e81c44`; Java 21. |
@@ -113,6 +114,42 @@ unveränderte Basiszweige und Itemphysik müssen vor V01-Aktivierung zusätzlich
 gelesen und getestet werden.
 
 ## Pflicht vor jeder betroffenen Implementierung
+
+### Tatsächliche EndIsland-Helferprobe
+
+Root hat `EndIslandDensityFunction(long)` und dessen echte `compute`-,
+`minValue`-/`maxValue`-Methoden aus dem offiziellen Vanilla-JAR und dem
+gepinnten gepatchten Paper-JAR aufgerufen. Kein nachgeschriebener Java-
+Algorithmus und kein gestarteter Server: nur tatsächliche Registrybootstrap-
+und Numericalhelper-Pfade. Constructorseed/RNG und Endhöhenrechnung kommen
+aus den Originalklassen. Ihre CodeSource wurde gegen das jeweilige Inner-JAR
+geprüft; ein absichtlich falscher Ursprung verweigert vor Samples/Output.
+
+**658 Paare:7 Seeds ×94 Blockpunkte** einschließlich Vorzeichenwechsel,
+Integerüberlaufgrenzen, Chunk-/Inselgrenzen, ±30M und i32-Yextrema.
+392 bitgleiche Antworten,266 Abweichungen:210 Vanilla-NaNs mit Rawbits
+`fff8000000000000` und56 endliche Unterschiede. Paper liefert in diesem
+Corpus ausschließlich finite Werte. Reverse Requestorder und frische
+Instanzen liefern dieselben Bits, einschließlich des Paper-Cachepfads.
+
+Beispiel Seed0, Blockposition(-524289,0,0): Vanilla `0.5625`
+(`3fe2000000000000`), Paper `-0.440873384475708` (`bfdc374500000000`).
+Paper widenet die erste radiale Distanz nach i64 und verwendet einen eigenen
+8192-Slot-Threadlocalcache. Eine bloße NaN-Verweigerung des Vanilla-Pfads
+behebt seine endlichen Distanzfehler nicht. GEN-05.2s Vanilla-Numericalvertrag
+bleibt getrennt von einer späteren tatsächlichen Paper-Endterrainaktivierung.
+
+Rootartefakte `.codex-tmp/gen05_2-root-paper-end/`, reproduziert nach
+`...-reexport/` und `...-optimized/`: normal und Python `-O` liefern jeweils
+bytegleiche Fixtures, Ergebnisse und vollständige Differenzliste. Vanilla-
+Fixture-SHA256 `903e8ebd571e11da575c7b308ede8799b1dee08141db4782290717489c7c54ce`;
+Paper-Fixture-SHA256 `9510370af48ac8c8bcd5ecb098360afb210ef40b72ee7f60f03ee20634667c76`.
+Neun-Dateien-Freeze `final.freeze.json`, SHA256
+`d27d4bac9ec5870eba58eabf4919cc6382a1846c928d1790b720f7d714bb10ad`.
+Alle120 Paperartefakte und Vanilla-Bundle/Inner/43 Libraries vor/nach gehasht,
+offizielle Mappings gepinnt; Java21.0.12.1+1. Diese Probe belegt Unterschiede
+der beiden Originalimplementierungen, noch keine Rust-Endgenerierung,
+Survival-, Enderdrachen- oder Performanceabnahme.
 
 Für jeden Survival- oder Java-API-Schritt wird im Implementierungsbrief und
 anschließend im Prüfbericht folgende Matrix geführt:
