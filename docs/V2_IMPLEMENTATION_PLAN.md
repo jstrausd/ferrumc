@@ -15,14 +15,17 @@ Prüfbericht und verbleibende Fehler stehen in
 
 ## Ziel und Reihenfolge
 
-Zuerst ein zuverlässig startbarer, administrierbarer Creative-/Minigame-Server
-für **Minecraft Java 1.21.8, Protokoll 772**, einschließlich Pterodactyl.
-Danach sichere öffentliche Anmeldung, brauchbare Plugin-Fassaden und mehr
-Welt-/Inventarfunktionen. Das erweiterte Betreiberziel umfasst inzwischen
-Survival, normales Serververhalten und unveränderte Java-Plugins. Dafür ist
+Das Betreiberziel ist ein speicherschonender, performanter Rust-Spielserver
+mit vollständigem normalem Survival und unveränderten Java-Plugins.
+Die derzeit geprüfte Grundlage spricht **Minecraft Java 1.21.8, Protokoll 772**,
+einschließlich lokal geprüfter Docker-/Pterodactyl-Artefakte. Öffentliche
+Anmeldung, Welt-/Inventarfunktionen und Java-Fassaden werden auf dieser
+Grundlage schrittweise erweitert. Dafür ist
 der Rust-Kern mit Java-Sidecar gemäß
 [ADR-0009](adr/0009-java-plugin-compatibility.md) ausgewählt; diese Funktionen
-sind nicht durch den bisherigen Hosting-PR erledigt.
+sind nicht durch den bisherigen Hosting-PR erledigt. Der Auftrag umfasst
+die weitere Implementierung; neue Arbeit bleibt auf `main` und wird jeweils
+mit Vertrag, Fehlerpfaden und unabhängiger Abnahme veröffentlicht.
 
 Jeder Implementierungsschritt verändert eine Produktions-Crate; bei Bedarf
 kommt `ferrumc-testkit` für Testinfrastruktur hinzu. Änderungen über mehrere
@@ -35,11 +38,11 @@ Protokolldateien werden ausschließlich über den Generator geändert.
 | --- | --- | --- |
 | Offline-Anmeldung, Version, Spieleridentität | `app/src/connection/mod.rs`, `app/tests/login_boundaries.rs`, `canonical_identity.rs` | Keine Mojang-Anmeldung oder aktive Verschlüsselung. |
 | Paketbudgets und Zugangskontrolle | `connection/serverbound_budget.rs`, `app/tests/ops_access.rs` | Gleichzeitige Verbindungen je IP begrenzt; zeitliche Verbindungsversuche noch nicht begrenzt. |
-| Spielerzustand | `app/src/player_data.rs`, `app/tests/player_state_persistence.rs`, `server_teleport_persistence.rs` | Speichern bei Leave/Shutdown; Item-Komponenten werden nicht erhalten. |
-| Welt-Persistenz | `app/src/storage_worker.rs`, `app/tests/leave_rejoin_persistence.rs`, `overlay_multi_section_persistence.rs` | Overlays, Journal, Retry und Flush-Barrieren vorhanden; Recovery-Verfahren bleibt zu prüfen. |
+| Spielerzustand | `app/src/player_data.rs`, `player_data/codec.rs`, `app/tests/player_component_persistence.rs`, `server_teleport_persistence.rs` | Schema 3 erhält alle 46 Slots plus Cursor einschließlich unterstützter Komponenten; Speichern bei Leave/Shutdown, periodische Checkpoints bleiben S01. |
+| Welt-Persistenz | `app/src/storage_worker.rs`, `ferrumc-sim/src/loaded.rs`, `ferrumc-storage/src/record.rs`, `app/tests/leave_rejoin_persistence.rs` | Produktive Checked-Capture-/Apply-Pfade erhalten Komponenten; Journal, Retry und Flush-Barrieren vorhanden. Crash-Recovery über mehrere Records bleibt S03; experimenteller Scheduler verwendet noch Legacy-Capture. |
 | Anvil-Import | `app/src/world.rs`, `ferrumc-anvil/tests/import.rs` | Blöcke, einfache Schilder, leere Truhen; kein Export, keine vollständige Weltkonvertierung. |
 | Platzierung | `ferrumc-placement/src/lib.rs`, `app/tests/placement_rotation.rs` | Bereits Türen, Betten, Slab-Merge, Treppenecken, Verbindungen und Waterlogging; keine vollständige Blockphysik. |
-| Truhen und Schilder | `app/src/window.rs`, `app/tests/signs.rs`, `block_entity_persistence.rs` | Truhen unterstützen einen Teil der Klickarten; Spielerfenster 0 synchronisiert bislang nur zurück. |
+| Truhen und Schilder | `app/src/window.rs`, `app/tests/signs.rs`, `block_entity_persistence.rs` | Truhen unterstützen Linksklicks; Spielerfenster 0 unterstützt normale Links-/Rechtsklicks. Rezepte, Shift-/Drag-/Zahlentasten-Klicks fehlen. |
 | Multiplayer und Ausrüstung | `app/tests/multiplayer_visibility.rs`, `app/src/inventory.rs` | Spieler sichtbar, Rotation, Haupthand, Rüstung/Offhand vorhanden; übrige Entity-Systeme fehlen. |
 | Befehle und Darstellung | `app/src/command.rs`, `ferrumc-sim/src/shard.rs` | Unter anderem `/tp`, `/time`, `/weather`, `/fill`, `/replace`, `/undo`, Titel, Sound, Partikel, Scoreboard, Teams, Bossbar vorhanden; kein kompletter Vanilla-Befehlssatz. |
 | Trusted native plugins | `app/src/plugins.rs`, `app/tests/trusted_native_plugin.rs`, `ferrumc-plugin-loader` | Versionierte C-ABI, Manifest-/Hash-/Zielprüfung, Events, Intents und Block-Veto vorhanden; weitere Fassaden nicht im App-Laufzeitpfad angeboten. |
@@ -52,7 +55,7 @@ Protokolldateien werden ausschließlich über den Generator geändert.
 | --- | --- | --- | --- |
 | H01 | P0 / umgesetzt | Build-Anleitung, auditierter Plan, dokumentierte Prüfergebnisse. | Frischer Checkout wird aus `server/` mit `--locked` gebaut; Plan nennt vorhandene Funktionen und echte Lücken. |
 | H02 | P0 / lokal geprüft | Mehrstufiges Container-Image, separates Installer-Image und importierbares Pterodactyl-Egg. | Nicht-root-Laufzeit, `/home/container`, konfigurierter Allocation-Port, persistente Daten, Ready-Erkennung, SIGINT/SIGTERM und Reinstall ohne Datenüberschreiben lokal geprüft; Installer ohne Entrypoint-/User-Override wie bei Wings gestartet. |
-| H03 | P0 / lokal und auf GitHub geprüft | Rust 1.99.0 fest gepinnt; vorhandene Lintfehler crateweise behoben; CI für `main` mit Java- und unabhängigen Client-Gates verdrahtet. | GitHub-Lauf [38043766725](https://github.com/jstrausd/ferrumc/actions/runs/38043766725) für `44f81bea` vollständig bestanden. Der zusätzliche Inventarcursor-Gate ist im Workflow verpflichtend; Ergebnisse neuer Commits werden separat protokolliert. |
+| H03 | P0 / lokal und auf GitHub geprüft (Basisstand) | Rust 1.99.0 fest gepinnt; vorhandene Lintfehler crateweise behoben; CI für `main` mit Java- und unabhängigen Client-Gates verdrahtet. | GitHub-Lauf [38046184757](https://github.com/jstrausd/ferrumc/actions/runs/38046184757) für `7333f404` vollständig bestanden. Inventarcursor- und Java-Gates sind verpflichtend; die abschließenden Gates der späteren N02/I03/S02-Arbeit werden im Prüfbericht separat festgehalten. |
 | H04 | P1 / offen | Fork-eigene CI-Branch-Regeln und Release-Pipeline für glibc Linux x86_64/aarch64. | Commit/Version im Artefakt, Prüfsummen, Image-Digest, native Plugin-Ziel dokumentiert; Egg verwendet veröffentlichtes, geprüftes Image. |
 | H05 | P1 / offen | Backup-/Restore- und Upgrade-Verfahren. | Kopie nach sauberem Stop wird auf leerer Instanz wiederhergestellt; Welt, Spieler und unterstützte Plugin-Daten werden geprüft. Schemawechsel hat Test und Rückweg. |
 
@@ -65,17 +68,17 @@ nicht. Ein v1-Release darf nicht als v2-Artefakt installiert werden.
 | ID | Priorität / Status | Arbeit und Zuständigkeit | Abnahme |
 | --- | --- | --- | --- |
 | N01 | P0 / umgesetzt (Play) | In `ferrumc-app` vorhandene `ConnectionLiveness` für Play-Keep-alive verdrahtet; zuvor wurden Antworten in `connection/handlers.rs` ignoriert. | Genau eine offene ID; richtige Antwort akzeptiert, falsche/unangeforderte/wiederholte Antwort abgewiesen. Absolute Antwortfrist trotz Timer-/Outbound-Aktivität; abbrechbare Socket-/Chunk-Waits begrenzt. Tests mit angehaltener Tokio-Zeit plus echtem Socket. |
-| N02 | P0 / offen | Absolute Handshake-/Login-/Configuration-/Teilframe-Fristen verdrahten (`ferrumc-app`; vorhandene Net-Policy wiederverwenden). | Slowloris, minimale Teilbytes und unbekannte Pakete verlängern keine Deadline; gültige Fortschritte und Netzwerk-Fragmentierung bleiben erlaubt. |
+| N02 | P0 / umgesetzt | Absolute Handshake-/Login-/Configuration-/Teilframe-Fristen (`ferrumc-app`; vorhandene Net-Policy wiederverwendet). | Nur semantischer Phasenwechsel erneuert das konfigurierte Fenster. First-Byte-Teilframefrist maximal 10 Sekunden; gepipelinete Reste behalten den Empfangszeitpunkt. Paused-Clock- und echte Socket-Abnahme prüfen Stalls, Unknown-ID-Flood, Shutdown und freie Verbindungskapazität. |
 | N03 | P1 / offen | Teleport-IDs und ausstehende Bestätigung serverseitig verfolgen (`ferrumc-app`). | Fremde/veraltete Bestätigung akzeptiert keine neue Position; Timeout und `/tp` während offener Bestätigung definiert. |
 | N04 | P1 / offen | Begrenzung neuer Verbindungsversuche je IP in `ferrumc-net`, dann separater App-Wiring-Schritt. | Bounded IP-Tabelle mit Ablauf, Burst-/Refill-Tests, genaue Ablehnungszähler; bestehendes Gleichzeitigkeit-Limit bleibt separat. |
 | N05 | P1 / offen | Vorhandene strengere `PlayIngress`-/Bytebudget-Regeln in den App-Laufzeitpfad integrieren. | Große Frames, komprimierte Daten und unbekannte Pakete beanspruchen begrenzte Bytes/CPU; Paketanzahl-Budget bleibt zusätzlich aktiv. |
 | N06 | P1 / offen | Fristen und einen sicheren Abbruchvertrag für zustandsändernde Handler-/Container-Waits definieren (`ferrumc-app`). | Verzögerte Simulation oder Speicherung blockiert eine Verbindung nicht unbegrenzt; Abbruch verliert oder dupliziert keine Items und lässt keine halb abgeschlossene Transaktion zurück. |
-| I01 | P0 / umgesetzt und geprüft | `PlayerInventory` besitzt den einzigen Cursor; Fenster-Schließen und Disconnect behalten Einzahlungsreste. Spielerdaten-Schema 2 speichert den Cursor, Schema 1 migriert mit leerem Cursor. UUID-Reserve vor dem Load bis nach Save/Leave-Ack; fehlgeschlagene Saves/unklare Freigaben sperren die UUID bis zum Neustart. | Unabhängiger Client bestätigt volle Tasche, falsche/veraltete IDs, Fensterwechsel, doppelte Anmeldung, Rejoin, zwei Neustarts und exakte Gesamtmenge. Komponenten bleiben während der Verbindung erhalten; Neustart-Vertrag beschränkt sich bis S02 auf Item-ID/Anzahl. Spawn-Tickets werden nach tatsächlicher Erwerbsantwort erfasst; Review, Workspace- und aktuelle Client-Abnahmen bestanden; Details im Prüfbericht. |
+| I01 | P0 / umgesetzt und geprüft | `PlayerInventory` besitzt den einzigen Cursor; Fenster-Schließen und Disconnect behalten Einzahlungsreste. S02 erweitert die bisherigen ID-/Anzahl-Saves auf Schema 3 einschließlich Komponenten; JSON 1/2 migrieren ausdrücklich. UUID-Reserve vor dem Load bis nach Save/Leave-Ack; fehlgeschlagene Saves/unklare Freigaben sperren die UUID bis zum Neustart. | Unabhängiger Client bestätigt volle Tasche, falsche/veraltete IDs, Fensterwechsel, doppelte Anmeldung, Rejoin, zwei Neustarts und exakte Gesamtmenge am Basisstand. Spawn-Tickets werden nach tatsächlicher Erwerbsantwort erfasst. Die zusätzliche Komponenten-/Restart-Abnahme und aktuellen Gates sind unter S02 und im Prüfbericht dokumentiert. |
 | I02 | P0 / umgesetzt | Truhen-Klick-State-ID und Fensterzustand prüfen (`ferrumc-app`); Chest-Snapshot im Driver atomar vergleichen. | Veraltete/falsche Fenster-ID oder State-ID mutiert nichts und synchronisiert Slots/Cursor zurück. Bei Konflikt bleibt der Cursor unverändert; echte Zwei-Client-Regressionsabnahme bestanden. Proaktive Viewer-Updates bleiben I04. |
-| I03 | P1 / offen | Normale Links-/Rechtsklicks für Spielerfenster 0; danach Shift-, Zahlentasten-, Drag-/Split-Klicks in einzelnen Schritten (`ferrumc-app`). | Item-Erhaltung für jedes Klickmodell, manipulierte clientseitige Änderungen zurückweisen, begrenzte Verarbeitung. |
+| I03 | P1 / erste Stufe umgesetzt | Serverautoritative Links-/Rechtsklicks für Spielerfenster 0 inklusive Komponenten, Offhand und Cursor. | Unit-/Socket-/unabhängige Client-Abnahme prüft Split/Merge/Swap, State-ID und volle Tasche. Spectator verändert weder Spieler- noch Truhenslots. Crafting-Ergebnis bleibt read-only, Armor-Inserts abgewiesen; Shift-, Zahlentasten-, Drag-/Drop-Klicks, Rezepte und Equippable-/Binding-Regeln bleiben offen. |
 | I04 | P1 / offen | Offene Truhenfenster aller Betrachter nach einer Mutation aktualisieren. | Zwei Spieler sehen dieselben Slots/Versionen ohne zusätzlichen Klick; konkurrierende alte Klicks werden zurückgewiesen. |
 | S01 | P1 / offen | Periodische Spieler-Checkpoints (`ferrumc-app`). | Bounded/off-thread Speicherung mit definiertem maximalem Verlustfenster; Fehler werden sichtbar; alter Datensatz bleibt bei fehlgeschlagenem Laden unverändert. |
-| S02 | P1 / offen | Item-Komponenten verlustfrei speichern: zuerst Welt-Codec (`ferrumc-world`), dann Spielerdaten (`ferrumc-app`). | Namen, Verzauberungen und unterstützte Komponenten bleiben nach Restart identisch; Schema-/Längen-/Malformed-Tests und Migration. |
+| S02 | P1 / umgesetzt und lokal geprüft | Eigenständiger bounded Item-Codec, versionierter Welt-Codec und produktive Checked-Verbraucher in Storage/Sim/App verdrahtet. Spieler-Schema 3 enthält 46 Slots plus Cursor mit vollständiger unterstützter Darstellung. | Schema-/Migration-/Malformed-/Grenzwerttests, Redb-Reopen und Socket-Restart-Fixtures prüfen Komponenten, opaque Payloads, Removals, NBT-Reihenfolge und Floatbits. Fehler behalten Dirty-/Journal-/Ticket-Verantwortung. Elternrecords und Queues begrenzen kodierte Bytes; Lokale Workspace-, Socket- und unabhängige Client-Abnahme bestanden; CI wird commitbezogen im Prüfbericht verlinkt. |
 | S03 | P1 / offen | Journal-Recovery-Audit und Wiederanlaufpfad (`ferrumc-storage`, danach App-Wiring separat). | Commit-/Overlay-/Journal-Cutpoints deterministisch prüfen, Recovery mehrfach gleiches Ergebnis; keine unbewiesene Crash-Durability-Garantie. |
 
 M1 ist fertig, wenn diese P0-Lücken geschlossen sind, die Regressionen grün
@@ -83,6 +86,27 @@ sind und der unabhängige Client Join, Bauen, Rejoin und Restart bestätigt.
 N01 unterbricht nur nachweislich abbrechbare Socket-/Chunk-Waits. Zustandsändernde
 Handler und Containertransaktionen dürfen zunächst fertiglaufen, damit die
 Inventar-Persistenz konsistent bleibt; ihre begrenzte Abwicklung ist N06.
+
+Der S02-Speichervertrag verwendet für Spieler ein `FCPS`-Schema-3-Envelope
+mit genau 47 `FCIS`-Itemrecords (46 Slots plus Cursor) und höchstens 1 MiB
+Gesamtpayload. JSON-Schemas 1/2 migrieren nur im Speicher mit ihrer bisherigen
+Normalisierung; Laden schreibt nichts zurück. Alte Saves enthalten keine
+Komponenten, die durch Migration wiedergewonnen werden könnten. Nur ein
+bestätigter Storage-Miss erlaubt frische Spielerdaten; kaputte, zu große oder
+unbekannte Datensätze werden abgewiesen.
+
+Eine Block-Entity teilt höchstens 16 KiB auf ihre Inhalte auf. Alle Entities
+eines Chunks teilen einen 2-MiB-Tail einschließlich Positionen und Längen;
+ein vollständiger Chunk-/Overlayrecord hat höchstens 3 MiB. Der Driver
+erfasst höchstens vier Overlays je Übergabe; die Queue besitzt acht Slots,
+der Worker schreibt ab 8 MiB an wartenden kodierten Overlaybytes oder seinen
+bestehenden Count-/Zeitgrenzen. Fehlerhafte späte Captures lassen die ganze
+ausgewählte Dirty-Gruppe, Journal und ID-Zähler unverändert. Release-Barrieren
+bestätigen alle Teilbatches vor dem letzten Ticket, Shutdown drainiert alle
+verbliebenen Batches. Diese Grenzen beschreiben kodierte Bytes und keine
+RSS-Obergrenze. Der experimentelle Scheduler verwendet weiterhin den
+Legacy-Capture; Crash-Atomizität zwischen Spieler-, Overlay- und Journalrecords
+ist S03 und gehört nicht zu diesem Implementierungsschritt.
 
 ## M2 — Öffentliche Anmeldung und Betrieb
 
@@ -141,14 +165,50 @@ und anschließend einen eigenen App-Schritt. Kein einzelner PR über alle Crates
 | W09 | Block-/Random-Ticks, Fluids und Nachbarphysik in begrenzten Einzelaufgaben. | Reproduzierbare Reihenfolge, Arbeitsbudget, grenzüberschreitende Updates und Persistenz. |
 | W10 | Weltzeit, Wetterdauer und Gamerules speichern. | `/time`-/`weather`-Zustand übersteht Restart; Tagesfortschritt und Pakete entsprechen der gespeicherten Basis. |
 
-W06–W09 sind bewusst spätere Arbeiten; sie ändern die heutige CreativeCore-Scope
-und dürfen nicht nebenbei in die Hosting-Grundlage aufgenommen werden.
+W06–W09 gehören zum ausdrücklich angeforderten Survival-Ziel. Sie folgen
+den Inventar-, Komponenten- und Tick-Grundlagen in eigenen geprüften Schritten.
+
+## Performancevertrag
+
+Rust ist eine technische Grundlage, kein gemessener Vorteil gegenüber Paper.
+Jede Messung nennt Commit/Binary-Hash, Release-Build, Hardware, Konfiguration,
+Weltumfang, Clientanzahl und Arbeitslast. Native-only und Java-Bridge werden
+getrennt und gemeinsam gemessen: RSS des Rust-Prozesses, RSS der JVM, gesamte
+Prozessgruppe, CPU-Zeit, Startup/Join und Tickverteilung. Eine kleinere Heapgrenze
+ist keine Messung des realen Speicherverbrauchs. Summiertes RSS kann gemeinsam
+benutzte Seiten mehrfach zählen; die Messmethode muss dies ausweisen.
+
+Ziel sind stabile 20 TPS im jeweils festgelegten Szenario, begrenzte Queues und
+Cache-/Chunk-Lebensdauern sowie wenig Leerlaufarbeit. Der instrumentierte
+Driverabschnitt ist kein vollständiger MSPT-Nachweis. Leistungsvergleiche sind
+erst bei gleichem Funktionsumfang, Welt, Sichtweite, Plugins und Arbeitslast
+belastbar. Fehlende Survival-Systeme dürfen nicht als Geschwindigkeitsgewinn
+gezählt werden. Ausgangsmessungen sind noch keine Kapazitäts- oder
+Produktionszusagen.
+
+Java-APIs sollen gebündelte, begrenzte Datenübertragungen verwenden, wenn der
+synchrone API-Vertrag dies erlaubt. Asynchrone Plugin-Aufgaben bekommen eigene
+Arbeitsgrenzen; wiederholte Java/Rust-Kopien und ein RPC pro Block sind explizite
+Messpunkte. Native-only Betrieb startet weiterhin keine JVM. Survival und
+Kompatibilität werden zusammen mit den Ressourcenmessungen ausgebaut.
+
+Die [Release-Ausgangsmessung vom 10.10.2026](../tests/performance/results/2026-10-10/README.md)
+verwendet den eingefrorenen Basisstand `7333f404`, vor N02/I03/S02.
+Bei acht stehenden Clients: Rust-RSS nativ 21,48–21,70 MiB,
+Rust plus JVM mit Bukkit-Fixture 108,41–108,72 MiB; CPU der Serverprozesse
+1,90–1,93 % eines logischen Kerns. Über die Messfenster lagen die effektiven
+TPS bei 19,964–20,032. Es gab keine aktive Bewegung, Survival-Systeme oder
+Plugin-Arbeitslast. Diese Werte sind eine reproduzierbare Regressionsbasis;
+die aktuelle Implementierung und ein gleichwertiger Paper-/Survival-Workload
+müssen getrennt gemessen werden.
 
 ## M5 — Skalierung erst nach Messung
 
 1. Referenzmessungen: Startup, Join-Sturm, Bewegung, aktive Builder, Plugin-Hooks,
    Chunk-Import und langsamer Storage. Hardware, Commit, Config, TPS/Tick-p95/p99,
    RAM und Queue-Tiefen festhalten; keine Spielerzahl versprechen ohne Messung.
+   Die stehende Release-Ausgangsmessung ist vorhanden; aktive Szenarien und
+   Messungen der neuen S02-Verbraucher bleiben offen.
 2. Bestehenden `TickScheduler` prüfen und Simulation auf den vorgesehenen eigenen
    Executor bringen. Heute wird eine weltweite Simulationsinstanz vom App-Driver
    bedient. Vor einer Mehr-Shard-Verdrahtung Inputs, Outputs, Storage und
@@ -164,20 +224,28 @@ und dürfen nicht nebenbei in die Hosting-Grundlage aufgenommen werden.
 
 ## M6 — Survival / weitere Vanilla-Parität (angefordertes Ziel)
 
-Diese Bereiche sind überwiegend noch nicht vorhanden und setzen M1, Welt-Ticks,
-Item-Komponenten und ein belastbares Entity-/Inventory-Modell voraus:
+Diese Bereiche sind noch nicht vollständig vorhanden und setzen M1, Welt-Ticks,
+Item-Komponenten und ein belastbares Entity-/Inventory-Modell voraus.
+Jede Zeile wird vor der Umsetzung in einzelne Crate-Aufgaben geteilt.
 
-- Survival-Inventar vollständig, Crafting/Rezepte, Furnace/Smelting, Hopper und
-  weitere Container; Transaktionen erhalten Items und erlauben keine Dupes.
-- Item-Entities, Pickup, Despawn, Projektile, Kollision und Entity-Metadaten.
-- Gesundheit, Schaden, Angriff/Knockback, Hunger, Nahrung, Erfahrung,
-  Tod/Respawn und serverseitig durchgesetzte Bewegungs-/Flugfähigkeiten.
-- Mob-Spawn, KI, Navigation und Loot; anschließend weitere Entity-Typen.
-- Redstone, Tick-Reihenfolge, Kolben und komplexe Blockphysik.
-- Vollständige Biome/Features/Caves/Structures und Licht-Parität, falls das
-  Produktziel später Vanilla-Parität wird.
-- Signed Chat/Chat-Sessions, Resource-Pack-Antwortpfad, Skins/Profil-Properties,
-  Maps und restlicher Command-/Packet-Surface für genau Protokoll 772.
+| ID | Arbeit / Voraussetzung | Verhaltens- und Ressourcenabnahme |
+| --- | --- | --- |
+| V01 | Item-Entities, Drop/Pickup/Despawn, Kollision und Entity-Metadaten; nach S02. | Items bleiben über Inventar/Welt/Restart erhalten; gleichzeitiger Pickup zählt genau einmal. Entityzahl und Arbeitsmenge je Tick begrenzt, Heap je Entity gemessen. |
+| V02 | Mining, Tools, Abbauzeiten, Haltbarkeit und Loot; nach V01. | Server bestimmt Werkzeug, Fortschritt und Drops; Abbruch, falsche Reichweite und wiederholter Abschluss erzeugen keine Items. |
+| V03 | Rezeptregistrierung, Crafting-Ergebnis und sämtliche Inventar-Klickarten; nach I03/S02. | Ingredient-/Result-Mengen und Komponenten, Repeated-/Shift-Crafting, Recipe-Book sowie Abbruch/Close/Restart mit unabhängigen Rezept-Fixtures geprüft. |
+| V04 | Gesundheit, Schaden, Angriff/Knockback, Tod/Respawn und Erfahrung. | Tick-/Damage-Reihenfolge, Rüstung, Immunitätsfenster, XP-/Inventarerhalt und Respawn mit echten Clients geprüft; kein unbegrenzter Entity-Scan je Treffer. |
+| V05 | Hunger, Sättigung, Exhaustion, Essen, Regeneration und Effekte; nach V04. | Vanillanahe tickbasierte Abläufe, Item-Verbrauch, Tod und Persistenz. Kosten werden bei stehenden und aktiven Spielern getrennt gemessen. |
+| V06 | Serverseitige Bewegungs-/Flugfähigkeiten, Flüssigkeits-/Fallverhalten und Projektile. | GameMode, Teleports, Kollision und Schaden verwenden denselben autoritativen Zustand; keine Client-Behauptung erzeugt Flugrechte oder Treffer. |
+| V07 | Furnace/Smelting, Hopper und weitere Container; nach W09/V03. | Tickzeit, Brennstoff, Inputs/Outputs, Nachbartransfer und Restart konservieren Items; begrenzte aktive Containerlisten statt Scans aller geladenen Blöcke. |
+| V08 | Mob-Spawn, KI, Navigation und Loot; nach V01/V04/W06/W07. | Arten-, Spawn-/Despawn- und Pfadbudget, Sichtbarkeit, Kampf und Restart; Ressourcen bei gleicher Mobzahl und aktivem Terrain messen. |
+| V09 | Redstone, Tick-Reihenfolge, Kolben und komplexe Blockphysik; nach W09. | Kleine unabhängige Schaltungs-Fixtures, Chunk-Grenzen und Wiederanlauf; Update-Floods haben Arbeitsgrenzen und definierte Fortsetzung. |
+| V10 | Vollständige Biome, Caves, Features, Structures und Licht-Parität; W06–W08. | Versionierter Seed-/Generatorvertrag, Dimensionen und unabhängige Welt-Fixtures; Generate/Load/Unload-RAM und CPU getrennt messen. |
+| V11 | Signed Chat/Sessions, Resource-Packs, Skins/Profile, Maps und restlicher Command-/Packet-Surface. | Für Protokoll 772 eigene Client-/Authentifizierungs-Fixtures; unsupported Inhalte bleiben sichtbar statt stillschweigend zu verschwinden. |
+
+Ein Survival-Meilenstein erfordert einen echten Ablauf von neuer Welt über
+Ressourcenabbau, Crafting, Nahrung, Kampf und Tod/Respawn bis zum Neustart.
+Seine RAM-/CPU-/Tickmessung nennt die aktive Welt, Chunks, Entities und Plugins;
+ein bestandener Einzeltest ersetzt diesen vollständigen Ablauf nicht.
 
 Für jedes Thema wird vor Implementierung ein eigener Umfang mit unabhängigen
 Client-/Welt-Fixtures definiert. Ein großer Sammel-PR wäre weder prüfbar noch

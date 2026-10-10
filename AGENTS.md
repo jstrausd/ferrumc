@@ -16,8 +16,8 @@
 - **Repo:** github.com/jstrausd/ferrumc (upstream: github.com/ferrumc-rs/ferrumc)
 - **Branch:** main; the fork has one working branch
 
-The operator explicitly expanded the target to normal server behavior and
-unmodified Java plugins. Follow [ADR-0009](docs/adr/0009-java-plugin-compatibility.md)
+The operator explicitly expanded the target to complete normal survival,
+unmodified Java plugins, and low memory/CPU use measured at equivalent scope. Follow [ADR-0009](docs/adr/0009-java-plugin-compatibility.md)
 for the chosen Rust/Java architecture and verified compatibility contracts.
 The current implementation still uses trusted native plugins. Keep requested
 future support separate from behavior actually implemented and tested.

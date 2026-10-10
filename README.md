@@ -11,7 +11,7 @@ A high-performance Minecraft Java Edition server implementation written in Rust.
 
 FerrumC v2 provides a deterministic Rust creative/minigame core for
 **Minecraft: Java Edition 1.21.8** clients. This fork is expanding that core
-toward normal server behavior and unmodified Java plugins. Rust owns the world
+toward complete Survival, low memory/CPU use and unmodified Java plugins. Rust owns the world
 and networking; an optional Java 21 adapter implements the first tested Paper
 API subset.
 
@@ -35,8 +35,11 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 - A flat creative world; build by placing blocks from the hotbar with **correct block states** — logs/slabs/stairs/torches/fences rotate and orient the way a real client expects.
 - Multiplayer: other players are visible and move, **face the right way** (body + head rotation), and you can **see their held main-hand item**.
 - In-game chat and `/` command autocomplete (`/spawn`, `/gamemode`, permission-filtered).
+- Server-authoritative normal left/right player-inventory clicks with component-preserving split/merge/swap, offhand updates and cursor resync. Spectators cannot exchange inventory or chest items. Recipes and additional click modes remain unfinished.
+- Absolute pre-Play phase and first-byte frame deadlines; ignored traffic and partial byte drips cannot renew them.
 - Persistence across **leave/rejoin and restart** — placed blocks stick.
-- Player position, game mode, hotbar, inventory and retained full-bag cursor are loaded/saved on join/leave/shutdown. Schema 1 migrates to schema 2; item components are currently omitted from persistence.
+- Player position, game mode, hotbar, all 46 inventory slots and the retained full-bag cursor are loaded/saved on join/leave/shutdown. Schema 3 preserves supported item components, opaque payloads, removals and NBT details; JSON schemas 1/2 migrate explicitly without rewriting on load.
+- Checked chest/overlay persistence preserves supported components across reloads. Invalid or oversized contents reject the complete capture/load. Dirty ownership transfers only after successful capture and queue admission; last chunk tickets release only after the durability barrier succeeds.
 - Limited startup import of Anvil blocks, plain signs and empty chests.
 - Built-in and **trusted native plugins** with events, mutation intents and block-edit decisions through a versioned C ABI. Dynamic bundles are target-specific and require a manifest and pinned library hash; additional host facades remain unfinished.
 - Optional ordinary Bukkit `plugin.yml` JARs: lifecycle and configuration, declared commands/aliases, plugin argument completion, current-player identity/messages, Rust command permissions, and join/quit listeners. Unsupported Java APIs report concrete errors; see the [tested API contract](server/java-bridge/README.md).
@@ -48,12 +51,22 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 - Offline mode only — no online-mode authentication/encryption.
 - Full-bright lighting (placeholder, no light engine).
 - No survival, mobs, redstone, or full vanilla parity.
-- Player inventory clicks and component persistence need further work. Cursor conservation is tested for normal closes, rejoin and successful graceful saves; player/chest crash-atomicity remains unfinished.
+- Recipes, armor insertion rules, shift/drag/number-key/drop clicks need further work. Full-bag crafting input overflow stays in its input slot until ground-item entities exist. Components omitted by older saves cannot be recovered. Atomic crash recovery across player, chest/overlay and journal records remains unfinished; the experimental scheduler still uses the legacy persistence path.
 - Java world/entity/inventory APIs, scheduler, full Bukkit permissions, Paper bootstrap and NMS integration need further work.
 
-**Roadmap:** reliable hosting and connection handling, state correctness,
-online-mode authentication, fuller plugin facades, world import/export, and
-lighting. See the [prioritized plan](docs/V2_IMPLEMENTATION_PLAN.md).
+**Roadmap:** build the remaining Survival systems on the inventory/component
+foundation: ground items, mining/loot, recipes, health/hunger/combat, entities,
+world ticks and lighting. Online authentication and Java world/inventory/event
+facades follow their corresponding Rust behavior. See the
+[prioritized plan](docs/V2_IMPLEMENTATION_PLAN.md).
+
+Resource measurements use the [process baseline harness](tests/performance/README.md)
+to record Rust and the optional JVM separately. The frozen Release
+[`7333f404` baseline](tests/performance/results/2026-10-10/README.md) measured
+21.48–21.70 MiB Rust RSS with eight standing clients; Rust plus the Java host and
+Bukkit fixture used 108.41–108.72 MiB. These runs exercised no active gameplay
+and predate the current S02 changes. Rust can offer resource advantages, but a
+Paper comparison requires equivalent gameplay, worlds, plugins and load.
 
 See `docs/architecture/overview.md` for the design, [`docs/public-alpha.md`](docs/public-alpha.md) for the public-alpha checklist, and `CLAUDE.md` for development instructions.
 
