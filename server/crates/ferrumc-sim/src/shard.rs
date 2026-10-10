@@ -318,6 +318,8 @@ impl SimShard {
     /// Creates an empty shard for `shard_pos` with the default inbox capacity in
     /// the default single overworld (world `0`, dimension `0`). Use
     /// [`in_dimension`](SimShard::in_dimension) to place the shard elsewhere.
+    /// This source-compatible constructor selects the explicit metadata-free
+    /// legacy path; metadata consumers use [`Self::with_generation`].
     pub fn new(shard_pos: ShardPos) -> Self {
         Self::build(
             shard_pos,
@@ -333,14 +335,39 @@ impl SimShard {
     /// `capacity` is a [`NonZeroUsize`] so a zero-capacity (permanently full)
     /// inbox is unrepresentable. The inbox pre-allocates this capacity once and
     /// never grows beyond it.
+    /// The chunks use the explicit legacy metadata-free mode.
     pub fn with_inbox_capacity(shard_pos: ShardPos, capacity: NonZeroUsize) -> Self {
         Self::build(shard_pos, DEFAULT_WORLD, DEFAULT_DIMENSION, capacity)
     }
 
     /// Creates an empty shard for `shard_pos` owning chunks in an explicit
     /// `world` and `dimension`, with the default inbox capacity.
+    /// This is the explicit legacy metadata-free path. Use
+    /// [`Self::with_generation`] for descriptor-bearing metadata admission.
     pub fn in_dimension(shard_pos: ShardPos, world: WorldId, dimension: DimensionId) -> Self {
         Self::build(shard_pos, world, dimension, DEFAULT_INBOX_CAPACITY)
+    }
+
+    /// Creates an empty shard with an explicit generated-baseline declaration.
+    ///
+    /// The declaration is not proof of initialized store metadata. Acquires and
+    /// checked persistence captures validate the actual target store. No store
+    /// handle or generation authorization is retained by the shard.
+    pub fn with_generation(shard_pos: ShardPos, binding: crate::GenerationBinding) -> Self {
+        Self::with_generation_and_inbox_capacity(shard_pos, binding, DEFAULT_INBOX_CAPACITY)
+    }
+
+    /// Creates a bound shard with an explicit nonzero inbox capacity.
+    pub fn with_generation_and_inbox_capacity(
+        shard_pos: ShardPos,
+        binding: crate::GenerationBinding,
+        capacity: NonZeroUsize,
+    ) -> Self {
+        Self::build_with_chunks(
+            shard_pos,
+            LoadedChunkMap::with_generation(binding),
+            capacity,
+        )
     }
 
     /// Shared constructor: builds a shard with every field initialized.
@@ -350,12 +377,24 @@ impl SimShard {
         dimension: DimensionId,
         capacity: NonZeroUsize,
     ) -> Self {
+        Self::build_with_chunks(
+            shard_pos,
+            LoadedChunkMap::new_legacy(world, dimension),
+            capacity,
+        )
+    }
+
+    fn build_with_chunks(
+        shard_pos: ShardPos,
+        chunks: LoadedChunkMap,
+        capacity: NonZeroUsize,
+    ) -> Self {
         Self {
             shard_pos,
             inbox: VecDeque::with_capacity(capacity.get()),
             inbox_capacity: capacity.get(),
             players: BTreeMap::new(),
-            chunks: LoadedChunkMap::new(world, dimension),
+            chunks,
             mutation_log: Vec::new(),
             undo_history: BTreeMap::new(),
             region_limits: RegionLimits::default(),

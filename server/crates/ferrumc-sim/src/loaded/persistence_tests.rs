@@ -2,6 +2,7 @@
 
 use std::num::{NonZeroU8, NonZeroUsize};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use ferrumc_core::{DimensionId, Result as CoreResult, ServerError, WorldId};
@@ -266,6 +267,189 @@ fn fixture_store(base: Chunk, overlay: ChunkOverlayRecord) -> CorruptStore {
         writes: AtomicUsize::new(0),
         reads: AtomicUsize::new(0),
     }
+}
+
+async fn bound_map_with_dirty_chunks(
+    count: usize,
+) -> (
+    LoadedChunkMap,
+    Arc<dyn WorldStore>,
+    VerifiedGenerationBinding,
+) {
+    let mut map = map_with_dirty_chunks(count);
+    let binding = GenerationBinding::new(
+        GenerationKey::new(map.world(), map.dimension()),
+        FlatWorldGenerator::new().identity(),
+    );
+    map.generation = Some(binding);
+    let store: Arc<dyn WorldStore> = Arc::new(InMemoryStore::with_generation_metadata());
+    store
+        .ensure_generation_identity(binding.key(), binding.identity())
+        .await
+        .unwrap();
+    let verified = binding.verify_store(&store).await.unwrap();
+    (map, store, verified)
+}
+
+#[tokio::test]
+async fn bound_capture_metadata_and_late_codec_failures_preserve_every_fact_and_cursor() {
+    let (mut map, store, verified) = bound_map_with_dirty_chunks(3).await;
+    let first = ChunkPos::new(0, 0);
+    let second = ChunkPos::new(1, 0);
+    let third = ChunkPos::new(2, 0);
+    map.try_take_persist_dirty_verified(&store, &verified, 1, NonZeroUsize::new(1).unwrap())
+        .unwrap();
+    assert_eq!(map.persist_scan_after, Some(first));
+    map.get_mut(first)
+        .unwrap()
+        .mark_persist_dirty(first.origin_block(0));
+    seed_chest(map.get_mut(second).unwrap(), component_stack());
+    seed_chest(map.get_mut(third).unwrap(), invalid_count_stack());
+    let before: Vec<_> = map.resident.values().map(|r| r.chunk.clone()).collect();
+    let tickets: Vec<_> = map
+        .loaded_positions()
+        .map(|pos| map.canonical_ticket_state_record(pos))
+        .collect();
+    let continuation = map.persist_scan_after;
+    let capacity = NonZeroUsize::new(2).unwrap();
+    let binding = map.generation_binding().unwrap();
+    let wrong = InMemoryStore::with_generation_metadata();
+    wrong
+        .ensure_generation_identity(binding.key(), identity_for_seed(77))
+        .await
+        .unwrap();
+    let empty = InMemoryStore::with_generation_metadata();
+    let legacy = InMemoryStore::new();
+    for target in [&wrong as &dyn WorldStore, &empty, &legacy] {
+        assert!(matches!(
+            map.try_take_persist_dirty_bound(target, 2, capacity).await,
+            Err(SimError::GenerationIdentityMismatch { .. }
+                | SimError::GenerationIdentityMissing { .. }
+                | SimError::GenerationStore { .. })
+        ));
+        assert_eq!(map.persist_scan_after, continuation);
+        assert_eq!(
+            map.resident
+                .values()
+                .map(|r| r.chunk.clone())
+                .collect::<Vec<_>>(),
+            before
+        );
+    }
+    for async_capture in [false, true] {
+        let result = if async_capture {
+            map.try_take_persist_dirty_bound(store.as_ref(), 3, capacity)
+                .await
+        } else {
+            map.try_take_persist_dirty_verified(&store, &verified, 3, capacity)
+        };
+        assert!(matches!(
+            result,
+            Err(SimError::PersistCapture {
+                source: StorageError::BlockEntityCodec { .. }
+            })
+        ));
+        assert_eq!(map.persist_scan_after, continuation);
+        assert_eq!(
+            map.resident
+                .values()
+                .map(|r| r.chunk.clone())
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert_eq!(
+            map.loaded_positions()
+                .map(|pos| map.canonical_ticket_state_record(pos))
+                .collect::<Vec<_>>(),
+            tickets
+        );
+    }
+    seed_chest(map.get_mut(third).unwrap(), component_stack());
+    let batch = map
+        .try_take_persist_dirty_verified(&store, &verified, 4, capacity)
+        .unwrap();
+    assert_eq!(
+        batch.iter().map(|(key, _)| key.pos()).collect::<Vec<_>>(),
+        [second, third]
+    );
+    assert_eq!(map.persist_scan_after, Some(third));
+    assert!(map.get(first).unwrap().persist_dirty_sections().any());
+    assert!(map.get(second).unwrap().persist_edited_sections().any());
+    assert_eq!(
+        map.try_take_persist_dirty_bound(store.as_ref(), 5, NonZeroUsize::new(1).unwrap())
+            .await
+            .unwrap()[0]
+            .0
+            .pos(),
+        first
+    );
+    assert!(!map.has_persist_dirty());
+    assert_eq!(map.persist_scan_after, None);
+}
+
+fn identity_for_seed(seed: i64) -> ferrumc_world::GenerationIdentity {
+    ferrumc_world::GenerationIdentity::flat_overworld(ferrumc_world::WorldSeed::new(seed))
+}
+
+#[tokio::test]
+async fn metadata_maps_refuse_all_unverified_legacy_drains_without_any_dirtyclear() {
+    let (mut map, store, verified) = bound_map_with_dirty_chunks(2).await;
+    map.try_take_persist_dirty_verified(&store, &verified, 1, NonZeroUsize::new(1).unwrap())
+        .unwrap();
+    let before: Vec<_> = map.resident.values().map(|r| r.chunk.clone()).collect();
+    let continuation = map.persist_scan_after;
+    assert_eq!(map.take_dirty(), Vec::new());
+    assert_eq!(map.take_persist_dirty(2), Vec::new());
+    assert_eq!(
+        map.take_persist_dirty_bounded(2, NonZeroUsize::new(1).unwrap()),
+        Vec::new()
+    );
+    assert_eq!(
+        map.try_take_persist_dirty_bounded(2, NonZeroUsize::new(1).unwrap()),
+        Err(StorageError::GenerationMetadataUnsupported)
+    );
+    assert_eq!(map.persist_scan_after, continuation);
+    assert_eq!(
+        map.resident
+            .values()
+            .map(|r| r.chunk.clone())
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert!(map.has_persist_dirty());
+}
+
+#[tokio::test]
+async fn verified_capture_clamps_before_allocation_and_keeps_the_deferred_tail() {
+    let (mut map, store, verified) = bound_map_with_dirty_chunks(MAX_SAVE_BATCH + 1).await;
+    let batch = map
+        .try_take_persist_dirty_verified(
+            &store,
+            &verified,
+            1,
+            NonZeroUsize::new(usize::MAX).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(batch.len(), MAX_SAVE_BATCH);
+    assert_eq!(batch.last().unwrap().0.pos(), ChunkPos::new(4095, 0));
+    assert_eq!(map.persist_scan_after, Some(ChunkPos::new(4095, 0)));
+    assert!(map
+        .get(ChunkPos::new(4096, 0))
+        .unwrap()
+        .persist_dirty_sections()
+        .any());
+    map.get_mut(ChunkPos::ORIGIN)
+        .unwrap()
+        .mark_persist_dirty(ChunkPos::ORIGIN.origin_block(0));
+    let next = map
+        .try_take_persist_dirty_verified(&store, &verified, 2, NonZeroUsize::new(1).unwrap())
+        .unwrap();
+    assert_eq!(next[0].0.pos(), ChunkPos::new(4096, 0));
+    assert!(map
+        .get(ChunkPos::ORIGIN)
+        .unwrap()
+        .persist_dirty_sections()
+        .any());
 }
 
 #[tokio::test]

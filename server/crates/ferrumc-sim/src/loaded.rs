@@ -19,21 +19,25 @@
 //! deliberately out of scope here. The crate-internal multi-shard scheduler uses
 //! a bounded canonical-order variant with a deterministic continuation cursor,
 //! leaving overflow dirty without allowing low-key re-dirties to starve it.
+//! Bound maps use the checked authorized capture APIs; the legacy drains cannot
+//! clear their dirty ownership without target-store validation.
 
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::sync::Arc;
 
 use ferrumc_core::{DimensionId, WorldId};
 use ferrumc_math::ChunkPos;
 use ferrumc_storage::{
-    ChunkKey, ChunkOverlayRecord, ChunkRecord, SchemaVersion, StorageError, WorldStore,
-    MAX_SAVE_BATCH,
+    ChunkKey, ChunkOverlayRecord, ChunkRecord, GenerationKey, SchemaVersion, StorageError,
+    WorldStore, MAX_SAVE_BATCH,
 };
-use ferrumc_world::{Chunk, FlatWorldGenerator};
+use ferrumc_world::{Chunk, ChunkGenerator, FlatWorldGenerator, GenerationIdentity, WorldSeed};
 
 use crate::error::{SimError, SimResult};
+use crate::generation::{GenerationBinding, VerifiedGenerationBinding};
 use crate::spawn::SpawnChunkTickets;
 #[cfg(test)]
 use crate::ticket::TicketReason;
@@ -143,9 +147,10 @@ pub enum TicketRelease {
     /// The last ticket was removed and the chunk was unloaded.
     ///
     /// Persistence is **not** surfaced here: a chunk's player edits are captured
-    /// into overlay records by [`take_persist_dirty`](LoadedChunkMap::take_persist_dirty)
-    /// at the tick boundary (and again, by the caller, immediately before an
-    /// unload), so an unloaded chunk has nothing left to save. A generated-only
+    /// into overlay records by the appropriate checked capture API at the tick
+    /// boundary (and again, by the caller, immediately before an unload). The
+    /// caller retains durable retry ownership of those records; an unloaded
+    /// chunk then has nothing left to capture. A generated-only
     /// chunk has no persist-dirty sections and therefore costs no storage on
     /// unload, which is the whole point of the persist-dirty signal.
     Unloaded,
@@ -184,7 +189,77 @@ struct ResidentChunk {
     tickets: BTreeMap<ChunkTicket, usize>,
 }
 
-/// Runs the load-or-generate flow for a single chunk.
+/// Source-compatible alias for the explicit legacy, metadata-free load path.
+///
+/// See [`load_or_generate_legacy`]. New metadata consumers must instead use
+/// [`load_or_generate_bound`]; this alias cannot infer a missing descriptor.
+pub async fn load_or_generate(
+    store: &dyn WorldStore,
+    generator: &FlatWorldGenerator,
+    key: ChunkKey,
+) -> SimResult<(Chunk, ChunkProvenance)> {
+    load_or_generate_legacy(store, generator, key).await
+}
+
+/// Runs the historic flat load-or-generate flow on an explicit legacy backend.
+///
+/// Metadata-enabled stores are refused even when their descriptor happens to
+/// match the generator: this path does not declare an expected baseline. The
+/// legacy backend's `Unsupported` metadata contract is checked before world
+/// reads; all other metadata errors surface as [`SimError::GenerationStore`].
+///
+/// This preserves the format-3 application path without enabling arbitrary
+/// generation changes over descriptor-free data. No descriptor is initialized.
+pub async fn load_or_generate_legacy(
+    store: &dyn WorldStore,
+    generator: &FlatWorldGenerator,
+    key: ChunkKey,
+) -> SimResult<(Chunk, ChunkProvenance)> {
+    validate_load_position(key.pos())?;
+    let binding = legacy_generation_binding(GenerationKey::new(key.world(), key.dimension()));
+    binding.validate_generator(generator)?;
+    validate_legacy_store(store, binding.key()).await?;
+    compose_chunk(store, generator, key, binding).await
+}
+
+/// Loads a full base or regenerates the explicitly bound base, then applies edits.
+///
+/// Scope and complete-column bounds are checked before any store or generator
+/// call. The generator and persisted descriptor must equal `binding` before
+/// world reads or regeneration. Missing, unsupported, corrupt or mismatched
+/// metadata is never a chunk miss and never initializes/falls back to a seed.
+/// A generator must honor [`ChunkGenerator`]'s stable-identity/deterministic
+/// output contract; the simulation additionally validates its returned column.
+///
+/// Resolution and overlay schema/entity validation are shared with the legacy
+/// path. The descriptor is not a Paper terrain parity assertion.
+pub async fn load_or_generate_bound(
+    store: &dyn WorldStore,
+    generator: &dyn ChunkGenerator,
+    binding: GenerationBinding,
+    key: ChunkKey,
+) -> SimResult<(Chunk, ChunkProvenance)> {
+    binding.validate_key(key)?;
+    validate_load_position(key.pos())?;
+    binding.validate_generator(generator)?;
+    binding.validate_store(store).await?;
+    compose_chunk(store, generator, key, binding).await
+}
+
+/// Explicit historical mode: this is not inferred from existing format-3 data.
+fn legacy_generation_binding(key: GenerationKey) -> GenerationBinding {
+    GenerationBinding::new(key, GenerationIdentity::flat_overworld(WorldSeed::new(0)))
+}
+
+async fn validate_legacy_store(store: &dyn WorldStore, key: GenerationKey) -> SimResult<()> {
+    match store.load_generation_identity(key).await {
+        Err(ferrumc_core::ServerError::Unsupported(_)) => Ok(()),
+        Ok(_) => Err(SimError::GenerationBindingRequired { key }),
+        Err(source) => Err(SimError::GenerationStore { key, source }),
+    }
+}
+
+/// Shared composition after the caller has checked bounds and store admission.
 ///
 /// Resolution order, all surfacing a storage failure as [`SimError::ChunkLoad`]:
 /// 1. **Base**: use the complete record from [`WorldStore::load_chunk`] when one
@@ -208,13 +283,16 @@ struct ResidentChunk {
 /// is additionally reseeded from its sections, so a later edit to a different
 /// section re-captures the whole overlay rather than overwriting earlier edits;
 /// the per-flush gate stays clear, so the reseed does not itself trigger a flush.
-pub async fn load_or_generate(
+async fn compose_chunk(
     store: &dyn WorldStore,
-    generator: &FlatWorldGenerator,
+    generator: &dyn ChunkGenerator,
     key: ChunkKey,
+    binding: GenerationBinding,
 ) -> SimResult<(Chunk, ChunkProvenance)> {
     let pos = key.pos();
-    validate_load_position(pos)?;
+    // Store admission may have awaited; reject a changed generator before the
+    // first world read, including callers of the free load functions.
+    binding.validate_generator(generator)?;
 
     // The durable full record is the base when present. In particular, this is
     // the shape produced by Anvil import and must not be bypassed merely because
@@ -227,7 +305,15 @@ pub async fn load_or_generate(
     if let Some(record) = &stored {
         validate_loaded_column(pos, record.chunk().pos())?;
     }
-    let mut chunk = stored.map_or_else(|| generator.generate(pos), ChunkRecord::into_chunk);
+    binding.validate_generator(generator)?;
+    let mut chunk = if let Some(record) = stored {
+        record.into_chunk()
+    } else {
+        let generated = generator.generate_chunk(pos);
+        validate_loaded_column(pos, generated.pos())?;
+        generated
+    };
+    binding.validate_generator(generator)?;
 
     // Apply only the overlay's carried sections and block entities over the
     // selected base. An empty overlay is therefore a no-op, not a reason to
@@ -236,6 +322,7 @@ pub async fn load_or_generate(
         .load_chunk_overlay(key)
         .await
         .map_err(|source| SimError::ChunkLoad { pos, source })?;
+    binding.validate_generator(generator)?;
     if let Some(overlay) = overlay {
         validate_loaded_column(pos, overlay.pos())?;
         if overlay.schema_version() != OVERLAY_SCHEMA_VERSION {
@@ -327,9 +414,10 @@ fn validate_load_position(pos: ChunkPos) -> SimResult<()> {
 
 /// The chunks a shard owns in memory for one world and dimension.
 ///
-/// Construct one with [`LoadedChunkMap::new`], bring chunks in with
+/// Construct a metadata map with [`LoadedChunkMap::with_generation`] or an
+/// explicit legacy map with [`LoadedChunkMap::new_legacy`], bring chunks in with
 /// [`acquire`](Self::acquire), release them with [`release`](Self::release), and
-/// drain pending saves with [`take_dirty`](Self::take_dirty). The map owns chunk
+/// capture pending bound overlays with [`Self::try_take_persist_dirty_verified`]. The map owns chunk
 /// *data* but never a database handle: every storage call is made through a
 /// borrowed [`WorldStore`] passed per acquire.
 ///
@@ -347,22 +435,44 @@ pub struct LoadedChunkMap {
     world: WorldId,
     dimension: DimensionId,
     schema_version: SchemaVersion,
+    generation: Option<GenerationBinding>,
     resident: BTreeMap<ChunkPos, ResidentChunk>,
     persist_scan_after: Option<ChunkPos>,
 }
 
 impl LoadedChunkMap {
-    /// Creates an empty map for `world` / `dimension`, saving chunks under
-    /// [`CHUNK_SCHEMA_VERSION`].
+    /// Source-compatible alias for [`Self::new_legacy`].
+    ///
+    /// Does not establish a generation identity. Metadata stores are rejected
+    /// by acquire; new metadata consumers must use [`Self::with_generation`].
     #[must_use]
     pub fn new(world: WorldId, dimension: DimensionId) -> Self {
-        Self::with_schema_version(world, dimension, CHUNK_SCHEMA_VERSION)
+        Self::new_legacy(world, dimension)
     }
 
-    /// Creates an empty map for `world` / `dimension` that saves chunks under an
-    /// explicit `schema_version`.
+    /// Creates an explicit metadata-free map for the historic format-3 path.
+    ///
+    /// This mode selects only Minecraft 1.21.8 / `FerrumC` flat revision 1 /
+    /// Overworld / seed 0. No historical seed is inferred from data; another
+    /// declared generator identity requires explicit metadata mode/migration.
+    #[must_use]
+    pub fn new_legacy(world: WorldId, dimension: DimensionId) -> Self {
+        Self::with_legacy_schema_version(world, dimension, CHUNK_SCHEMA_VERSION)
+    }
+
+    /// Source-compatible alias for [`Self::with_legacy_schema_version`].
     #[must_use]
     pub fn with_schema_version(
+        world: WorldId,
+        dimension: DimensionId,
+        schema_version: SchemaVersion,
+    ) -> Self {
+        Self::with_legacy_schema_version(world, dimension, schema_version)
+    }
+
+    /// Creates an explicit legacy map with a caller-selected full-record schema.
+    #[must_use]
+    pub fn with_legacy_schema_version(
         world: WorldId,
         dimension: DimensionId,
         schema_version: SchemaVersion,
@@ -371,9 +481,40 @@ impl LoadedChunkMap {
             world,
             dimension,
             schema_version,
+            generation: None,
             resident: BTreeMap::new(),
             persist_scan_after: None,
         }
+    }
+
+    /// Creates a map with an explicitly declared scope and generated baseline.
+    ///
+    /// The declaration is not a store attestation. Acquires and checked captures
+    /// verify existing metadata; bootstrap must initialize it explicitly first.
+    #[must_use]
+    pub fn with_generation(binding: GenerationBinding) -> Self {
+        Self::with_generation_and_schema_version(binding, CHUNK_SCHEMA_VERSION)
+    }
+
+    /// Creates a bound map with a caller-selected full-record capture schema.
+    #[must_use]
+    pub fn with_generation_and_schema_version(
+        binding: GenerationBinding,
+        schema_version: SchemaVersion,
+    ) -> Self {
+        let mut map = Self::with_legacy_schema_version(
+            binding.key().world(),
+            binding.key().dimension(),
+            schema_version,
+        );
+        map.generation = Some(binding);
+        map
+    }
+
+    /// Returns the explicit baseline, or `None` for the legacy metadata-free mode.
+    #[must_use]
+    pub const fn generation_binding(&self) -> Option<GenerationBinding> {
+        self.generation
     }
 
     /// Returns the world these chunks belong to.
@@ -498,15 +639,28 @@ impl LoadedChunkMap {
     /// with `ticket` as its first ticket, and
     /// [`ChunkAcquired::NewlyResident`] reports how it was obtained.
     ///
-    /// Returns [`SimError::ChunkLoad`] if the store read fails; on failure the
-    /// map is left unchanged.
+    /// Bound maps validate the generator and target store before every acquire,
+    /// including an already-resident ticket increment. Legacy maps explicitly
+    /// reject metadata stores. Any admission failure leaves resident chunks,
+    /// tickets, dirty masks and the persistence cursor unchanged.
     pub async fn acquire(
         &mut self,
         store: &dyn WorldStore,
-        generator: &FlatWorldGenerator,
+        generator: &dyn ChunkGenerator,
         pos: ChunkPos,
         ticket: ChunkTicket,
     ) -> SimResult<ChunkAcquired> {
+        validate_load_position(pos)?;
+        let binding = self.generation.unwrap_or_else(|| {
+            legacy_generation_binding(GenerationKey::new(self.world, self.dimension))
+        });
+        binding.validate_generator(generator)?;
+        if self.generation.is_some() {
+            binding.validate_store(store).await?;
+        } else {
+            validate_legacy_store(store, GenerationKey::new(self.world, self.dimension)).await?;
+        }
+        binding.validate_generator(generator)?;
         if let Some(resident) = self.resident.get_mut(&pos) {
             *resident.tickets.entry(ticket).or_insert(0) += 1;
             return Ok(ChunkAcquired::AlreadyResident);
@@ -515,7 +669,7 @@ impl LoadedChunkMap {
         // Not resident: run the flow before mutating the map so a load failure
         // leaves residency untouched.
         let key = self.chunk_key(pos);
-        let (chunk, provenance) = load_or_generate(store, generator, key).await?;
+        let (chunk, provenance) = compose_chunk(store, generator, key, binding).await?;
         let mut tickets = BTreeMap::new();
         tickets.insert(ticket, 1usize);
         self.resident.insert(pos, ResidentChunk { chunk, tickets });
@@ -526,13 +680,13 @@ impl LoadedChunkMap {
     /// number that were newly brought into memory.
     ///
     /// Chunks already resident (for any reason) still receive a spawn ticket but
-    /// are not counted as newly resident. Returns [`SimError::ChunkLoad`] if any
-    /// underlying load fails, after which the chunks acquired so far remain
-    /// resident.
+    /// are not counted as newly resident. Any generation admission or chunk
+    /// load failure stops the loop; chunks successfully acquired so far remain
+    /// resident. Each acquire independently checks the same explicit binding.
     pub async fn acquire_spawn(
         &mut self,
         store: &dyn WorldStore,
-        generator: &FlatWorldGenerator,
+        generator: &dyn ChunkGenerator,
         spawn: &SpawnChunkTickets,
     ) -> SimResult<usize> {
         let ticket = spawn.ticket();
@@ -553,10 +707,10 @@ impl LoadedChunkMap {
     ///
     /// Decrements that ticket's holder count. If it was the chunk's last ticket
     /// the chunk is unloaded ([`TicketRelease::Unloaded`]). Persistence is not
-    /// surfaced here: the caller captures any pending player edits via
-    /// [`take_persist_dirty`](Self::take_persist_dirty) before releasing, so an
-    /// unloaded chunk has nothing left to save and a generated-only chunk costs
-    /// no storage. Releasing a ticket that is not held (or a chunk that is not
+    /// surfaced here: the caller must successfully capture pending gameplay
+    /// edits via the appropriate checked capture API before releasing the last
+    /// ticket and retain the returned records until durable success. A
+    /// generated-only chunk costs no storage. Releasing a ticket that is not held (or a chunk that is not
     /// resident) is a no-op reported as [`TicketRelease::NotPresent`].
     pub fn release(&mut self, pos: ChunkPos, ticket: ChunkTicket) -> TicketRelease {
         let Some(resident) = self.resident.get_mut(&pos) else {
@@ -592,9 +746,15 @@ impl LoadedChunkMap {
     /// the assumption the batch will be persisted; this method does not perform
     /// the save and intentionally implements no flush *policy* (when to call it,
     /// and what to do if the save later fails, are the caller's concern). The
-    /// batch is ordered by [`ChunkPos`] for determinism.
+    /// batch is ordered by [`ChunkPos`] for determinism. This legacy drain is a
+    /// no-op on bound maps: it cannot validate a target store and must not clear
+    /// dirty ownership or expose unchecked save records. It is not a metadata
+    /// flush-success signal; use the checked bound overlay capture instead.
     #[must_use]
     pub fn take_dirty(&mut self) -> Vec<(ChunkKey, ChunkRecord)> {
+        if self.generation.is_some() {
+            return Vec::new();
+        }
         let world = self.world;
         let dimension = self.dimension;
         let schema = self.schema_version;
@@ -642,8 +802,13 @@ impl LoadedChunkMap {
     /// compatibility. Production consumers must instead use
     /// [`Self::try_take_persist_dirty_bounded`]; the experimental scheduler still
     /// uses the separately bounded legacy variant.
+    /// On bound maps it is a no-op, preserving all masks and the cursor; an
+    /// empty result must never be used as a metadata flush-success signal.
     #[must_use]
     pub fn take_persist_dirty(&mut self, tick: u64) -> Vec<(ChunkKey, ChunkOverlayRecord)> {
+        if self.generation.is_some() {
+            return Vec::new();
+        }
         let batch = self.take_persist_dirty_up_to(tick, usize::MAX);
         self.persist_scan_after = None;
         batch
@@ -667,7 +832,75 @@ impl LoadedChunkMap {
     ///
     /// Returns the checked storage capture error for an invalid/unrepresentable
     /// entity or record. No selected dirty mask is cleared on any such error.
+    /// This synchronous source-compatible API is legacy-only and returns
+    /// [`StorageError::GenerationMetadataUnsupported`] on a bound map because
+    /// it has no target-store authorization. Bound consumers use
+    /// [`Self::try_take_persist_dirty_verified`] or
+    /// [`Self::try_take_persist_dirty_bound`].
     pub fn try_take_persist_dirty_bounded(
+        &mut self,
+        tick: u64,
+        capacity: NonZeroUsize,
+    ) -> Result<Vec<(ChunkKey, ChunkOverlayRecord)>, StorageError> {
+        if self.generation.is_some() {
+            return Err(StorageError::GenerationMetadataUnsupported);
+        }
+        self.capture_persist_dirty_checked(tick, capacity)
+    }
+
+    /// Checks the target store afresh, then captures a complete bounded batch.
+    ///
+    /// This async option borrows the store without retaining a handle. Every
+    /// metadata check and every selected record's codec preflight succeeds
+    /// before any mask clears or the continuation advances. Missing/corrupt/
+    /// incompatible metadata and late record failures retain all dirty facts.
+    /// Durable save and retry remain the caller's responsibility.
+    ///
+    /// On the synchronous tick hot path, prefer off-tick verification with
+    /// [`GenerationBinding::verify_store`] and [`Self::try_take_persist_dirty_verified`].
+    pub async fn try_take_persist_dirty_bound(
+        &mut self,
+        store: &dyn WorldStore,
+        tick: u64,
+        capacity: NonZeroUsize,
+    ) -> SimResult<Vec<(ChunkKey, ChunkOverlayRecord)>> {
+        let binding = self.require_generation_binding()?;
+        binding.validate_store(store).await?;
+        self.capture_persist_dirty_checked(tick, capacity)
+            .map_err(|source| SimError::PersistCapture { source })
+    }
+
+    /// Captures against an opaque authorization for the exact immutable store.
+    ///
+    /// This performs no storage I/O. The token's scope, descriptor and weak
+    /// allocation identity must match the map and the supplied target `Arc`
+    /// before the whole bounded codec preflight and dirty-ownership transfer.
+    /// Clones of the verified `Arc` work; a different same-content store does
+    /// not. Any refusal preserves chunks, masks, tickets and continuation.
+    ///
+    /// App bootstrap verifies off-tick. Driver and writer must share this exact
+    /// store allocation. Keep returned batches until durable success; validate
+    /// the expected binding before initial writer saves and retries, and never
+    /// retarget an already captured batch to another store or baseline.
+    pub fn try_take_persist_dirty_verified(
+        &mut self,
+        store: &Arc<dyn WorldStore>,
+        verified: &VerifiedGenerationBinding,
+        tick: u64,
+        capacity: NonZeroUsize,
+    ) -> SimResult<Vec<(ChunkKey, ChunkOverlayRecord)>> {
+        verified.validate(self.require_generation_binding()?, store)?;
+        self.capture_persist_dirty_checked(tick, capacity)
+            .map_err(|source| SimError::PersistCapture { source })
+    }
+
+    fn require_generation_binding(&self) -> SimResult<GenerationBinding> {
+        self.generation.ok_or(SimError::GenerationBindingRequired {
+            key: GenerationKey::new(self.world, self.dimension),
+        })
+    }
+
+    fn capture_persist_dirty_checked(
         &mut self,
         tick: u64,
         capacity: NonZeroUsize,
@@ -728,11 +961,16 @@ impl LoadedChunkMap {
     /// chunk position even when selection wraps.
     /// This experimental scheduler seam retains legacy lossy entity capture;
     /// production persistence must use [`Self::try_take_persist_dirty_bounded`].
+    /// Bound maps are not supported by this legacy scheduler seam: the no-op
+    /// keeps dirty facts/cursor intact until an authorized consumer captures them.
     pub(crate) fn take_persist_dirty_bounded(
         &mut self,
         tick: u64,
         capacity: NonZeroUsize,
     ) -> Vec<(ChunkKey, ChunkOverlayRecord)> {
+        if self.generation.is_some() {
+            return Vec::new();
+        }
         let capacity = capacity.get();
         let world = self.world;
         let dimension = self.dimension;

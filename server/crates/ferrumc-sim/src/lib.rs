@@ -47,20 +47,26 @@
 //! A shard owns its chunks in a [`LoadedChunkMap`], governed by
 //! [`ChunkTicket`]s: a chunk is resident exactly while it holds a ticket.
 //! [`LoadedChunkMap::acquire`] runs the load-or-generate flow
-//! ([`load_or_generate`]: try the [`WorldStore`](ferrumc_storage::WorldStore),
-//! else generate with [`FlatWorldGenerator`](ferrumc_world::FlatWorldGenerator)),
+//! ([`load_or_generate_bound`]: verify [`GenerationBinding`], try the
+//! [`WorldStore`](ferrumc_storage::WorldStore), else regenerate the declared
+//! [`ChunkGenerator`](ferrumc_world::ChunkGenerator) baseline),
 //! [`LoadedChunkMap::release`] drops tickets and unloads, and
 //! [`LoadedChunkMap::take_dirty`] hands changed chunks off as full save records,
 //! while persist-dirty gameplay edits become overlay records. The
 //! [`SpawnChunkTickets`] set keeps the world spawn resident. The map and
 //! scheduler collect records but never persist them — flush *policy* is the
 //! caller's.
+//! The existing constructors and [`load_or_generate`] remain documented legacy
+//! aliases for the metadata-free application path. Bound persistence uses an
+//! explicit verified target-store authorization for synchronous capture, or an
+//! async fresh metadata check; neither initializes missing generation metadata.
 //!
 //! [`Tick`]: ferrumc_core::Tick
 
 mod coordinator;
 mod cross_shard;
 mod error;
+mod generation;
 mod harness;
 mod loaded;
 mod message;
@@ -79,10 +85,11 @@ mod time;
 
 pub use coordinator::{TickCoordinator, TickRate};
 pub use error::{SimError, SimResult};
+pub use generation::{GenerationBinding, VerifiedGenerationBinding};
 pub use harness::{SimHarness, TickOutcome};
 pub use loaded::{
-    load_or_generate, ChunkAcquired, ChunkProvenance, LoadedChunkMap, TicketRelease,
-    CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,
+    load_or_generate, load_or_generate_bound, load_or_generate_legacy, ChunkAcquired,
+    ChunkProvenance, LoadedChunkMap, TicketRelease, CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,
 };
 pub use message::{GameInput, GameOutput};
 // Only the cause is public: the structured `MutationResult` stays internal to

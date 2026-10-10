@@ -4,7 +4,8 @@ use std::io::ErrorKind;
 
 use ferrumc_core::{ServerError, Tick};
 use ferrumc_math::{ChunkPos, ShardPos};
-use ferrumc_storage::ChunkKey;
+use ferrumc_storage::{ChunkKey, GenerationKey, StorageError};
+use ferrumc_world::GenerationIdentity;
 
 use crate::ownership::{ShardId, ShardLifecycleState, ShardRegion};
 
@@ -56,6 +57,78 @@ pub enum SimError {
         /// The underlying storage error.
         #[source]
         source: ServerError,
+    },
+
+    /// Reading the immutable generation descriptor failed, rather than missing
+    /// a chunk. The backend's unsupported/corruption classification is preserved.
+    #[error("failed to verify generation metadata for {key:?}: {source}")]
+    GenerationStore {
+        /// Exact world/dimension scope checked before admission or capture.
+        key: GenerationKey,
+        /// Classified backend failure, never interpreted as absent terrain.
+        #[source]
+        source: ServerError,
+    },
+
+    /// A metadata backend has no explicitly initialized descriptor for the scope.
+    #[error("missing generation identity for {key:?}")]
+    GenerationIdentityMissing {
+        /// Scope that bootstrap or explicit offline migration must initialize.
+        key: GenerationKey,
+    },
+
+    /// A stored or previously verified baseline differs from the declaration.
+    #[error("generation identity mismatch for {key:?}: expected {expected:?}, stored {stored:?}")]
+    GenerationIdentityMismatch {
+        /// Scope whose existing descriptor must remain unchanged.
+        key: GenerationKey,
+        /// Explicit caller-selected descriptor.
+        expected: GenerationIdentity,
+        /// Immutable descriptor returned by the target store or its token.
+        stored: GenerationIdentity,
+    },
+
+    /// A supplied generator disagrees with the map's declared baseline.
+    #[error("generator identity mismatch for {key:?}: expected {expected:?}, actual {actual:?}")]
+    GeneratorIdentityMismatch {
+        /// Scope whose terrain the generator would supply.
+        key: GenerationKey,
+        /// Explicit map baseline.
+        expected: GenerationIdentity,
+        /// Descriptor reported by the incompatible generator.
+        actual: GenerationIdentity,
+    },
+
+    /// A chunk key or capture authorization belongs to another world/dimension.
+    #[error("generation scope mismatch: expected {expected:?}, actual {actual:?}")]
+    GenerationScopeMismatch {
+        /// Bound map or loader scope.
+        expected: GenerationKey,
+        /// Incompatible requested key or supplied authorization scope.
+        actual: GenerationKey,
+    },
+
+    /// A capture token was verified against another store allocation.
+    #[error("generation capture authorization targets another store for {key:?}")]
+    GenerationStoreAuthorizationMismatch {
+        /// Exact scope that remains dirty after refusal.
+        key: GenerationKey,
+    },
+
+    /// A metadata operation was attempted on an explicitly legacy map, or a
+    /// metadata store was passed to a descriptor-free legacy load path.
+    #[error("explicit generation binding required for {key:?}")]
+    GenerationBindingRequired {
+        /// Scope that needs an explicit descriptor-bearing constructor.
+        key: GenerationKey,
+    },
+
+    /// The complete checked overlay batch could not be represented losslessly.
+    #[error("failed to capture persistence batch: {source}")]
+    PersistCapture {
+        /// Precise codec, domain or record-size failure; no dirty facts clear.
+        #[source]
+        source: StorageError,
     },
 
     /// A shard-grid position cannot describe a complete 8x8 region in the
@@ -241,7 +314,16 @@ impl From<SimError> for ServerError {
                 ServerError::internal("simulation tick counter overflowed u64")
             }
             // Preserve the storage classification rather than flatten it.
-            SimError::ChunkLoad { source, .. } => source,
+            SimError::ChunkLoad { source, .. } | SimError::GenerationStore { source, .. } => source,
+            SimError::PersistCapture { source } => source.into(),
+            generation @ (SimError::GenerationIdentityMissing { .. }
+            | SimError::GenerationIdentityMismatch { .. }
+            | SimError::GeneratorIdentityMismatch { .. }
+            | SimError::GenerationScopeMismatch { .. }
+            | SimError::GenerationStoreAuthorizationMismatch { .. }
+            | SimError::GenerationBindingRequired { .. }) => {
+                ServerError::invalid_state(generation.to_string())
+            }
             SimError::ShardRegionOutOfRange { position } => ServerError::invalid_state(format!(
                 "shard position ({},{}) is outside the complete-region range",
                 position.x(),

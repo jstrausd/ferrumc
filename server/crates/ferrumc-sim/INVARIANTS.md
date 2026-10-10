@@ -56,16 +56,54 @@
   the last ticket unloads the chunk.
 - The simulation owns chunk *data* but never a database handle: a `WorldStore`
   is borrowed per `acquire` call, never stored in the map or shard.
+- A metadata map declares one explicit `GenerationBinding` (runtime world /
+  dimension and full versioned generator identity). This declaration is not a
+  store attestation. Missing metadata is never initialized, guessed or treated
+  as a chunk miss. Before any world read/regeneration or resident ticket
+  increment, the borrowed store's existing descriptor and generator identity
+  must match. Refusal preserves the resident set, tickets, chunks and dirty
+  facts. Generator identity is rechecked across awaits and generation; produced
+  columns, stored full columns and overlay columns must all match the load key.
+- Off-tick verification can create an opaque `VerifiedGenerationBinding` for
+  one immutable store's exact `Arc` allocation, scope and identity. It holds
+  only a weak allocation identity, never a strong store handle; maps/shards
+  retain neither store nor authorization. Synchronous verified capture accepts
+  only that exact allocation (including its Arc clones), map scope and
+  descriptor. Another same-content store, scope, seed or replacement allocation
+  cannot use the token. Custom metadata backends must honor `WorldStore`'s
+  immutable baseline contract. No I/O occurs during verified capture.
+- Legacy constructors/free-loader aliases are explicitly metadata-free and
+  accept only the historic MC 1.21.8 / FerrumC flat revision 1 / Overworld /
+  seed-0 generator identity. They refuse metadata-enabled stores, including
+  already-resident acquisitions. This explicit historic mode never infers a
+  historical descriptor from format-3 data or initializes one.
 - Dirty chunks are *collected* for saving (`take_dirty`, and on unload) but
   never persisted here, and no flush policy is implemented — that is the
   caller's concern.
-- Production overlay capture uses `try_take_persist_dirty_bounded`: requested
+- Metadata overlay capture uses `try_take_persist_dirty_verified` (off-tick
+  immutable-store authorization) or async `try_take_persist_dirty_bound` (fresh
+  read). Every generation/target-store check and the complete bounded codec
+  preflight succeeds before any selected dirty mask or continuation changes.
+  The source-compatible `try_take_persist_dirty_bounded` is legacy-only and
+  returns `GenerationMetadataUnsupported` on a bound map. Infallible legacy
+  `take_dirty`, `take_persist_dirty` and internal scheduler drains are no-ops
+  for bound maps, preserving all dirty facts and cursor; an empty result is not
+  a metadata flush-success signal. App must consume the bound Result API.
+- Production checked overlay capture uses the above selected API: requested
   capacity is clamped to storage's `MAX_SAVE_BATCH` before allocation. All
   selected records are captured immutably before any selected dirty mask clears
   or the deterministic fairness cursor advances. Failure retains every mask,
   item component, chunk and cursor; an unselected tail stays dirty and receives
   its turn before newly re-dirtied lower keys. Legacy `take_persist_dirty` and
   the experimental scheduler's internal variant remain explicitly lossy seams.
+- Capture transfers move-owned records only after complete validation, never
+  durable ownership. Application driver and writer share the same store Arc;
+  writer validates the expected baseline before initial durable saves/retries,
+  keeps failed batches and never retargets a captured batch to another store or
+  descriptor. Storage checks descriptor existence, not caller intent, so the
+  writer's expected-identity check is required. Sim supplies no retry queue or
+  flush policy. The experimental scheduler remains legacy-only until its own
+  authorized consumer integration.
 - Chunk loading selects a stored full `ChunkRecord` when present, otherwise a
   deterministic generated base, and then applies the stored overlay. Overlay
   records must use exactly the current schema; old and future schemas are

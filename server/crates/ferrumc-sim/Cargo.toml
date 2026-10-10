@@ -15,7 +15,7 @@ ferrumc-core = { workspace = true }
 # messages (never raw tuples, per the coordinate rule).
 ferrumc-math = { workspace = true }
 # The world model the simulation owns: `Chunk` is the resident chunk data and
-# `FlatWorldGenerator` is the miss path of the load-or-generate flow.
+# `ChunkGenerator` supplies the explicitly bound miss/regeneration path.
 ferrumc-world = { workspace = true }
 # ItemStack + left_click_exchange: the sim owns chest container mutation, applying
 # the conserving slot/cursor exchange against a chest block-entity. ferrumc-world
