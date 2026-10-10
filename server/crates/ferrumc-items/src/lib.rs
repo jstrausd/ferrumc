@@ -11,15 +11,20 @@
 //! * [`untrusted`] — the [`UntrustedItemStack`] wire form, its decoder, and
 //!   `into_validated`.
 //! * [`wire`] — shared wire bounds and the `SetContainerContent` payload builder.
+//! * [`persistence`] — versioned, bounded, lossless storage of modelled stacks.
 
 pub mod component;
 pub mod item_id;
+pub mod persistence;
 pub mod stack;
 pub mod untrusted;
 pub mod wire;
 
 pub use component::{ComponentPatch, ComponentTypeId, ComponentValue, OpaqueComponent};
 pub use item_id::ItemId;
+pub use persistence::{
+    decode_persisted_stack, encode_persisted_stack, ItemPersistenceError, MAX_PERSISTED_STACK_BYTES,
+};
 pub use stack::{left_click_exchange, ItemStack};
 pub use untrusted::{ItemValidationError, UntrustedItemStack};
 pub use wire::{

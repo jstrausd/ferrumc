@@ -19,6 +19,8 @@ Brigadier `Commands` packet); this crate produces and consumes those bytes.
 - `ComponentValue` / `ComponentPatch` / `ComponentTypeId` — the data-component
   model, with a few typed variants and an `Opaque` passthrough.
 - `encode_container_content_payload` — builds the `SetContainerContent` body.
+- `encode_persisted_stack` / `decode_persisted_stack` — a separate versioned,
+  bounded storage codec that preserves the supported authoritative model.
 
 ## Trusted vs untrusted slots
 
@@ -57,3 +59,50 @@ to `1..=max_stack`, bounds the component count and total bytes, strips
 `block_entity_data` (51), `container` (66), and out-of-range component types, and
 validates NBT component data against `ferrumc_nbt::NbtLimits`. Anything malformed
 returns an `Err` rather than panicking.
+
+## Independent item persistence
+
+The storage codec is an S02 foundation. Player inventories and world containers
+must integrate it through their own versioned records; adding this codec alone
+does not make existing player/world persistence retain components.
+
+Creative decoding is intentionally lossy and must never be used to read stored
+items. The storage codec preserves patch order, all seven `ComponentValue`
+representations, opaque payloads even for modeled component ids, and removed ids.
+It preserves NBT compound key order and duplicate names, strings including NUL
+and astral characters, and exact floating-point bits. Duplicate component patch
+ids and an id both added and removed are rejected rather than merged. In-range
+removals of dangerous types are safe removals and remain preserved.
+
+Schema 1 uses fixed big-endian lengths and integers:
+
+| Field | Representation |
+| --- | --- |
+| Signature and schema | `FCIS`, `u16 = 1` |
+| Stack discriminator | `u8`: 0 empty, 1 present; empty ends here |
+| Item | `u16` UTF-8 byte length plus canonical resource name, then `u8` count |
+| Patch counts | `u8` additions, `u8` removals |
+| Each addition | `u8` model representation, `i32` component id, `u32` payload length, payload |
+| Each removal | `i32` component id |
+
+The addition representations are 1 `MaxStackSize` (`u8`), 2 `Damage` (`i32`),
+3 `MaxDamage` (`i32`), 4 `Unbreakable` (empty), 5 `CustomName` (file-form NBT),
+6 `CustomData` (file-form NBT), and 7 `Opaque` (unchanged trusted bytes). File-form
+NBT has an empty root name. Item names avoid coupling storage to item protocol
+numbers, but component ids and opaque payload semantics remain pinned to
+Minecraft 1.21.8. Updating that model requires an explicit schema migration.
+
+The codec permits at most 64 total patch entries, 8192 payload bytes per
+component, and 256 KiB total payload bytes. `MAX_PERSISTED_STACK_BYTES` bounds
+the whole record before parsing. These are encoded-byte caps; they are not a
+decoded-heap limit. Inventory and chunk consumers must enforce a separate
+aggregate record budget. NBT output receives an allocation-free size/structure
+preflight before the shared NBT writer is invoked, so its allocation remains
+bounded as well.
+
+Unknown schemas, discriminators, ids, noncanonical names, duplicate patch ids,
+malformed values, oversized declarations, truncation, and trailing bytes fail
+with `ItemPersistenceError`. A stored stack is never clamped or stripped.
+`max_stack_size` values must be in `1..=99`; they cannot raise the registry count
+ceiling. The codec preserves the current model's signed damage values and
+present-air representation without adding gameplay normalization.
