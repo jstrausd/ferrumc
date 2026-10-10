@@ -260,21 +260,41 @@ Gesamt-CI für `83ea2c6d2a1c251da956a94c06fe8a7891530260` ist erfolgreich:
 [Lauf38081893560](https://github.com/jstrausd/ferrumc/actions/runs/38081893560).
 Sie umfasst SIM-03.3, alle bisherigen Workspace-/Java-/Generator- und sieben
 Client-/Neustartgates; STORAGE-ENTITY001.2 und GEN-05.2 gehören nicht zu diesem
-Head. Ein neuer Gesamtlauf für `34acc8e9` ist angefordert.
+Head. Gesamt-CI für `34acc8e9`, einschließlich STORAGE-ENTITY001.2, ist
+erfolgreich: [Lauf38082651584](https://github.com/jstrausd/ferrumc/actions/runs/38082651584).
+
+## Seedrouterintegration und Folgefreigaben
+
+GEN-05.2 ist nach unabhängigem
+[Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md) CLEAN als `290e5343`
+auf `main` integriert. Autor Debug/Release je188, Reviewer Debug188 und drei
+zusätzliche eigene Debug-/Releaseprobes grün; strict Clippy/Fmt grün.
+Root hat alle29 Main-/Snapshot-Freezehashes bestätigt und den vollständigen
+Originalcorpus frisch normal und unter Python `-O` reproduziert: Fixture und
+Manifest bytegleich,17.213 echte JAR-Records mit27 Original-Class-CodeSources.
+Die neue Gesamt-CI läuft als
+[Lauf38083747393](https://github.com/jstrausd/ferrumc/actions/runs/38083747393).
+Diese Numericalabnahme erzeugt noch keine aktive natürliche Welt.
+
+Root hat die vollständigen konkreten Entwürfe für GEN-05.3 NoiseChunk
+(514 Zeilen, ProposalSHA `4d943e796734ffe1231b9d95271205deec5ab457b45b753445517e88731f8cff`)
+und DUR-03.1 Ownershiptransfers (787 Zeilen,
+ProposalSHA `b8ffca1ceff5c84e9626e983ea70047f70d785805fb4f5d25a38ed8699a68794`)
+innerhalb der bestehenden Nutzerautorisierung intern zur Runtimeimplementierung
+freigegeben. Das ist keine Abnahme des noch ausstehenden Codes. Bestehende
+.2-Vanillaverträge und Format3/4/5-Migrationsverträge bleiben verbindlich.
 
 ## Laufende Folgearbeit
 
-- `feature_catalog`: STORAGE-ENTITY001.2 unabhängig CLEAN abgeschlossen;
-  jetzt read-only GEN-05.2-Codereview. Isolierter Snapshot folgt dem finalen
-  Autorenfreeze. Root führt frische normal/-O Original-JAR-Reexports aus.
-- `item_transfer_primitives`: GEN-05.2-Seed-/Scalar-/Climateumsetzung deckt
-  sämtliche17.213 Oracle-Records lokal ab. Finale Debug-/Release-/strictchecks
-  und Freeze laufen; nach CLEAN NoiseChunk/Interpolation, Aquifers,
+- `feature_catalog`: GEN-05.2-Codereview CLEAN abgeschlossen;
+  jetzt SRV-05.1 Daten-/APIentwurf für alle968 normalen Craftingrezepte,
+  Originaltags, komponententragende Resultate und Craftingreste.
+- `item_transfer_primitives`: GEN-05.3 NoiseChunk/Interpolation intern
+  freigegeben, Runtimeimplementierung begonnen. Danach direkt Aquifers,
   Material/Ore und Surface/Biome bis zu echter Chunkgeneration.
-- `select_world_ticket`: konkreter DUR-03.1-API-/Schemaentwurf für atomare
-  Player↔Entity-Ownership. Eigener versionierter Modus mit scoped Player,
-  Revisionen/Tombstones und bounded idempotenten Receipts; Rootdesignreview
-  vor Runtimecode. Danach DUR-04 Reservation/Pending/Ack und DUR-05 Appdriver.
+- `select_world_ticket`: DUR-03.1 Format6-/CAS-/Receiptentwurf intern
+  freigegeben, Storage-Runtimeimplementierung begonnen. Danach DUR-04
+  Reservation/Pending/Ack und DUR-05 Appdriver.
 
 Der Oracleagent `gen05_2_router_oracle` ist beendet und besitzt keine aktive
 Runtimeaufgabe. Seine fünf Referenzdateien sind eingefroren:17.213 tatsächliche

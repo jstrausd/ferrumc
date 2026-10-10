@@ -461,8 +461,10 @@ Artefakte und verbleibende Grenzen stehen im
 | STORAGE-ENTITY001.2 | F | [Explizite4→5-Migration](agent-tasks/STORAGE-ENTITY001_2_UUID_MIGRATION.md), `34acc8e9`: unabhängiges Review CLEAN, Debug/Release je243 Tests plus fünf Runtime-/drei Authorityprobes grün. Geschlossenes Backup/immutable Checkpoint und vollständige Delta-/Retryvalidation. Keine Appaktivierung. |
 | REG-WORLDGEN001 | F | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md),555ee2aa: unabhängiges Rootreview CLEAN, Debug/Release jeweils69 und4 Reviewerproben grün;102 tatsächliche Originalressourcen und195 Amplitudenbits vollständig geprüft. Keine aktive Terrainpipeline. |
 | GEN-05.1 | F | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md), `c4e3dc76`: unabhängiger Rootreview CLEAN, Debug/Release je177 plus3 eigene Probes und strictchecks grün.128 tatsächliche Original-JAR-Records, frischer normal/-O-Reexport bytegleich;35 Definitionen/7 Router. Seed-/Terrainconsumer bleiben offen. |
-| GEN-05.2 | A | [Seed-/Scalar-/Climateconsumer](agent-tasks/GEN-05_2_SEEDED_ROUTER_APPROVAL.md): konkreter vollständiger Vertrag durch Root freigegeben, `item_transfer_primitives` implementiert echte Seedbindung, Factory-/Boundviews und gemeinsame Budgetauswertung gegen actual JAR. Noch keine Chunks. |
-| DUR-03.1 | A | [Player↔Entity-Transferentwurf](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md): `select_world_ticket` konkretisiert eigenen scoped Ownershipmodus, monotone Revisionen/Tombstones und bounded idempotente Receipts. Rootdesignreview vor Produktionsstart; DUR-03 bleibt O. |
+| GEN-05.2 | F | [Seed-/Scalar-/Climateconsumer](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md), `290e5343`: unabhängiger Review CLEAN, Debug/Release je188 und drei unabhängige Zusatzprobes grün. Alle17.213 Original-JAR-Records geprüft; frischer normal/-O Reexport bytegleich. Keine aktiven Chunks. |
+| GEN-05.3 | A | NoiseChunk/Interpolation: vollständiger konkreter Entwurf durch Root intern freigegeben; `item_transfer_primitives` implementiert originale Wrapper-/Array-/Driversemantik, Preliminary und Climate. PaperBuild60-Policy nur im neuen Chunkpfad; Material-/Terrainaktivierung folgen. |
+| DUR-03.1 | A | [Player↔Entity-Transferproducer](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md): vollständiger Format6-/CAS-/Receiptentwurf intern freigegeben, `select_world_ticket` implementiert tatsächliche Storageauthority. Drop/Pickup-/Appconsumer und DUR-03-Gesamtumfang bleiben offen. |
+| SRV-05.1 | A | [Normale Craftingrezepte](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md): `feature_catalog` konkretisiert Daten/API für alle968 shaped/shapeless Rezepte mit Originaltags, Komponenten und Craftingresten. Rootreview vor Runtime; Onlinecrafting und weitere Rezepttypen folgen. |
 | SIM-03.3 / SRV-02.1 | F | [Besessene ItemEntities](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md), `84967c54`: Rootreview CLEAN, Debug/Release je252 Tests samt3 zusätzlichen Probes und strictchecks grün; sealed Slotstate, lossless FCIE/FCIS, owned Refusals/Removal, checked Restore und originale Counter. Drop/Pickup/Appaktivierung folgen; SIM-03/SRV-02 bleiben offen. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
@@ -478,9 +480,9 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Reviewer `feature_catalog` | GEN-05.2 | Unabhängiger Weltcodereview begonnen | Read-only Worldproduktion; exklusives eigenes Reviewdokument. STORAGE-ENTITY001.2 ist CLEAN integriert. |
-| Storageagent `select_world_ticket` | DUR-03.1 | Vollständiger API-/Schemaentwurf | Zunächst eigener Transferbrief; Produktionsstart nach Rootdesignreview. Oracleagent ist fertig, 17.213 echte JAR-Records eingefroren. |
-| Weltagent `item_transfer_primitives` | GEN-05.2 | Ganze Corpusprüfung grün; finale Gesamtchecks/Freeze | World-Crate und GEN-05-Brief; Compiler CLEAN als `c4e3dc76` integriert, konkreter .2-Vertrag durch Root freigegeben. |
+| Rezeptagent `feature_catalog` | SRV-05.1 | Konkreter API-/Datenentwurf | Items-Crate und eigener Rezeptbrief; GEN-05.2-Fremdreview abgeschlossen und CLEAN integriert. |
+| Storageagent `select_world_ticket` | DUR-03.1 | Runtimeimplementierung freigegeben und begonnen | Storage-Crate und Transferbrief; .2-Migration CLEAN integriert, eigene Format6authority. |
+| Weltagent `item_transfer_primitives` | GEN-05.3 | Runtimeimplementierung freigegeben und begonnen | World-Crate und GEN-05-Brief; .2-Seedrouter CLEAN als `290e5343` integriert. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
 aktiven Slots stehen im Implementierungsboard. Reviews nutzen frei gewordene
