@@ -1,12 +1,22 @@
-//! Checked, seed-free Minecraft 1.21.8 builtin density and router compilation.
+//! Checked Minecraft 1.21.8 builtin compilation and seeded scalar/climate sampling.
 //!
 //! Templates own immutable private graphs. They expose metadata only: there is
 //! no evaluation API, unbound-noise sampler, generated chunk or natural-world
 //! identity. Seed binding and `NoiseChunk` contexts are subsequent consumers.
 
+mod bind;
 mod compile;
+mod evaluate;
 mod graph;
 mod json;
+mod seeded;
+
+pub use seeded::{
+    ClimateAxis, ClimateQuartPos, ClimateSample, DensityBatchBudget, DensityBindError,
+    DensityBindErrorKind, DensityBounds, DensityRequest, DensitySampleError,
+    DensitySampleErrorKind, DensityWorkBudget, SeededRouter, MAX_DENSITY_BATCH_REQUESTS,
+    MAX_DENSITY_BATCH_WORK, MAX_DENSITY_BLOCK_COORDINATE, MAX_DENSITY_SAMPLE_WORK,
+};
 
 use std::sync::Arc;
 

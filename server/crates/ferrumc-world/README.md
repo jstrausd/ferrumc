@@ -7,8 +7,12 @@ builtin density definition and all seven builtin settings routers into checked,
 immutable private graphs. `DensityTemplate::compile_definition` and
 `RouterTemplate::compile_builtin` expose geometry, flags, noise references and
 graph metadata. They validate all 35 definitions, including unused graphs.
-They provide no density sampling or natural chunk generation; the executable
-server still uses the flat generator described below.
+`RouterTemplate::bind_seed` now constructs an immutable `SeededRouter` for
+explicit seeds. It samples the fifteen original router fields, all 35 named
+definitions and six climate axes in the original empty-Blender point context.
+The executable server still uses the flat generator described below; block
+chunks, interpolation, aquifers, materials, biomes and surfaces need their own
+consumers.
 
 Admission retains both direct/reference `HolderHolder` nodes and distinct raw
 spline-coordinate holders. Bounds are 2 MiB distinct original source bytes,
@@ -27,6 +31,33 @@ terrain, Survival or Paper runtime parity. See the
 [density oracle](tests/reference/density_compiler.md) and
 [GEN-05](../../../docs/agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md) for the
 exact projection scope, corrected holder inventory and next consumers.
+
+Seed binding distinguishes decoded codec objects from actual native registered
+`NoiseRouterData` targets. Sparse native variants preserve factory provenance
+and original first/second visitor diagnostics inside the existing graph caps.
+Bounds preserve original nonfinite, reversed and signed-zero diagnostics;
+they are metadata rather than sample clamps. Sampling rejects a nonfinite
+completed requested node with a classified error and no replacement density.
+
+Every point or six-axis climate sample shares an explicit work budget of
+1..=1,048,576 across density, spline and noise operations. Batches accept
+1..=4096 requests with one aggregate budget up to 67,108,864 units and publish
+results only after all requests succeed. Horizontal block coordinates include
+±30,000,000; vertical coordinates support all i32 values. Checked quart
+coordinates convert to the original block origin without Java shift wrap;
+negative unaligned blocks floor to their enclosing quart. Exact block climate
+sampling is also available. These samples contain no biome or spawn selection.
+
+The separate [seeded router oracle](tests/reference/density_router.md) calls
+actual original `RandomState`, both visitors, scalar/bounds and climate methods.
+Its corpus covers all settings and signed seed extremes, nested spline
+properties, native registered targets, direct large per-octave wrapped noise,
+canonical-name controls, aquifer/ore positional draws and selected-child traces.
+Original Java NaN/throw behavior and `FerrumC`'s checked refusal policy are
+compared separately. Vanilla's overflow-prone distant End density is retained
+as this oracle's numerical reference; Paper's widened End path needs separate
+acceptance before an active terrain generator claims Paper parity. No RAM/TPS
+improvement or Survival/plugin completion follows from scalar parity.
 
 This crate owns the world's block-storage value types and a flat-world
 generator:
@@ -123,9 +154,9 @@ float bits, complete active permutations, signed seed extrema, parent RNG
 consumption, normal scaling boundaries, Blended codec endpoints and clamped
 interpolation boundaries. See
 [GEN-04.2](../../../docs/agent-tasks/GEN-04_2_NORMAL_SIMPLEX_BLENDED.md).
-Density routing/sampling, End island density, `WorldgenRandom` feature/decoration
-seeding, Overworld/Nether/End chunk consumers and complete world seed parity
-remain separate work. Primitive goldens do not establish complete terrain or
+`WorldgenRandom` feature/decoration seeding, Overworld/Nether/End chunk consumers
+and complete world seed parity remain separate work. Seeded plain-point density
+and End scalar sampling are supplied by the separate checked router consumer. Primitive goldens do not establish complete terrain or
 cross-platform parity.
 
 ## Original cubic splines

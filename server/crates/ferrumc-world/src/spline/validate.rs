@@ -213,10 +213,10 @@ fn metrics(
     Ok((bounds, depth))
 }
 
-fn diagnostics(
+pub(super) fn diagnostics(
     range: SplineCoordinateRange,
     points: &[SplinePoint],
-    bounds: &[(f32, f32); MAX_SPLINE_NODES],
+    bounds: &[(f32, f32)],
 ) -> (f32, f32) {
     let mut min = f32::INFINITY;
     let mut max = f32::NEG_INFINITY;

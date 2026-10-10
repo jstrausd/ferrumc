@@ -57,14 +57,14 @@ pub(super) enum HolderOrigin {
     Direct,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct Point {
     pub location: f32,
     pub derivative: f32,
     pub value: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) enum NodeKind {
     Constant(f64),
     // Direct HolderHolder is an actual original codec node, even around a

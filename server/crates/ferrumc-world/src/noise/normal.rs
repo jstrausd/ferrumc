@@ -1,7 +1,9 @@
 use ferrumc_math::Vec3;
 
+use super::ConsumerNoiseError;
 use super::{finite, octave_max_value, validate_input, validate_octaves, NoiseError, PerlinNoise};
 use crate::random::WorldgenRandomSource;
+use crate::sample_work::SampleWork;
 
 const SECOND_INPUT_FACTOR: f64 = 1.018_126_888_217_522_7;
 
@@ -112,5 +114,30 @@ impl NormalNoise {
         );
         validate_input(second, 0.0, 0.0)?;
         finite((self.first.sample(position)? + self.second.sample(second)?) * self.value_factor)
+    }
+
+    pub(crate) fn sample_consumer(
+        &self,
+        position: Vec3,
+        work: &mut SampleWork,
+    ) -> Result<f64, ConsumerNoiseError> {
+        let second = Vec3::new(
+            position.x * SECOND_INPUT_FACTOR,
+            position.y * SECOND_INPUT_FACTOR,
+            position.z * SECOND_INPUT_FACTOR,
+        );
+        if ![
+            position.x, position.y, position.z, second.x, second.y, second.z,
+        ]
+        .into_iter()
+        .all(f64::is_finite)
+        {
+            return Err(NoiseError::InvalidInput.into());
+        }
+        Ok(finite(
+            (self.first.sample_consumer(position, work)?
+                + self.second.sample_consumer(second, work)?)
+                * self.value_factor,
+        )?)
     }
 }

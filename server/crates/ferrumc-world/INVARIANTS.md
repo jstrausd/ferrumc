@@ -111,7 +111,8 @@
   the documented toolchain, not complete world-seed or cross-platform parity.
 - No seeded density/router sampling, chunk consumer, Natural-world identity,
   persistence gate, event, storage/thread handle or Gaussian API is activated
-  by these primitives. The separate seed-free compiler exposes metadata only.
+  by these primitives. The separate compiler admits metadata and graphs; seeded point sampling is
+  provided by its explicitly bounded router consumer.
 - Simplex retains only the original 256 addressed permutation values. Its
   original extra 256 zero entries are unused. Construction shares the identical
   Improved shuffle; seeded offsets are not added by the original 2D/3D samplers.
@@ -165,8 +166,8 @@
   endpoint. Shared child/coordinate requests repeat without memoization.
 - Interpolation, extrapolation and diagnostics preserve original f32 order;
   no deliberate FMA, algebraic reassociation or f64 interpolation. A future
-  density adapter must cast original f64 coordinates to f32 before sampling
-  and widen the f32 result after sampling, as the original does.
+  density adapter casts original f64 coordinates to f32 before sampling
+  and widens the f32 result after sampling, as the original does.
 - Original Java min/max propagate NaN and preserve signed-zero distinctions.
   Diagnostic overflow/infinity/NaN is retained and never guards finite sample
   coordinates. Reported coordinate ranges neither clamp callback values nor
@@ -188,8 +189,9 @@
 - `DensityTemplate::compile_definition` and `RouterTemplate::compile_builtin`
   admit only typed pinned Registry resources. All 35 density definitions,
   including unused definitions, are validated before a template is returned.
-  No raw JSON compiler, unchecked node handle, default router, sample method,
-  seeded noise, natural-world identity or chunk output is exposed.
+  No raw JSON compiler, unchecked node handle, default router, natural-world
+  identity or chunk output is exposed. The explicit router seed-binding API
+  supplies the separately checked scalar/climate consumer below.
 - Graphs are owned immutable `Arc` data. Every original density helper input,
   including inline constants/objects, retains its `HolderHolder`; raw spline
   coordinate holders remain separate vertices. Named targets are resolved only
@@ -222,6 +224,71 @@
   raw bits, holder identities and 32 node forms; six direct factory probes are
   separate evidence for later visitor lowering. Structural acceptance supplies
   no density sampling, worldgen, Survival or Paper-runtime parity.
+
+## Original seeded density and climate consumer
+
+- Seed binding owns one immutable graph/noise pool and two original visitor
+  views. It preserves every signed64 seed, selected algorithm, canonical named
+  positional streams, legacy temperature/vegetation wrapping seeds and zero
+  offset special case, independent Blended terrain seed and End 17292-step consumption.
+  Private aquifer/ore positional factories are retained; no material consumer
+  is activated. Binding errors cannot publish a partial router or mutate a
+  previously returned router/template/clone.
+- Decoded JSON objects and actual registered native `NoiseRouterData` objects
+  have distinct origins. Decoded inline HolderHolder stays; native inline
+  codec artifacts are omitted. Reference holders and raw spline coordinates
+  resolve to the registered graph. Sparse native variants share unchanged
+  immutable nodes; each tested settings graph needs 162 additional vertices.
+  Both prepared/visitor views keep 4096 vertices, 8192 edges and depth 96 limits, with
+  pre-growth vertex/edge checks and the complete existing graph validator.
+- Actual factories, source indices and holder origins are retained privately.
+  The seed visitor preserves Holder/Marker factories and rebuilds original
+  diagnostics. The climate visitor removes them without compute charges and
+  rebuilds their ancestors. Native and already-existing MulOrAdd uses its own
+  mapAll bounds; decoded Ap2 uses the original two-input factory path. Spline
+  diagnostics use the existing original f32 builder, with a private coordinate
+  range adapter that preserves arbitrary original diagnostics while public
+  caller admission stays unchanged.
+- Bounds preserve exact original signed zero, reversed, infinity and NaN values.
+  They are not guaranteed mathematical hulls and never clamp samples. Java
+  min/max and original mapped diagnostics are preserved. Actual samples use
+  the original evaluation/shortcircuit order; Ap2 mul ±0 skips right and yields
+  +0, whereas MulOrAdd with a zero argument evaluates input. MIN/MAX skips use strict right bounds.
+  RangeChoice selects exactly one child; spline keeps low-before-high order.
+- One work meter crosses every density/spline/noise transition. Charges occur
+  before executed density/spline entries, coordinate callbacks, binary-search
+  comparisons, sampler invocations, every fixed octave slot including zeros
+  and every one of 625 End candidates plus eligible Simplexinvocations. Removed
+  climate holders/markers are aliases and uncharged. Exhaustion stops the next
+  operation; there is no recursion-local allowance reset, sample value cache,
+  mutable RNG use, I/O, lock or production point/climate allocation.
+- Point and six-axis climate budget is 1..=1,048,576. Batch shares one budget of
+  1..=67,108,864 over 1..=4096 ordered requests. All shape/position checks happen
+  before sampling and bounded output allocation. First failure stops later
+  requests; no partial output is published. Errors identify source, target,
+  position, batch index where applicable and limit/used or raw nonfinite bits.
+- Block X/Z include ±30,000,000; Y includes all i32. Quart-to-block conversion
+  checks i64 products before casts and refuses shift wrap. from_block uses
+  arithmetic >>2 including negative unaligned coordinates. sample_climate uses
+  quart origin; sample_climate_at_block uses the exact block. Six original
+  f64 results cast to f32 then quantize with f32 × 10000 and Java-long saturation.
+  Neither method resolves biomes, spawn or chunk terrain.
+- Legitimate 45 billion scaled jagged inputs use private finite checked per-octave wrap,
+  including original Normal second scaling and long-floor conversion checks.
+  Public noise caller caps stay unchanged. Every actually requested completed
+  density/spline node and f32coordinate must be finite. Checked refusal can
+  stop before a later Java child even when Java's final parent is finite; no
+  numerical fallback or diagnostics normalization is supplied.
+- Plain End density follows Vanilla truncating division/remainder and initial
+  wrapping i32 radius, preserving full 625 candidate evaluation before checked
+  nonfinite refusal. Paper widens that radius and has a cache; Vanilla goldens
+  do not establish Paper End parity or authorize its terrain activation.
+- The new actual-JAR corpus separately proves both recursive visitor factory
+  views, scalar/bounds/climate bits, registered origins, wrapped noise, named
+  seed controls, positional factory draws and original branch traces. Rust
+  tests prove its own budgets, finite policy, admission and atomic publication;
+  Java does not implement or prove FerrumC work budgets. Existing primitive,
+  composite-noise, public spline and seed-free codec corpora stay unchanged.
 
 ## Block-entity persistence
 

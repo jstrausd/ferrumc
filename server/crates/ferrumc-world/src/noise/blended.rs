@@ -1,7 +1,9 @@
 use ferrumc_math::{BlockPos, Vec3};
 
+use super::ConsumerNoiseError;
 use super::{finite, lerp, wrap_unchecked, NoiseError, PerlinNoise};
 use crate::random::WorldgenRandomSource;
+use crate::sample_work::SampleWork;
 
 /// Explicit original blended-noise codec parameters; no default terrain profile.
 /// The original Java testing constructor accepts values outside these ranges;
@@ -148,7 +150,29 @@ impl BlendedNoise {
         finite(self.sample_with_blend(position).0)
     }
 
+    pub(crate) fn sample_consumer(
+        &self,
+        position: BlockPos,
+        work: &mut SampleWork,
+    ) -> Result<f64, ConsumerNoiseError> {
+        let result = self.sample_with_blend_metered(position, &mut || work.charge())?;
+        Ok(finite(result.0)?)
+    }
+
     fn sample_with_blend(&self, position: BlockPos) -> (f64, f64) {
+        match self
+            .sample_with_blend_metered(position, &mut || Ok::<(), std::convert::Infallible>(()))
+        {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+
+    fn sample_with_blend_metered<E>(
+        &self,
+        position: BlockPos,
+        charge: &mut impl FnMut() -> Result<(), E>,
+    ) -> Result<(f64, f64), E> {
         let x = f64::from(position.x()) * self.xz_multiplier;
         let y = f64::from(position.y()) * self.y_multiplier;
         let z = f64::from(position.z()) * self.xz_multiplier;
@@ -160,6 +184,7 @@ impl BlendedNoise {
         let mut interpolation_sum = 0.0;
         let mut frequency = 1.0;
         for index in 0..8 {
+            charge()?;
             if let Some(noise) = self.main_noise.octave_noise(index) {
                 interpolation_sum += noise.sample_unchecked(
                     Vec3::new(
@@ -182,6 +207,7 @@ impl BlendedNoise {
         let mut max_value = 0.0;
         frequency = 1.0;
         for index in 0..16 {
+            charge()?;
             let p = Vec3::new(
                 wrap_unchecked(x * frequency),
                 wrap_unchecked(y * frequency),
@@ -202,7 +228,7 @@ impl BlendedNoise {
         }
         let min = min_value / 512.0;
         let max = max_value / 512.0;
-        (clamped_lerp(min, max, blend) / 128.0, blend)
+        Ok((clamped_lerp(min, max, blend) / 128.0, blend))
     }
 }
 

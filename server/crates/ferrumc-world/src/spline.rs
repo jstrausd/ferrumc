@@ -355,6 +355,36 @@ impl CubicSpline {
         evaluate::sample(&self.graph, budget, coordinate)
     }
 
+    pub(crate) fn sample_shared<E>(
+        &self,
+        work: &mut crate::sample_work::SampleWork,
+        coordinate: &mut impl FnMut(
+            SplineCoordinateId,
+            &mut crate::sample_work::SampleWork,
+        ) -> Result<f32, E>,
+    ) -> Result<f32, SplineSampleError<E>> {
+        evaluate::sample_shared(&self.graph, work, coordinate)
+    }
+
+    // Structure/point admission is unchanged. Only original density diagnostic
+    // ranges may contain reversed/nonfinite endpoints in this private consumer.
+    pub(crate) const fn original_coordinate_range(min: f32, max: f32) -> SplineCoordinateRange {
+        SplineCoordinateRange { min, max }
+    }
+
+    pub(crate) fn original_multipoint_bounds(
+        min: f32,
+        max: f32,
+        points: &[SplinePoint],
+        child_bounds: &[(f32, f32)],
+    ) -> (f32, f32) {
+        validate::diagnostics(
+            Self::original_coordinate_range(min, max),
+            points,
+            child_bounds,
+        )
+    }
+
     /// Returns the original root minimum diagnostic, including signed zero,
     /// infinity or NaN. This is not a bound for arbitrary coordinate callbacks.
     pub fn min_value(&self) -> f32 {

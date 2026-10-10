@@ -25,7 +25,7 @@
 //! - [`ChunkGenerator`] and [`GenerationIdentity`] — a pure versioned baseline
 //!   contract with an explicit numeric [`WorldSeed`]. Storage adoption and
 //!   natural terrain are separate implementation steps.
-//! - [`density`] — checked seed-free builtin density/router graphs and metadata;
+//! - [`density`] — checked builtin graphs, original seeded scalar/climate samples;
 //!   no evaluation or natural terrain is activated by their compilation.
 //!
 //! The network encoder turns a [`Chunk`] into the wire bytes a 1.21.8 client
@@ -49,6 +49,7 @@ pub mod noise;
 mod packed_array;
 mod paletted_container;
 pub mod random;
+mod sample_work;
 pub mod spline;
 
 pub use block_entity::{

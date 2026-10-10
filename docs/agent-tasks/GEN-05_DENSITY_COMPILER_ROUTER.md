@@ -1,9 +1,11 @@
 # GEN-05 — Originale Densitydefinitionen, Seedrouter und Chunkinterpolation
 
-Status: **GEN-05.1 unabhängig CLEAN geprüft und zur Integration freigegeben**.
+Status: **GEN-05.1 unabhängig CLEAN; GEN-05.2 implementiert und für unabhängiges Review eingefroren**.
 Compiler und echte Originalcodec-Strukturabnahme fertig; [Rootreview](GEN-05_1_DENSITY_COMPILER_REVIEW.md)
 mit Debug/Release je177 Tests, drei eigenen Zusatzprobes und frischem
-bytegleichem Original-JAR-Reexport grün. GEN-05.2/.3 benötigen separate
+bytegleichem Original-JAR-Reexport grün. GEN-05.2 hat die genehmigte
+Seedbindung und direkte Auswertung vollständig geliefert; unabhängiges
+Runtime-Review und Integration stehen noch aus. GEN-05.3 benötigt separate
 Folgefreigabe. GEN-04.3 ist unabhängig CLEAN und als
 `245134eb` integriert. REG-WORLDGEN001 ist CLEAN als `555ee2aa` integriert; sein unveränderter
 APIproducer ist die geprüfte Basis dieser Worldcompilation.
@@ -512,3 +514,227 @@ Files unabhängig prüfen. Kein Implementercommit. Nach sauberer .1-Abnahme
 ist **GEN-05.2 echte Seedbindung/Scalar-/Climateauswertung** das konkrete nächste
 Ticket; alle Samples/Chunkwrapper/Aquifer/material/biome/surface und aktive
 Naturalwelt bleiben bis zu ihrer eigenen Umsetzung offen.
+
+
+## GEN-05.2 geprüfte Herkunftspräzisierung (2026-10-10)
+
+Root hat die vollständige sparse-native Herkunftskorrektur intern genehmigt.
+Unveränderter Vorschlag SHA256 `2e91cc9b346bf0168036033e185179f059fc3801f7ad7dd21c18f3de733277e5`;
+der konkrete geprüfte Inhalt ist nachfolgend archiviert. Diese Freigabe erweitert
+keine öffentliche API und aktiviert keine Chunk-/Paper-Terrainausgabe.
+
+# GEN-05.2 amendment: actual registered target origin
+
+Internal approval request to Root, no user approval required. Parent has made
+no runtime change for this issue yet. Only a private dry-run census/projection
+test was added. Existing oracle outputs remain authoritative and unchanged.
+
+## Concrete original behavior and uncovered mismatch
+
+Read complete base RandomState.java constructor/inner NoiseWiringHelper/anonymous
+climatevisitor and full NoiseRouterData.java.bootstrap plus all relevant helpers:
+`.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/`.
+RandomState lines35..130 wires actual settings graphs and returns actual registry
+values inside mapAll. HolderHolder.mapAll (DensityFunctions576..578) retains a
+Direct holder after mapping its **actual value**. NoiseRouterData.bootstrap
+(69..156) builds registry graphs through native factories, with explicit named
+HolderHolder only in registerAndWrap/getFunction (219..225). Inline native
+factory child inputs do not have the codec's HOLDER_HELPER_CODEC wrapper.
+Native spline coordinates use raw named Holder (registerTerrainNoises lines175ff).
+Native MulOrAdd arises through TwoArgumentSimpleFunction.create (1155..1214).
+MulOrAdd.mapAll (749..770) owns its specific reconstruction formula rather than
+replaying Ap2.create. Actual Vanilla-JAR recursive projections already show this.
+
+Example original decoded router temperature -> named shift_x Holder -> native
+flat_cache -> native cache_2d -> ShiftA. Current Rust wrongly has a direct
+CodecHolder between flat_cache and cache_2d because .1 graph roots are decoded
+from exported JSON. .1 typed metadata/codecprojection remains valid: resource
+projections stop at the typed ResourceId; it did not claim actual registered
+closurefactory evaluation. .2 now needs to represent both actual origins.
+
+## Proposed bounded preparation before existing two visitors
+
+No public API or .1compile changes. In bind.rs create one private PreparedGraph
+from the admitted .1 graph. Preserve source vertices at original indices for
+explicit decoded named requests/router roots. Create a `native_map` for source
+nodes reachable from all35named roots, in admitted child-first order.
+
+- A decoded ReferenceHolder/rawReferenceCoordinate points to actual native_map
+  of its registered resource target. A decoded DirectHolder retains its source
+  decoded child. Decoded inputs/Namedroots do not blanket strip their holders.
+- Native inlineDirectHolder is only a codec-representation artifact and maps
+  directly to the native child without allocating a runtime vertex. Native
+  ReferenceHolder remains an actual factory and points to native_map(target).
+- All other native child references use native_map(child). If those child IDs
+  and source factory shape match the already prepared decoded counterpart,
+  share that immutable node. Otherwise append one tagged native variant for that
+  source index. No repeated reference occurrence expands a target tree.
+- Native direct-child Constant means its Binary source shape actually came
+  from MulOrAdd before NoiseWiring. First noisevisitor therefore uses original
+  MulOrAdd.mapAll endpoint formula for that tagged node. Ordinary decoded Ap2
+  follows actual Ap2.mapAll/create; actual climate secondvisitor consumes prior
+  seeded factory as already implemented. No arithmetic constantfolding.
+- Boundnodes retain `{source_index, representation:Decoded|Registered,
+  holder_origin:Option<HolderOrigin>}` privately; BoundView tags SeedRouter or
+  Climate. Actual factory remains BoundKind (Original/actualAlias/MulOrAdd).
+  Source-origin tags and private retained aquifer/ore factories may carry an
+  explicit dead_code expectation in non-test compilation because they are
+  required audit/following-consumer metadata. No fake public API or consumer.
+
+PreparedGraph stores owned nodes, roots/fields/noises metadata and checked stats;
+root/.1 graph never mutates. BoundSpline construction uses prepared remapped
+coordinate targets and the same existing spline bounds/evaluator.
+
+## Exact measured variant census and bounds
+
+Private dry-run tested childremapping/native omission against all7settings and
+ran existing full graph::validate on its result. Log
+`.codex-tmp/gen05_2-native-census.log` (Rustdebug test inspect_registered_target_census).
+Both visitorviews retain the same admitted vertex slots; climate Alias nodes
+are uncharged and actualprojection skips them. Thus counts below apply to EACH
+SeedRouter/Climate view before/after secondvisitor:
+
+| Settings | Source vertices | Native variants | View vertices | View edges | View depth |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| amplified |2398|162|2560|3032|71|
+| caves |2271|162|2433|2887|35|
+| end |2295|162|2457|2907|35|
+| floating_islands |2271|162|2433|2887|35|
+| large_biomes |2398|162|2560|3032|71|
+| nether |2271|162|2433|2887|35|
+| overworld |2398|162|2560|3032|71|
+
+This preserves existing4096vertices/8192edges/combineddepth96 perview and
+8192/16384 combinedviews. Native fullcopy would incorrectly require4233..4360
+vertices and is explicitly rejected. Check cloneappend vertices/edges BEFORE
+growth, run original graph::validate for shape/cycle/depth before publishing
+prepared/bound graph. Construction temporary mapping/order/pending lists have
+original4096caps. Invalid shape typed InvalidGraph; limits typed BindError.Limit,
+no incomplete public binding. Existing noise60/splinecaps unchanged.
+
+## Work/evaluation and tests
+
+Actual native codec-artifact holders have no compute operation and no charge;
+actual native Referenceholders remain compute entries after noisevisitor.
+Actual climate-removed Holder/Marker aliases remain nocharge. No workbudget
+reset across Density/Spline/Noise and no valuecache. Context/Worldborder/Y and
+publiccaps remain unchanged. Native MulOrAdd still evaluates its input at0;
+Ap2 mul ±0 still skips right and yields+0.
+
+Acceptance:
+1. Replace temporary census with exact production PreparedGraph sourceorigin,
+variantcounts/edges/depth assertions for all7settings and bothvisitorviews.
+2. Compare ALL recursive actual7projection trees, every Factory/input/bit/bounds,
+including nested source coordinate/view, against unmodifiedactualJARhelper.
+3. Preserve49binding/1813point/90650scalar/294quart matches; add private builtin
+native-vs-directdecoded Namedtarget test proving distinct wrapper/factory/work
+origins and sourceconst/MulOrAdd secondvisitor diagnostics.
+4. Complete separate Oraclechild additional actual noise/RNG/branchtrace/quantize
+corpus, sharedmeter N/N-1 tests and typed finite/errorpolicy.
+5. Full oldpublicoracles, debug/release, strictclippy/fmt, source matrix/provenance,
+final freeze and independent Rootreview. No .3chunks or Paperterrain claim.
+
+## GEN-05.2 — gelieferter Stand und eingefrorene Abnahme (2026-10-10)
+
+Die freigegebene Seedbindung ist implementiert. Der ursprüngliche vollständige
+Aktivierungsvorschlag `.codex-tmp/gen05_2-activation-proposal.md` hat SHA256
+`9b92ed683d495d5e8ddea964b046f44a1d90e7c8ac089cb811c24b94bf84b177`.
+Die oben archivierte Herkunftskorrektur ist ebenfalls umgesetzt und geprüft.
+Dieser Abschnitt dokumentiert die eigene Abnahme; er ersetzt kein unabhängiges
+Rootreview und behauptet keine aktive Terrain- oder Survivalfähigkeit.
+
+Öffentlicher Vertrag in `ferrumc_world::density`:
+
+- `RouterTemplate::bind_seed(WorldSeed)` liefert einen immutable `SeededRouter`.
+- `seed`, `resource`, `field_bounds`, `definition_bounds`, `climate_bounds`
+  melden expliziten Ursprung und originale Diagnostik ohne Sample-Clamping.
+- `sample_field` und `sample_definition` werten den tatsächlichen direkten
+  Blockkontext aus; `sample_climate_at_block` behält exakt diesen Block,
+  `sample_climate(ClimateQuartPos)` verwendet den originalen Quartursprung.
+- Point/Climate teilen je einen geprüften Budgetwert von 1 bis 1.048.576.
+  `sample_batch` nimmt 1 bis 4096 Requests und ein gemeinsames Budget von
+  höchstens 67.108.864; erst vollständiger Erfolg veröffentlicht das Ergebnis.
+- Klassifizierte Compile-/Bind-/Samplefehler behalten Resource, Feld, Position,
+  Batchindex und die jeweiligen Limit-/Nonfiniteinformationen. Kein Sample
+  führt I/O, RNGmutation, Locks oder eine Valuecachemutation aus. Nur der
+  begrenzte Batchoutput wird beim Sampling allokiert.
+
+Die sparse-native Vorbereitung ergänzt pro Router exakt 162 private Varianten.
+Beide tatsächlichen Visitorviews halten für Overworld/Large/Amplified jeweils
+2560 Vertices, 3032 Edges und Tiefe 71, für Caves/Floating/Nether jeweils
+2433/2887/35 und für End 2457/2907/35. Alle behalten die freigegebenen Kappen
+4096/8192/96; Vertex-/Edgeprüfungen passieren vor Wachstum, danach läuft der
+vollständige bestehende gemeinsame Graphvalidator. Decoderorigins und actual
+registrierte Factoryprodukte bleiben getrennt; unveränderte private Nodes
+werden immutable geteilt. Das belegt noch keine Java-HashMap-/Objektgleichheit
+oder Wrapper-Sharingsemantik einer späteren NoiseChunk-Session.
+
+Die echte Original-JAR-Abnahme umfasst **17.213 Records**:
+
+| Abnahme | Tatsächlich geprüfter Umfang |
+| --- | --- |
+| Seeds und direkte Werte | 49 Settings-/Seedbindungen, 1813 Blockpositionen, 90.650 Densitywerte; alle 15 Fields und 35 decoded Namedroots. |
+| Tatsächliche Visitorstruktur | 637 vollständige rekursive Roots: je sieben Settings × (15 Fields + 35 decoded Named + 35 native Registered + sechs Climateaxes); sämtliche Factory-/Bounds-/Referenzbits. |
+| Spline und Climate | 53.628 verschachtelte Spline-Treeoccurrences mit vollständiger Diagnostik; sechs Climateaxes an allen Blockpositionen, 294 zusätzliche Quartproben und 42 echte Quantisierungsfälle. |
+| Noise und Namen | 14.700 Normal-/Perlinproben einschließlich großer legitimer Inputs und falscher Namen als Kontrollen; 2940 originale Maximalwertpins für alle 60 Noiseresourcen. Runtimepool wird nur gegen aktive Ressourcen geprüft. Unbenutzte kanonische Testproben verwenden separat denselben privaten Binder. |
+| Factory und Requests | 308 tatsächliche Branch-/Factorytraces aus 77 Cases × Factory/Identity/Wiring/Climate, einschließlich Shortcircuit-/Nonfinite-/Failureprefixnachweis. |
+| Spätere Material-RNG-Basis | 686 echte Aquifer-/Ore-Factorypositionen und 2058 Longdraws; noch keine Aquifer-, Ore- oder Blockausgabe. |
+
+Elf zusätzliche Rusttests prüfen unter anderem native Herkunft und alle Kappen,
+gemeinsame Density→Spline→Density/Noise-Meter, ausgewählte Branches,
+Quart-/Worldborder-/i32-Y-Grenzen, große Noiseinputs, Endoverflow, atomare
+Batchfehler und die ausdrücklich strengere finite Policy. Jede tatsächlich
+angefragte fertig berechnete Nonfinite-Node wird verweigert: Java kann danach
+noch einen endlichen outside-RangeChoice-Child wählen. Java ProbeFailure wird
+im privaten Rusttrace durch einen Nonfinite-Childsentinel modelliert; geprüft
+wird die Requestfolge beziehungsweise der Refusalprefix, keine Gleichheit
+von Javaexceptions oder Pluginverhalten.
+
+Vanilla End behält den ersten i32-Radiusoverflow und den vollständigen
+625-Kandidatenloop. Ein resultierendes NaN wird als typisierter Fehler
+verweigert. Paper widenet diese Distanz und benötigt eine getrennte
+Numericalabnahme; die Vanilla-JAR-Fixture beweist diese Abweichung nicht.
+
+Oraclechild besitzt die fünf neuen Router-Fixture-/Referencefiles exklusiv.
+Sein vollständiger Freeze `.codex-tmp/gen05_2-child-oracle-final.freeze.json`
+hat SHA256 `bae903ce56acdef17ac8d28901f359c351a5958fc08eb340a731ba28843ffac8`.
+Fixture: 47.371.851 Bytes, SHA256
+`2012acc2b8256a9adbf10b54a3534e8d9cc5d0a79d5e481d5bc3ff55cd73430e`;
+Manifest SHA256
+`f3dfc7e1614e26ab809996dea2928638e76b6c03da80b124c58f63c8b96c80f2`.
+Normaler und Python-`-O`-Reexport ergeben bytegleiche Fixture **und** Manifest;
+acht negative Pinguards laufen auch unter `-O`. 28 tatsächliche CodeSources
+(27 Originalklassen und Helper) sowie 51 Inputs wurden rehashed. Die ursprüngliche
+2163-Record-Baseline ist separat bytegenau rekonstruiert. Vollständige
+Source-/Calleematrix und Policygrenzen stehen in
+`tests/reference/density_router.md` der Worldcrate. Root hat zusätzlich eigene
+frische normale und optimierte Reexports geprüft.
+
+Eigene finale Checks mit dem gepinnten Rusttoolchain, zwei Jobs,
+`--offline --locked --target-dir ../.codex-tmp/gen04_3-target` ab `server/`:
+
+- World-Debug: **188 passed** (145 Lib + 43 Integration).
+- World-Release: **188 passed** bei denselben Fällen.
+- Strict all-targets Clippy: grün.
+- World `cargo fmt -- --check` und Scope-`git diff --check`: grün.
+- Alle 20 vorher getrackten Fixture-/Referencefiles, World-Cargo.toml,
+  Cargo.lock, Compiler-/JSONfiles und ursprüngliche `worldgen.json` bleiben
+  unverändert; alle fünf Oraclechildfiles stimmen mit dessen Freeze überein.
+
+Finale Logs: `.codex-tmp/gen05_2-world-debug.log`,
+`...-world-release.log`, `...-clippy.log`, `...-world-fmt.log`,
+`...-world-diff-check.log`. Der komplette eigene Runtime-/Docfreeze liegt in
+`.codex-tmp/gen05_2-world.freeze.json`; er enthält sämtliche tatsächlich
+geänderten/neuen Worldfiles und diesen Brief einschließlich der separat
+gefrorenen Oraclechildfiles. Unveränderte Inputs sind separat in
+`.codex-tmp/gen05_2-world-input-check.json` festgehalten. Kein Implementercommit.
+
+Nach Übergabe bleiben alle .2-Produktionsfiles und dieser gemeinsame Brief
+für unabhängiges Review unverändert. Die nächste konkrete Arbeit ist der
+separate vollständige .3-Vorschlag
+`.codex-tmp/gen05_3-noise-chunk-proposal.md`: tatsächliche fünf Wrapper,
+Originalsharing, Array-/Cellkontexte, Lifecycle, Interpolation, Ressourcen- und
+Arbeitskappen sowie echte NoiseChunk-JAR-Abnahme. Kein .3-Runtimecode wird vor
+Rootfreigabe geschrieben. Aquifer/Material/Orevein, Biome/Surface/Bedrock und
+konkrete Noisechunkblöcke folgen danach; Carvers, Features und Structures
+bleiben weiterhin eigenständige reale Generationsstages.

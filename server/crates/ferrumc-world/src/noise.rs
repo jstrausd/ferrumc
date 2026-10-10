@@ -6,6 +6,7 @@
 use ferrumc_math::Vec3;
 
 use crate::random::WorldgenRandomSource;
+use crate::sample_work::{SampleWork, SampleWorkExceeded};
 
 mod blended;
 mod normal;
@@ -48,6 +49,22 @@ pub enum NoiseError {
     /// A blended-noise parameter falls outside its original codec range.
     #[error("blended-noise parameter {0} is nonfinite or outside its codec range")]
     InvalidBlendedParameter(&'static str),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConsumerNoiseError {
+    Noise(NoiseError),
+    Work(SampleWorkExceeded),
+}
+impl From<NoiseError> for ConsumerNoiseError {
+    fn from(error: NoiseError) -> Self {
+        Self::Noise(error)
+    }
+}
+impl From<SampleWorkExceeded> for ConsumerNoiseError {
+    fn from(error: SampleWorkExceeded) -> Self {
+        Self::Work(error)
+    }
 }
 
 // The final four entries intentionally duplicate particular original gradients.
@@ -413,6 +430,55 @@ impl PerlinNoise {
         }
         finite(value)
     }
+
+    // Only the checked builtin density consumer uses this path. A legitimate
+    // block position can produce inputs larger than the public caller cap;
+    // each original octave is wrapped before its ImprovedNoise sample.
+    pub(crate) fn sample_consumer(
+        &self,
+        position: Vec3,
+        work: &mut SampleWork,
+    ) -> Result<f64, ConsumerNoiseError> {
+        if ![position.x, position.y, position.z]
+            .into_iter()
+            .all(f64::is_finite)
+        {
+            return Err(NoiseError::InvalidInput.into());
+        }
+        let mut frequency = self.input_factor;
+        let mut factor = self.value_factor;
+        let mut value = 0.0;
+        for octave in &self.octaves {
+            work.charge()?;
+            if let Some(noise) = &octave.noise {
+                let sample_position = Vec3::new(
+                    wrap_consumer(position.x * frequency)?,
+                    wrap_consumer(position.y * frequency)?,
+                    wrap_consumer(position.z * frequency)?,
+                );
+                validate_input(sample_position, 0.0, 0.0)?;
+                value +=
+                    octave.amplitude * noise.sample_unchecked(sample_position, 0.0, 0.0) * factor;
+            }
+            frequency *= 2.0;
+            factor /= 2.0;
+        }
+        Ok(finite(value)?)
+    }
+}
+
+fn wrap_consumer(value: f64) -> Result<f64, NoiseError> {
+    let quotient = value / 33_554_432.0 + 0.5;
+    // Original lfloor performs a Java long conversion. All supported builtin
+    // block-domain products stay comfortably inside this conversion domain;
+    // reject unsupported products instead of relying on unchecked casts.
+    if !value.is_finite()
+        || quotient < -9_223_372_036_854_775_808.0
+        || quotient >= 9_223_372_036_854_775_808.0
+    {
+        return Err(NoiseError::InvalidInput);
+    }
+    finite(wrap_unchecked(value))
 }
 
 /// Applies original Perlin coordinate wrapping to a finite bounded scalar.

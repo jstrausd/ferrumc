@@ -3,22 +3,7 @@
 use super::{
     Graph, NodeKind, SplineCoordinateId, SplineNodeId, SplineSampleError, MAX_SPLINE_SAMPLE_WORK,
 };
-
-struct Work {
-    left: usize,
-    limit: usize,
-}
-
-impl Work {
-    fn charge<E>(&mut self) -> Result<(), SplineSampleError<E>> {
-        if self.left == 0 {
-            Err(SplineSampleError::BudgetExceeded { limit: self.limit })
-        } else {
-            self.left -= 1;
-            Ok(())
-        }
-    }
-}
+use crate::sample_work::SampleWork;
 
 pub(super) fn sample<E>(
     graph: &Graph,
@@ -28,27 +13,40 @@ pub(super) fn sample<E>(
     if budget == 0 || budget > MAX_SPLINE_SAMPLE_WORK {
         return Err(SplineSampleError::InvalidBudget { budget });
     }
-    let mut work = Work {
-        left: budget,
-        limit: budget,
-    };
-    visit(graph, graph.root, &mut work, coordinate)
+    sample_shared(graph, &mut SampleWork::new(budget), &mut |id, _| {
+        coordinate(id)
+    })
+}
+
+pub(super) fn sample_shared<E>(
+    graph: &Graph,
+    work: &mut SampleWork,
+    coordinate: &mut impl FnMut(SplineCoordinateId, &mut SampleWork) -> Result<f32, E>,
+) -> Result<f32, SplineSampleError<E>> {
+    visit(graph, graph.root, work, coordinate)
+}
+
+fn charge<E>(work: &mut SampleWork) -> Result<(), SplineSampleError<E>> {
+    work.charge()
+        .map_err(|error| SplineSampleError::BudgetExceeded { limit: error.limit })
 }
 
 fn visit<E>(
     graph: &Graph,
     index: usize,
-    work: &mut Work,
-    source: &mut impl FnMut(SplineCoordinateId) -> Result<f32, E>,
+    work: &mut SampleWork,
+    source: &mut impl FnMut(SplineCoordinateId, &mut SampleWork) -> Result<f32, E>,
 ) -> Result<f32, SplineSampleError<E>> {
-    work.charge()?;
+    charge(work)?;
     let result = match &graph.nodes[index].kind {
         NodeKind::Constant(value) => *value,
         NodeKind::Multipoint { coordinate, points } => {
-            work.charge()?;
-            let x = source(*coordinate).map_err(|source| SplineSampleError::CoordinateSource {
-                coordinate: *coordinate,
-                source,
+            charge(work)?;
+            let x = source(*coordinate, work).map_err(|source| {
+                SplineSampleError::CoordinateSource {
+                    coordinate: *coordinate,
+                    source,
+                }
             })?;
             if !x.is_finite() {
                 return Err(SplineSampleError::NonFiniteCoordinate {
@@ -61,7 +59,7 @@ fn visit<E>(
             let mut start = 0;
             let mut count = points.len();
             while count > 0 {
-                work.charge()?;
+                charge(work)?;
                 let half = count / 2;
                 let middle = start + half;
                 if x < points[middle].location {
