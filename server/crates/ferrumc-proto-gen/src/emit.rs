@@ -379,6 +379,9 @@ fn render_dispatch(
         state = state.module(),
     );
     out.push_str(
+        "#[allow(clippy::too_many_lines, reason = \"Generated dispatch tables keep one arm per packet in stable schema order.\")]\n",
+    );
+    out.push_str(
         "pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {\n\
          match id {\n",
     );
