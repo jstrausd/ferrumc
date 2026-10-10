@@ -43,10 +43,11 @@ const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 /// worker.
 ///
 /// Each slot is one tick's (or one chunk-release's) batch of overlays + journal
-/// entries. Sized so the worker has ample headroom under normal edit volume; when
-/// it does fill, the driver's end-of-tick flush *defers* (keeps the chunks
+/// entries. Eight slots absorb short worker stalls without retaining hundreds
+/// of large component-bearing records. Each request has at most four overlays;
+/// when full, the driver's end-of-tick flush defers (keeps the chunks
 /// persist-dirty and retries next tick) rather than blocking the tick.
-const STORAGE_FLUSH_CHANNEL_CAPACITY: usize = 256;
+const STORAGE_FLUSH_CHANNEL_CAPACITY: usize = 8;
 
 /// A bound, running server: a handle to its listening address and shutdown.
 ///

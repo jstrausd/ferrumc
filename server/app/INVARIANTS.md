@@ -37,8 +37,9 @@
   handoff quarantines the player UUID.
 - A chest click may exchange items only after both active window and state IDs
   match. The driver also compares that viewer's bounded chest snapshot atomically
-  before a chest-slot exchange; conflicting views return the unchanged cursor
-  and fresh contents. Resyncs include both slot sections and the cursor.
+  before a chest-slot exchange using exact lossless item encodings, including
+  NBT float bits; conflicting views return the unchanged cursor and fresh
+  contents. Resyncs include both slot sections and the cursor.
 - A Close Container packet may close only the window whose exact ID it carries.
 - Normal window-0 clicks derive changes exclusively from authoritative slots and
   cursor. Spectators cannot exchange items in either section of an open chest
@@ -51,6 +52,16 @@
 - Normal shutdown drains every connection's save, ticket release and Leave
   acknowledgment while the driver remains alive, then stops simulation and
   awaits the final storage drain. Terminal task failures remain observable.
+- Production overlay capture uses the strict fallible codec, at most four
+  records per request. All selected records validate before dirty masks, the
+  mutation journal or assigned mutation IDs transfer. A full eight-slot storage
+  queue defers tick capture; release barriers acknowledge every batch before any
+  ticket release, and shutdown drains all remaining batches.
+- Storage commits on an 8 MiB encoded-overlay threshold as well as existing
+  count/time limits; accounting decreases only after a successful prefix save.
+  Record ceilings bound each request to 12 MiB encoded overlays. Pending data
+  can overshoot its threshold by one request; journals and in-memory object
+  overhead are additional. These are encoded limits, not an RSS guarantee.
 - New player saves use binary schema 3: exactly 46 slots and a required carried
   item, each framed with the lossless bounded FCIS item codec. Typed/opaque
   components, removals, NBT ordering and floating-point bits survive saves.

@@ -104,6 +104,11 @@ const FLUSH_EVERY_N_TICKS: u32 = 4;
 /// how much work one commit defers and how large the in-worker buffer grows.
 const FLUSH_CHUNK_THRESHOLD: usize = 128;
 
+/// Large component records force a commit before the count threshold. The
+/// producer adds at most four bounded records, so pending encoded overlay data
+/// grows by at most one 12 MiB request beyond this 8 MiB threshold.
+const FLUSH_OVERLAY_BYTES_THRESHOLD: usize = 8 * 1024 * 1024;
+
 /// Maximum number of attempts for one retained flush before the worker stops
 /// accepting requests and asks the server to shut down.
 const MAX_FLUSH_ATTEMPTS: u32 = 3;
@@ -134,6 +139,7 @@ impl RetryPolicy {
 #[derive(Debug, Default)]
 struct PendingStorage {
     overlays: Vec<(ChunkKey, ChunkOverlayRecord)>,
+    overlay_bytes: usize,
     mutation_batches: VecDeque<PendingJournalBatch>,
     mutation_count: usize,
 }
@@ -145,6 +151,11 @@ impl PendingStorage {
             mutation_batches,
             ack,
         } = request;
+        self.overlay_bytes = overlays
+            .iter()
+            .fold(self.overlay_bytes, |bytes, (_, record)| {
+                bytes.saturating_add(record.encoded_len())
+            });
         self.overlays.extend(overlays);
         for batch in mutation_batches {
             // This count is only compared with a small flush threshold. Saturation
@@ -161,7 +172,9 @@ impl PendingStorage {
     }
 
     fn reached_threshold(&self) -> bool {
-        self.overlays.len() >= FLUSH_CHUNK_THRESHOLD || self.mutation_count >= FLUSH_CHUNK_THRESHOLD
+        self.overlays.len() >= FLUSH_CHUNK_THRESHOLD
+            || self.mutation_count >= FLUSH_CHUNK_THRESHOLD
+            || self.overlay_bytes >= FLUSH_OVERLAY_BYTES_THRESHOLD
     }
 }
 
@@ -349,8 +362,19 @@ async fn flush_once(
 async fn flush_inner(store: &dyn WorldStore, pending: &mut PendingStorage) -> ServerResult<()> {
     while !pending.overlays.is_empty() {
         let take = pending.overlays.len().min(MAX_SAVE_BATCH);
+        let committed_bytes = pending.overlays[..take]
+            .iter()
+            .fold(0_usize, |bytes, (_, record)| {
+                bytes.saturating_add(record.encoded_len())
+            });
         let batch = pending.overlays[..take].to_vec();
         store.save_chunk_overlays(batch).await?;
+        pending.overlay_bytes = pending
+            .overlay_bytes
+            .checked_sub(committed_bytes)
+            .ok_or_else(|| {
+                ServerError::internal("storage worker pending overlay byte count underflow")
+            })?;
         pending.overlays.drain(..take);
     }
 
@@ -425,6 +449,61 @@ mod tests {
             ChunkKey::new(WorldId::new(1), DimensionId::new(2), pos),
             ChunkOverlayRecord::from_chunk(SchemaVersion::new(3), pos, &chunk, 7),
         )
+    }
+
+    fn dense_overlay() -> (ChunkKey, ChunkOverlayRecord) {
+        let pos = ChunkPos::new(0, 0);
+        let mut chunk = Chunk::new(pos);
+        for section in 0..ferrumc_world::SECTION_COUNT {
+            let y =
+                ferrumc_registry::dimension::MIN_Y + i32::try_from(section).expect("section") * 16;
+            let block = BlockPos::new(1, y, 1);
+            chunk
+                .set_block(block, BlockStateId::new(9))
+                .expect("inside chunk");
+            chunk.mark_persist_dirty(block);
+        }
+        (
+            ChunkKey::new(WorldId::new(1), DimensionId::new(2), pos),
+            ChunkOverlayRecord::try_from_chunk(SchemaVersion::new(3), pos, &chunk, 7)
+                .expect("bounded dense record"),
+        )
+    }
+
+    #[tokio::test]
+    async fn overlay_bytes_trigger_flush_below_count_limit_and_survive_failed_commit() {
+        let (key, record) = dense_overlay();
+        let mut pending = PendingStorage::default();
+        while pending.overlay_bytes < FLUSH_OVERLAY_BYTES_THRESHOLD {
+            assert!(!pending.reached_threshold());
+            pending.push(StorageFlushRequest::new(
+                vec![(key, record.clone())],
+                Vec::new(),
+            ));
+        }
+        assert!(pending.overlays.len() < FLUSH_CHUNK_THRESHOLD);
+        assert!(pending.reached_threshold());
+        let bytes_before = pending.overlay_bytes;
+        let count_before = pending.overlays.len();
+        let store = FaultInjectingStore::new();
+        store
+            .fail_next_before_commit()
+            .expect("inject commit failure");
+        flush_inner(&store, &mut pending)
+            .await
+            .expect_err("failed write");
+        assert_eq!(pending.overlay_bytes, bytes_before);
+        assert_eq!(pending.overlays.len(), count_before);
+        flush_inner(&store, &mut pending)
+            .await
+            .expect("retry exact batch");
+        assert!(pending.is_empty());
+        assert_eq!(pending.overlay_bytes, 0);
+        assert!(!pending.reached_threshold());
+        assert_eq!(
+            store.snapshot().expect("snapshot").chunk_overlay(key),
+            Some(&record)
+        );
     }
 
     fn request(

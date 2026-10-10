@@ -19,6 +19,7 @@
 //! next tick rather than consuming and dropping them.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -58,6 +59,10 @@ use crate::world::chunk_packet;
 /// Independent of the chunk/overlay record versions (the journal is its own
 /// versioned format), per the versioned-record rule.
 const MUTATION_LOG_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
+
+/// Four records cap one producer's temporary encoded overlay work at 12 MiB.
+/// Overflow remains dirty; barriers drain every bounded batch before release.
+const PERSIST_FLUSH_CHUNK_LIMIT: usize = 4;
 
 /// `GameEvent` reason for `change_game_mode` (clientbound Game Event, protocol
 /// 772): the recipient's own game mode switches to the carried mode id. Sent to a
@@ -789,12 +794,12 @@ async fn flush_pending_before_stop(
     tick: Tick,
     next_mutation_id: &mut u64,
 ) -> ServerResult<()> {
-    if has_pending_persistence(shard) {
+    while has_pending_persistence(shard) {
         let permit = storage_tx
             .reserve()
             .await
             .map_err(|_| storage_worker_closed("final shutdown flush"))?;
-        if let Some(request) = build_flush_request(shard, tick, next_mutation_id) {
+        if let Some(request) = build_flush_request(shard, tick, next_mutation_id)? {
             permit.send(request);
         }
     }
@@ -824,12 +829,17 @@ fn build_flush_request(
     shard: &mut SimShard,
     tick: Tick,
     next_mutation_id: &mut u64,
-) -> Option<StorageFlushRequest> {
+) -> ServerResult<Option<StorageFlushRequest>> {
     if !shard.loaded_chunks().has_persist_dirty() && !shard.has_pending_mutations() {
-        return None;
+        return Ok(None);
     }
     let tick_n = tick.get();
-    let overlays = shard.loaded_chunks_mut().take_persist_dirty(tick_n);
+    // Capture every selected record before draining the journal or assigning
+    // ids. An invalid late entity retains the entire selected dirty batch.
+    let capacity = NonZeroUsize::new(PERSIST_FLUSH_CHUNK_LIMIT).unwrap_or(NonZeroUsize::MIN);
+    let overlays = shard
+        .loaded_chunks_mut()
+        .try_take_persist_dirty_bounded(tick_n, capacity)?;
     let mutations = shard
         .take_mutations()
         .into_iter()
@@ -839,7 +849,7 @@ fn build_flush_request(
             build_mutation_record(id, tick_n, &mutation)
         })
         .collect();
-    Some(StorageFlushRequest::new(overlays, mutations))
+    Ok(Some(StorageFlushRequest::new(overlays, mutations)))
 }
 
 /// Maps a sim-layer [`PendingMutation`] (plus an assigned `id` and `tick`) into a
@@ -887,7 +897,7 @@ fn try_flush_persist_dirty(
     }
     match storage_tx.try_reserve() {
         Ok(permit) => {
-            if let Some(request) = build_flush_request(shard, tick, next_mutation_id) {
+            if let Some(request) = build_flush_request(shard, tick, next_mutation_id)? {
                 permit.send(request);
             }
             Ok(())
@@ -1338,7 +1348,9 @@ async fn handle_command(
             // Checking and exchanging contain no await and share the shard's
             // sole owner. Another viewer cannot change the chest between them.
             let outcome = match shard.container_open(player, position) {
-                Some(snapshot) if snapshot != expected_slots => Some((cursor, snapshot)),
+                Some(snapshot) if !chest_snapshots_match(&snapshot, &expected_slots) => {
+                    Some((cursor, snapshot))
+                }
                 Some(_) => shard.container_left_click(player, position, slot, cursor),
                 None => None,
             };
@@ -1347,6 +1359,23 @@ async fn handle_command(
     }
 
     Ok(())
+}
+
+fn chest_snapshots_match(actual: &[ItemStack], expected: &[ItemStack]) -> bool {
+    if actual.len() != ferrumc_world::CHEST_SLOTS || actual.len() != expected.len() {
+        return false;
+    }
+    // A viewer receives the exact authoritative representation. Float equality
+    // would reject unchanged NaNs and miss changes between signed zero values.
+    actual.iter().zip(expected).all(|(actual, expected)| {
+        match (
+            ferrumc_items::encode_persisted_stack(actual),
+            ferrumc_items::encode_persisted_stack(expected),
+        ) {
+            (Ok(actual), Ok(expected)) => actual == expected,
+            _ => false,
+        }
+    })
 }
 
 /// Load-or-generates each chunk in `positions`, acquiring a player ticket on it,
@@ -1452,26 +1481,28 @@ async fn release_chunks_acked(
     next_mutation_id: &mut u64,
     positions: &[ChunkPos],
 ) -> ServerResult<()> {
-    // This admission must happen before `build_flush_request`: a closed worker
-    // cannot consume the batch, so the shard must keep both its dirty state and
-    // final ticket for recovery.
-    let permit = storage_tx
-        .reserve()
-        .await
-        .map_err(|_| storage_worker_closed("chunk-release durability barrier"))?;
-    let (ack_tx, ack_rx) = oneshot::channel();
-    // Always send an acked request, even with nothing fresh to flush: the overlay
-    // may already be buffered uncommitted in the worker.
-    let mut request = build_flush_request(shard, tick, next_mutation_id)
-        .unwrap_or_else(|| StorageFlushRequest::new(Vec::new(), Vec::new()));
-    request.ack = Some(ack_tx);
-    permit.send(request);
-
-    // A canceled acknowledgement means the worker terminated without proving
-    // durability. Propagate that failure and retain every requested ticket.
-    ack_rx.await.map_err(|_| {
-        ServerError::invalid_state("chunk-release durability barrier acknowledgement was canceled")
-    })??;
+    loop {
+        // Reserve before capture: no queue slot means no transferred state.
+        let permit = storage_tx
+            .reserve()
+            .await
+            .map_err(|_| storage_worker_closed("chunk-release durability barrier"))?;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        // The first request is always acked, even if earlier tick output moved
+        // everything into the worker. A bounded tail needs its own commit proof.
+        let mut request = build_flush_request(shard, tick, next_mutation_id)?
+            .unwrap_or_else(|| StorageFlushRequest::new(Vec::new(), Vec::new()));
+        request.ack = Some(ack_tx);
+        permit.send(request);
+        ack_rx.await.map_err(|_| {
+            ServerError::invalid_state(
+                "chunk-release durability barrier acknowledgement was canceled",
+            )
+        })??;
+        if !has_pending_persistence(shard) {
+            break;
+        }
+    }
 
     let ticket = ChunkTicket::of(TicketReason::Player);
     for &pos in positions {
@@ -1782,6 +1813,39 @@ mod tests {
         release_chunks_acked, route_input_command, try_flush_persist_dirty, SimCommand,
     };
 
+    #[test]
+    fn chest_snapshot_comparison_preserves_nbt_float_bits() {
+        use ferrumc_items::ComponentValue;
+        use ferrumc_nbt::{NbtCompound, NbtTag};
+
+        let snapshot = |value: f32| {
+            let mut data = NbtCompound::new();
+            data.push("value", NbtTag::Float(value));
+            let mut slots = vec![ItemStack::empty(); CHEST_SLOTS];
+            slots[0] = ItemStack::try_new(
+                ItemId::from_name("diamond").expect("registry item"),
+                1,
+                ComponentPatch::new(
+                    vec![ComponentValue::CustomData(NbtTag::Compound(data))],
+                    Vec::new(),
+                ),
+            )
+            .expect("valid stack");
+            slots
+        };
+        let nan = snapshot(f32::from_bits(0x7fc0_0011));
+        assert!(super::chest_snapshots_match(&nan, &nan.clone()));
+        assert!(!super::chest_snapshots_match(
+            &nan,
+            &snapshot(f32::from_bits(0x7fc0_0012)),
+        ));
+        assert!(!super::chest_snapshots_match(
+            &snapshot(-0.0),
+            &snapshot(0.0)
+        ));
+        assert!(!super::chest_snapshots_match(&nan, &nan[..26]));
+    }
+
     /// Builds one shard-mutating driver command for the saturation matrix.
     type CommandBuilder = fn(PlayerId) -> SimCommand;
 
@@ -1906,6 +1970,123 @@ mod tests {
         assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
         assert!(shard.loaded_chunks().has_persist_dirty());
         (shard, pos)
+    }
+
+    async fn dirty_player_batch() -> (SimShard, Vec<ChunkPos>) {
+        let (mut shard, first) = dirty_player_chunk().await;
+        let mut positions = vec![first];
+        let store = InMemoryStore::new();
+        for x in 1..=4 {
+            let pos = ChunkPos::new(x, 0);
+            shard
+                .loaded_chunks_mut()
+                .acquire(
+                    &store,
+                    &FlatWorldGenerator::new(),
+                    pos,
+                    ChunkTicket::of(TicketReason::Player),
+                )
+                .await
+                .expect("acquire bounded batch");
+            let block = BlockPos::new(x * 16 + 1, 65, 1);
+            let chunk = shard.loaded_chunks_mut().get_mut(pos).expect("resident");
+            chunk
+                .set_block(block, BlockStateId::new(1))
+                .expect("inside chunk");
+            chunk.mark_persist_dirty(block);
+            positions.push(pos);
+        }
+        (shard, positions)
+    }
+
+    #[tokio::test]
+    async fn failed_late_capture_keeps_dirty_chunks_journal_and_mutation_ids() {
+        let (mut shard, positions) = dirty_player_batch().await;
+        let edited = BlockPos::new(1, 66, 1);
+        shard
+            .enqueue(GameInput::RegionEdit {
+                player: PlayerId::offline("capture-failure"),
+                region: Cuboid::new(edited, edited),
+                op: RegionOp::Fill {
+                    state: BlockStateId::new(3),
+                },
+            })
+            .expect("admit a journaled edit");
+        let _ = shard.run_tick();
+        assert!(shard.has_pending_mutations());
+        let bad_position = BlockPos::new(49, 65, 1);
+        let mut sign = ferrumc_world::Sign::new(ferrumc_world::SignKind::Sign);
+        sign.set_face_lines(
+            true,
+            std::array::from_fn(|_| "x".repeat(ferrumc_world::MAX_SIGN_LINE_BYTES + 1)),
+        );
+        shard
+            .loaded_chunks_mut()
+            .get_mut(positions[3])
+            .expect("late chunk")
+            .set_block_entity(bad_position, BlockEntity::Sign(sign))
+            .expect("inside chunk");
+        let mut next_id = 71;
+        assert!(super::build_flush_request(&mut shard, Tick::ZERO, &mut next_id).is_err());
+        assert_eq!(next_id, 71);
+        assert!(shard.has_pending_mutations());
+        for pos in positions {
+            assert!(shard
+                .loaded_chunks()
+                .get(pos)
+                .expect("resident")
+                .persist_dirty_sections()
+                .any());
+        }
+        let journal = shard.take_mutations();
+        assert_eq!(journal.len(), 1);
+        assert_eq!(journal[0].position(), edited);
+    }
+
+    #[tokio::test]
+    async fn failed_tail_commit_retains_every_ticket_after_first_batch_was_acknowledged() {
+        let (mut shard, positions) = dirty_player_batch().await;
+        let (storage_tx, mut storage_rx) = mpsc::channel::<StorageFlushRequest>(1);
+        let worker = tokio::spawn(async move {
+            for (size, result) in [(4, Ok(())), (1, Err(ServerError::internal("tail failed")))] {
+                let mut request = storage_rx.recv().await.expect("bounded barrier batch");
+                assert_eq!(request.overlays.len(), size);
+                request
+                    .ack
+                    .take()
+                    .expect("receipt required")
+                    .send(result)
+                    .expect("waiting driver");
+            }
+        });
+        release_chunks_acked(&mut shard, &storage_tx, Tick::ZERO, &mut 0, &positions)
+            .await
+            .expect_err("tail failure refuses the complete release");
+        worker.await.expect("worker");
+        for pos in positions {
+            assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
+            assert!(shard.loaded_chunks().is_loaded(pos));
+        }
+    }
+
+    #[tokio::test]
+    async fn shutdown_flush_drains_all_bounded_batches_through_a_single_slot_queue() {
+        let (mut shard, positions) = dirty_player_batch().await;
+        let (storage_tx, mut storage_rx) = mpsc::channel::<StorageFlushRequest>(1);
+        let worker = tokio::spawn(async move {
+            let mut captured = Vec::new();
+            while let Some(request) = storage_rx.recv().await {
+                assert!(request.overlays.len() <= super::PERSIST_FLUSH_CHUNK_LIMIT);
+                captured.extend(request.overlays.into_iter().map(|(key, _)| key.pos()));
+            }
+            captured
+        });
+        super::flush_pending_before_stop(&mut shard, &storage_tx, Tick::ZERO, &mut 0)
+            .await
+            .expect("complete bounded drain");
+        assert!(!shard.loaded_chunks().has_persist_dirty());
+        drop(storage_tx);
+        assert_eq!(worker.await.expect("worker"), positions);
     }
 
     /// Installs an initially clean chest so only the later off-tick click can
