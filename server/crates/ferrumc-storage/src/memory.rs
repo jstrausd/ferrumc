@@ -28,6 +28,7 @@ use crate::{
     MAX_GENERATION_IDENTITIES,
 };
 
+mod ownership;
 mod uuid_entities;
 
 /// One committed idempotent batch, retained for exact normalized-payload replay.
@@ -67,6 +68,8 @@ pub struct InMemoryStore {
     uuid_entities: RwLock<crate::persistent_entity::engine::MemoryState>,
     entity_incarnation: Arc<()>,
     players: RwLock<HashMap<PlayerId, PlayerRecord>>,
+    ownership_state: RwLock<ownership::State>,
+    ownership_runtime: Option<Arc<crate::ownership::Runtime>>,
     /// Each plugin id maps to its own private key-value namespace. Nesting the
     /// maps is what enforces cross-plugin isolation: a lookup can only ever
     /// reach one plugin's inner map.
@@ -158,6 +161,14 @@ impl InMemoryStore {
             .uuid_entities
             .read()
             .map_err(|_| poisoned("UUID entity"))?
+            .is_empty()
+        {
+            return Ok(false);
+        }
+        if !self
+            .ownership_state
+            .read()
+            .map_err(|_| poisoned("ownership"))?
             .is_empty()
         {
             return Ok(false);
@@ -409,7 +420,10 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn load_entity(&self, key: EntityKey) -> Result<Option<EntityRecord>> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         let map = self.entities.read().map_err(|_| poisoned("entity"))?;
@@ -417,7 +431,10 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         let _boundary = self.mutation_guard()?;
@@ -428,7 +445,10 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn save_entities(&self, entities: Vec<(EntityKey, EntityRecord)>) -> Result<()> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         if entities.len() > MAX_SAVE_BATCH {
@@ -450,7 +470,10 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         let _boundary = self.mutation_guard()?;
@@ -463,11 +486,17 @@ impl WorldStore for InMemoryStore {
 #[async_trait]
 impl PlayerStore for InMemoryStore {
     async fn load_player(&self, id: PlayerId) -> Result<Option<PlayerRecord>> {
+        if self.generation_mode == GenerationMode::Ownership {
+            return Err(crate::OwnershipError::Unsupported.into());
+        }
         let map = self.players.read().map_err(|_| poisoned("player"))?;
         Ok(map.get(&id).cloned())
     }
 
     async fn save_player(&self, id: PlayerId, record: PlayerRecord) -> Result<()> {
+        if self.generation_mode == GenerationMode::Ownership {
+            return Err(crate::OwnershipError::Unsupported.into());
+        }
         let _boundary = self.mutation_guard()?;
         self.require_generation(None)?;
         let mut map = self.players.write().map_err(|_| poisoned("player"))?;
@@ -476,6 +505,9 @@ impl PlayerStore for InMemoryStore {
     }
 
     async fn delete_player(&self, id: PlayerId) -> Result<bool> {
+        if self.generation_mode == GenerationMode::Ownership {
+            return Err(crate::OwnershipError::Unsupported.into());
+        }
         let _boundary = self.mutation_guard()?;
 
         let mut map = self.players.write().map_err(|_| poisoned("player"))?;

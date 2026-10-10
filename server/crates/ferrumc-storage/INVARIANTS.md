@@ -246,3 +246,54 @@
 - All APIs are synchronous offline methods requiring Unix in this release.
   Operator CLI, App/Sim activation, gameplay/Anvil/entity codecs and process-kill/
   power-loss/Paper runtime acceptance are separate from this storage producer.
+
+## Explicit Player/UUID-entity ownership mode (DUR-03.1 / Format6)
+
+- Ownership has separate opt-in constructors/configuration and a dyn-compatible
+  seven-method trait. Defaults and Legacy/Metadata/UUID modes refuse all calls.
+  Old formats3/4/5 and their migrations remain unchanged; no automatic5→6 upgrade.
+- Global PlayerUUID and world/full EntityUUID histories bind explicit verified
+  scopes. Fresh has no row; Live/Tombstone revisions are positive and permanent.
+  A deletion never releases the scope or resets history/global freshness.
+- Pair snapshots capture both payloads and stamps under one actual boundary.
+  New CAS expectations bind the current Weak owner incarnation, full identity
+  and stamp. One transfer contains exactly one player and one entity in the
+  same scope. Standalone bootstrap/autosave uses the same receipt-backed CAS.
+- Hard request admission precedes digest/worker work. A matching committed
+  receipt precedes owner/CAS/history-capacity checks. Identical old-incarnation
+  retries return original evidence; changed semantic bytes under the same ID
+  refuse with ReceiptCollision before any write. Historical outcome stamps
+  cannot be substituted for current state without a new CAS check.
+- Raw-equal no-ops preserve owner last-changing pointers/revisions/chunk epochs,
+  but consume a new receipt. Real changes advance once without wrap. Fresh or
+  Tombstone deletion refuses AlreadyAbsent, including at RevisionMAX.
+- Memory's unified state contains both records, all UUID relations/epochs,
+  headers, receipts and counters under one lock inside the existing mutation
+  boundary. No fallible returned-error apply hook claims row rollback. All
+  redb rows and checks belong to one actual Immediate writer transaction.
+- Format6 is exactly15 tables with six mandatory ownership meta keys and only
+  the optional existing journal watermark. Headers are39/35 bytes, receipts256;
+  revision row footprints are55 bytes, receipt footprints272. Fixed encodings,
+  reserved/inactive zeroes, transitions, epochs/chunk unions and last receipts
+  are checked. Historical relation checks do not recurse through owner receipts.
+- Request/receipt/revision capacities are positive, checked and persisted
+  immutably. Startup local scan/scratch limits may change but must validate the
+  complete snapshot. Budget admission precedes decoder/hash/payload copies.
+  Typed Format6 raw/codec/engine validation never classifies from error strings;
+  no malformed record is normalized or repaired.
+- Ownership admission is shared by Arc clones, fail-fast Busy, bounded1..64,
+  with no awaiting request queue. A spawned blocking closure owns its permit
+  through completion even if the caller drops its future. Local encoded-byte,
+  scratch-extent and cache bounds are not a total heap/RSS or disk quota.
+- All old PlayerStore and wire/UUID-entity writers/moves refuse in this mode,
+  including empty batches. UUID read-only point/page/lookahead validates the
+  same unified owner state. Plugin namespace IDs retain the4096-byte bound.
+- Actual commit I/O failures are CommitUncertain; started-worker failure/lost
+  reply is ExecutionUncertain. Preserve pending ownership and original query
+  until checked receipt/exact retry. Receipt absence while a worker runs does
+  not prove abort. Beforecommit returned errors leave all15 logical tables
+  unchanged; postcommit uncertainty may retain a complete committed operation.
+- Payload schemas/item quantities remain caller-owned opaque data. Simulation
+  reservations, gameplay codecs/drop/pickup consumers, App activation,
+  crossdimension ownership, capacity changes,5→6 migration, real Paper/client/
+  plugin acceptance and process-kill/power-loss evidence remain separate.

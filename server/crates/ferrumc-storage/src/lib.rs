@@ -8,6 +8,7 @@ mod generation;
 mod journal;
 mod key;
 mod memory;
+mod ownership;
 mod persistent_entity;
 mod record;
 mod redb_store;
@@ -19,6 +20,16 @@ pub use generation::{GenerationInitialization, GenerationKey, MAX_GENERATION_IDE
 pub use journal::{JournalAppendReceipt, JournalBatchId};
 pub use key::{ChunkKey, EntityKey, StorageKey, MAX_PLUGIN_KEY_LEN};
 pub use memory::InMemoryStore;
+pub use ownership::{
+    EntityOwnershipCasRequest, EntityOwnershipProposal, OwnedEntityExpectation,
+    OwnedEntitySnapshot, OwnedPlayerEntitySnapshot, OwnedPlayerExpectation, OwnedPlayerSnapshot,
+    OwnershipCapacity, OwnershipCommitDisposition, OwnershipCommitOutcome, OwnershipConfig,
+    OwnershipEpochChange, OwnershipError, OwnershipHistory, OwnershipOpenLimits, OwnershipReceipt,
+    OwnershipReceiptQuery, OwnershipRequestIdentity, OwnershipResource, OwnershipResult,
+    OwnershipRevision, OwnershipStamp, OwnershipTransferId, PlayerEntityOwnershipStore,
+    PlayerEntityTransferRequest, PlayerOwnershipCasRequest, PlayerOwnershipProposal,
+    ScopedPlayerKey, MAX_OWNERSHIP_INFLIGHT, MAX_OWNERSHIP_REQUEST_BYTES,
+};
 pub use persistent_entity::{
     PersistentEntityCursor, PersistentEntityEntry, PersistentEntityEpoch, PersistentEntityKey,
     PersistentEntityPage, PersistentEntityRecord, PersistentEntityStore, PersistentEntityWrite,

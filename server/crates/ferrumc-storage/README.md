@@ -371,3 +371,112 @@ There is no operator CLI, automatic startup migration, App/Sim activation,
 Anvil import or entity codec in this ticket. Tests of actual producer abort,
 commit-I/O and lost replies do not establish process-kill/power-loss durability
 or Paper gameplay parity.
+
+## Opt-in atomic Player/UUID-entity ownership (Format6)
+
+[`PlayerEntityOwnershipStore`] is a separate dyn-compatible authority. Enable it
+explicitly with [`InMemoryStore::with_player_entity_ownership`] or
+[`RedbStore::open_with_player_entity_ownership`] and an [`OwnershipConfig`].
+Formats3/4/5 and trait defaults refuse all seven ownership calls. Existing
+formats require a separately specified offline migration; this producer never
+upgrades them during open. Format6 has exactly15 typed tables: the Format5
+catalog plus player ownership, entity ownership and ownership receipts.
+
+[`ScopedPlayerKey`] binds the full global player UUID to an explicit generation
+scope. Entity history remains keyed by world/full UUID. Each resource has a
+private Fresh/Live/Tombstone stamp and a positive, nonwrapping revision once
+changed. Deletion retains its header permanently. A different player scope or
+entity dimension refuses rather than selecting another descriptor. Full
+identities, payload schema versions and typed `GameMode` are preserved.
+
+A coherent [`OwnedPlayerEntitySnapshot`] captures both records and stamps in
+one actual read boundary. [`PlayerEntityTransferRequest`] changes exactly one
+player and one entity in that same scope. Receipt-backed standalone player and
+entity CAS calls support bootstrap/autosave without inventing a placeholder.
+The old blind [`PlayerStore`], wire-entity and UUID-entity writers, including move,
+refuse in Ownership mode. Read-only UUID point/page calls use the same owner
+state and validate page lookahead before publishing entries.
+
+```rust
+use ferrumc_storage::{PlayerEntityOwnershipStore, PlayerEntityTransferRequest,
+    PlayerOwnershipProposal, EntityOwnershipProposal, OwnershipTransferId,
+    ScopedPlayerKey, PersistentEntityKey, PlayerRecord, PersistentEntityRecord,
+    OwnershipResult};
+use ferrumc_world::GenerationIdentity;
+
+# async fn submit(store: &dyn PlayerEntityOwnershipStore,
+#     player: ScopedPlayerKey, entity: PersistentEntityKey,
+#     generation: GenerationIdentity, operation: OwnershipTransferId,
+#     player_record: PlayerRecord, entity_record: PersistentEntityRecord,
+# ) -> OwnershipResult<()> {
+let before = store.load_owned_pair(player, entity, generation).await?;
+let request = PlayerEntityTransferRequest::new(
+    operation,
+    before.player().expectation().clone(),
+    before.entity().expectation().clone(),
+    PlayerOwnershipProposal::put(player_record),
+    EntityOwnershipProposal::put(entity_record),
+)?;
+let query = request.receipt_query();
+let outcome = store.commit_player_entity_transfer(request).await?;
+assert_eq!(store.load_ownership_receipt(query).await?.as_ref(),
+    Some(outcome.receipt()));
+# Ok(())
+# }
+```
+
+The caller supplies a128-bit operation ID. A canonical SHA256 binds kind, scope,
+generation, resource IDs, expected stamps and complete proposals, including
+schemas/GameMode/chunk/opaque bytes. Constructors compute it synchronously
+within hard admission; async workers use the cached digest. A matching retained
+receipt wins before live-owner/CAS/history-capacity checks, allowing the exact
+committed retry after later writes, deletion, reopen or a lost reply. Reusing an
+ID for another request returns `ReceiptCollision`. Receipt results describe that
+historical operation and do not assert that its stamps are still current.
+
+Memory preflights and publishes player/entity payloads, UUID relationships,
+epochs, headers, receipt and counters under one owned state lock. redb preflights
+and writes all of them in one `Durability::Immediate` writer transaction on a
+blocking worker. Real changes increment each resource once and each affected
+chunk once; raw-equal no-ops leave revisions/epochs unchanged but consume a new
+receipt. Fresh/Tombstone deletion returns `AlreadyAbsent`. MAX revisions and
+epochs permit only consistent raw no-ops and never wrap.
+
+[`OwnershipCapacity`] fixes canonical-request, receipt-row and revision-row
+limits. Request admission is149..2MiB; current maximum player1MiB plus entity256KiB
+forms1,310,896 canonical bytes. A receipt is256 value bytes/272 key+value bytes;
+each retained resource header is55 key+value bytes. Capacity accounting is
+checked. Limits are persisted exactly and must agree on reopen; history is not
+pruned or reset. [`OwnershipOpenLimits`] bounds full startup scan rows/bytes,
+actual journal-index scratch extent and1..64 concurrent ownership workers.
+Arc clones share fail-fast `Busy` admission without an awaiting queue. A dropped
+caller does not release a running blocking worker's permit. These bounds do not
+cover caller-owned payloads/futures, all database caches, allocator overhead or
+total process RSS. Memory retains its complete stored state.
+
+Format6 startup validates every table/type/meta key, bounded record and both
+UUID relationship directions, owner last-changing receipts, historical stamps,
+epochs, counts, descriptors and the unchanged journal grammar. It streams a
+bounded row before decoding/copying and does no normalization. The new validator
+reuses typed raw/codec/engine parsers directly; malformed records retain their
+specific class instead of being reconstructed from a `ServerError` string. The
+Format5 validator and migrations remain unchanged. Main redb cache is64MiB; a
+nonempty journal-range index adds16MiB cache within its separate scratch extent.
+Scratch cleanup removes only its owned file identity and preserves replacements.
+
+Precommit returned errors abort all actual rows. An actual commit I/O error is
+`CommitUncertain`; a started worker panic or lost reply is `ExecutionUncertain`,
+both carrying the original receipt query. Keep pending ownership until a checked
+receipt or exact retry clarifies it. `None` from a receipt read is a snapshot,
+not proof that another running worker aborted. Gameplay consumers must reserve
+and publish inventory/entity changes at their own simulation boundary after
+confirmation; storage does not interpret item quantities or plugin mutations.
+
+Tests exercise independent fixtures/state traces, actual concurrent pickups and
+autosave conflicts, every real row/commit cutpoint, actual commit-sync failure,
+lost replies, cancelled callers, MAX histories, full scans/scratch boundaries
+and maximum opaque payloads across both backends and reopen. Paper1.21.8 Build60
+source/event ordering was inspected; no Paper runtime, client/plugin differential
+acceptance or process-kill/power-loss evidence is claimed. App/Sim activation,
+owned gameplay codecs, drop/pickup consumers, capacity changes and Format5→6
+migration remain separate tickets.

@@ -26,7 +26,7 @@ fn storage_backend(error: impl std::fmt::Display) -> StorageError {
     StorageError::backend(error.to_string())
 }
 
-pub(super) struct RawGuard<'a>(AccessGuard<'a, &'static [u8]>);
+pub(super) struct RawGuard<'a>(pub(super) AccessGuard<'a, &'static [u8]>);
 impl AsRef<[u8]> for RawGuard<'_> {
     fn as_ref(&self) -> &[u8] {
         self.0.value()
@@ -193,6 +193,13 @@ impl PersistentEntityStore for RedbStore {
         key: PersistentEntityKey,
         expected: GenerationIdentity,
     ) -> Result<Option<PersistentEntityRecord>> {
+        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+            return Ok(
+                crate::PlayerEntityOwnershipStore::load_owned_entity(self, key, expected)
+                    .await?
+                    .record,
+            );
+        }
         require_mode(self.generation_mode)?;
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -277,6 +284,12 @@ impl PersistentEntityStore for RedbStore {
         cursor: Option<PersistentEntityCursor>,
         limit: NonZeroU16,
     ) -> Result<PersistentEntityPage> {
+        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+            return self
+                .owned_uuid_page(chunk, expected, cursor, limit)
+                .await
+                .map_err(Into::into);
+        }
         require_mode(self.generation_mode)?;
         let db = self.db.clone();
         let owner = self.entity_incarnation.clone();

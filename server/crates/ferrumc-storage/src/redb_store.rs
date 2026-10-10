@@ -55,6 +55,8 @@ use crate::{
 };
 
 pub(crate) mod migration;
+mod ownership;
+mod ownership_validation;
 mod uuid_entities;
 pub(crate) mod uuid_migration;
 mod uuid_validation;
@@ -270,6 +272,38 @@ fn world_state_is_empty(txn: &redb::WriteTransaction) -> Result<bool> {
             }
         }
     }
+    let has_ownership = txn
+        .list_tables()
+        .map_err(backend_err)?
+        .any(|t| t.name() == ownership::PLAYER_OWNER.name());
+    if has_ownership {
+        let meta = txn.open_table(META_TABLE).map_err(backend_err)?;
+        for key in [ownership::RECEIPT_COUNT, ownership::REVISION_COUNT] {
+            let count = meta
+                .get(key)
+                .map_err(backend_err)?
+                .map(|v| v.value())
+                .ok_or_else(|| StorageError::backend("missing ownership history count"))?;
+            if count != 0 {
+                return Ok(false);
+            }
+        }
+        drop(meta);
+        for definition in [
+            ownership::PLAYER_OWNER,
+            ownership::ENTITY_OWNER,
+            ownership::RECEIPT,
+        ] {
+            if !txn
+                .open_table(definition)
+                .map_err(backend_err)?
+                .is_empty()
+                .map_err(backend_err)?
+            {
+                return Ok(false);
+            }
+        }
+    }
     Ok(true)
 }
 
@@ -441,6 +475,7 @@ pub struct RedbStore {
     db: Arc<Database>,
     generation_mode: GenerationMode,
     entity_incarnation: Arc<()>,
+    ownership_runtime: Option<Arc<crate::ownership::Runtime>>,
 }
 
 impl fmt::Debug for RedbStore {
@@ -454,7 +489,7 @@ impl RedbStore {
     /// Opens the database at `path`, creating it if it does not exist.
     ///
     /// On a fresh file the metadata and data tables are created and the
-    /// [format version](STORE_FORMAT_VERSION) is stamped. On an existing file the
+    /// format version 3 is stamped. On an existing file the
     /// recorded version is checked and a mismatch is rejected with
     /// [`ServerError::InvalidState`] (via
     /// [`StorageError::IncompatiblePreAlphaData`]) rather than risking a misread
@@ -529,6 +564,7 @@ impl RedbStore {
             db: Arc::new(db),
             generation_mode: mode,
             entity_incarnation: Arc::new(()),
+            ownership_runtime: None,
         })
     }
 
@@ -540,6 +576,7 @@ impl RedbStore {
             GenerationMode::Legacy => STORE_FORMAT_VERSION,
             GenerationMode::Metadata => GENERATION_STORE_FORMAT_VERSION,
             GenerationMode::UuidEntities => 5,
+            GenerationMode::Ownership => return Err(crate::OwnershipError::Unsupported.into()),
         };
         {
             // The format marker is the gate for every table and record below.
@@ -1031,7 +1068,10 @@ impl WorldStore for RedbStore {
     }
 
     async fn load_entity(&self, key: EntityKey) -> Result<Option<EntityRecord>> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         let db = Arc::clone(&self.db);
@@ -1048,7 +1088,10 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         let mode = self.generation_mode;
@@ -1075,7 +1118,10 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_entities(&self, entities: Vec<(EntityKey, EntityRecord)>) -> Result<()> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         if entities.len() > MAX_SAVE_BATCH {
@@ -1113,7 +1159,10 @@ impl WorldStore for RedbStore {
     }
 
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
-        if self.generation_mode == GenerationMode::UuidEntities {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::UuidEntities | GenerationMode::Ownership
+        ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
         let db = Arc::clone(&self.db);
@@ -1135,6 +1184,9 @@ impl WorldStore for RedbStore {
 #[async_trait]
 impl PlayerStore for RedbStore {
     async fn load_player(&self, id: PlayerId) -> Result<Option<PlayerRecord>> {
+        if self.generation_mode == GenerationMode::Ownership {
+            return Err(crate::OwnershipError::Unsupported.into());
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Option<PlayerRecord>> {
             let txn = db.begin_read().map_err(backend_err)?;
@@ -1149,6 +1201,9 @@ impl PlayerStore for RedbStore {
     }
 
     async fn save_player(&self, id: PlayerId, record: PlayerRecord) -> Result<()> {
+        if self.generation_mode == GenerationMode::Ownership {
+            return Err(crate::OwnershipError::Unsupported.into());
+        }
         let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
@@ -1169,6 +1224,9 @@ impl PlayerStore for RedbStore {
     }
 
     async fn delete_player(&self, id: PlayerId) -> Result<bool> {
+        if self.generation_mode == GenerationMode::Ownership {
+            return Err(crate::OwnershipError::Unsupported.into());
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<bool> {
             let txn = db.begin_write().map_err(backend_err)?;

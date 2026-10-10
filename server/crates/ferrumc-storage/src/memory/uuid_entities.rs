@@ -21,6 +21,13 @@ impl PersistentEntityStore for InMemoryStore {
         key: PersistentEntityKey,
         expected: GenerationIdentity,
     ) -> Result<Option<PersistentEntityRecord>> {
+        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+            return Ok(
+                crate::PlayerEntityOwnershipStore::load_owned_entity(self, key, expected)
+                    .await?
+                    .record,
+            );
+        }
         require_mode(self.generation_mode)?;
         let _boundary = self.mutation_guard()?;
         let generations = self
@@ -142,6 +149,11 @@ impl PersistentEntityStore for InMemoryStore {
         cursor: Option<PersistentEntityCursor>,
         limit: NonZeroU16,
     ) -> Result<PersistentEntityPage> {
+        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+            return self
+                .owned_uuid_page(chunk, expected, cursor.as_ref(), limit)
+                .map_err(Into::into);
+        }
         require_mode(self.generation_mode)?;
         let _boundary = self.mutation_guard()?;
         let generations = self

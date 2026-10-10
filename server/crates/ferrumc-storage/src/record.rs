@@ -133,7 +133,7 @@ pub(crate) fn capture_block_entities(
 /// which it was written.
 ///
 /// `PartialEq` but not `Eq`: a [`Chunk`] may hold a chest block-entity whose
-/// [`ItemStack`](ferrumc_items::ItemStack) NBT component data is `PartialEq`-only.
+/// `ItemStack` NBT component data is `PartialEq`-only.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChunkRecord {
     schema_version: SchemaVersion,

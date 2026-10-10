@@ -1,9 +1,9 @@
 # DUR-03.1 — Atomare Player↔Item-Entity-Ownership
 
-Status: **an `select_world_ticket` vergeben; vollständiges Producerproposal
-zur internen Rootprüfung vorgelegt**. Produktionscode benötigt die ausdrückliche
-Rootfreigabe dieses Entwurfs und die Freigabe der STORAGE-ENTITY001.2-Files nach
-ihrem unabhängigen Review. Der verbindliche Auftrag unten bleibt erhalten.
+Status: **Producer durch `select_world_ticket` umgesetzt; vollständige
+Autorchecks bestanden und exakter Freeze zur unabhängigen Rootprüfung**.
+Die interne Implementierungsfreigabe ist unten dokumentiert. Rootintegration
+und Consumeraktivierung sind noch keine Aussage dieses Autorstandes.
 
 ## Ziel
 
@@ -780,8 +780,12 @@ Bestehende owned Files nach STORAGE-ENTITY001.2-Freigabe:
 - `src/memory/uuid_entities.rs`, `src/redb_store/uuid_entities.rs` — konkrete
   Readonlyownership-Adapter und explizite Blindwriterrefusals;
 - `src/store.rs` — auch inOwnership Pluginnamespace4096;
-- `src/redb_store/uuid_validation.rs` — nur Visibility des bestehenden bounded
-  Payloadrowhelpers; kein Format5scan-/Error-/Fingerprintfunktionswechsel;
+- `src/record.rs` — von Root akzeptierte reine Rustdockorrektur: der Link auf
+  den nur als Devdependency verfügbaren ItemStack wird als Inlinecode gesetzt;
+  keine Record-/Wire-/Laufzeitänderung;
+- `src/redb_store/uuid_validation.rs` bleibt **unverändert**: Format6 verwendet
+  nach Rootfreigabe direkt die vorhandenen typisierten raw/codec/engine-Parser
+  und rekonstruiert keine Recordklassifikation aus einem ServerErrorstring.
 - `README.md`, `INVARIANTS.md` — neuer separater Vertrag/Limit-/Uncertaintygrenzen;
 - dieser DUR03brief — approved Design, gemessene Tests/Freeze, offene Consumer.
 
@@ -795,3 +799,133 @@ Historycapacityerweiterung/Replayretirement; Container/Hopper/Itemmerge-/Mehr-
 ressourcentransfers; DUR-04s Pending-/Reservations-/Ackproducer, DUR-05s
 Appdriver und eigentliche Drop-/Pickup-/Autosaveaktivierung. Keine existente
 Format5welt wird zum Test dieses neuen Modus still konvertiert.
+
+
+## Tatsächliche Umsetzung und Autorprüfung
+
+Die konkrete API, Header-/Receipt-/Capacitygrammatik und die sieben neuen
+Methods sind umgesetzt. Memory besitzt einen gemeinsamen Player/UUID-State
+mit echter gemeinsamer Pairread-/Writegrenze; redb verwendet eine konkrete
+Immediate-Writertransaction über alle Payloads/Relationen/Ownershipheader/
+Receipts/Counter. Es wurde kein allgemeiner Storageaction-/Transaktions-
+Framework und kein anderer Crateproducer hinzugefügt.
+
+Der Format6scan ist ein eigener exact15-Catalog-/Metadata-/Rawrelationscan mit
+positiven Scan-/Scratchgrenzen. Die wiederverwendeten Parser liefern ihre
+konkreten Storage-/Ownershiperrors unmittelbar. Der bestehende Format5scan
+und beide Offline-Migrationen wurden nicht verändert. Die einzige veränderte
+Sichtbarkeit im alten UUIDadapter ist das crateinterne borrowed RawGuardfeld
+für den konkreten Format6reader; kein crosscrate Handle wird veröffentlicht.
+
+Zusätzliche Testfiles gegenüber dem freigegebenen Dateiplan:
+`tests/ownership_boundaries.rs` für öffentliche Admission-/Reopen-/Collision-
+verträge und `tests/ownership_contention.rs` für tatsächliche konkurrierende
+Consumerintents. Beide gehören unverändert zum allein besessenen Storagecrate.
+Die von Root akzeptierten minimalen Rustdockorrekturen betreffen zusätzlich
+`src/record.rs` (Devdependencylink) und `src/redb_store.rs` (öffentlicher Link
+auf private Formatkonstante). Strict Rustdoc benötigt keine unterdrückten
+Warnungen; diese beiden Korrekturen ändern kein Laufzeitverhalten.
+
+### Nachweise im tatsächlichen Producer
+
+- Eine unabhängige Map-/Integer-State-Machine prüft Drop-/Teil-/Fullpickupartige
+  opaque Jointwrites, Bootstrap, standalone CAS, Delete/Recreate/ABA, Chunkmoves
+  und No-ops gegen beide Backends. Das ist Storageevidenz; Itemmengen/Survival-
+  gameplay und echte Simpublication sind noch Consumerarbeit.
+- Zwei wirkliche Collector-Threads mit verschiedenen Playern konkurrieren
+  gegen denselben Entitysnapshot: genau ein Entity-CAS gewinnt, genau ein
+  Player erhält die opaque Fixturemenge, der Verlierer erhält kein Receipt.
+  Ein tatsächlicher Autosave↔Pickup-Race desselben Players hat genau einen
+  Player-CAS-Gewinner und kohärenten Entitynachzustand.
+- Memoryreader während des ersten echten Playerrow-Apply können keine halbe
+  Pairmutation erfassen. Ein tatsächlicher Memorywriter belegt shared Busy.
+  Ein realer redbworker wird bei BeforeRow angehalten; der aufrufende Future
+  wird abgebrochen. Weitere Reads erhalten weiterhin Busy, bis derselbe
+  laufende Worker endet; danach klären Originalreceipt und Replay den Commit.
+- Maximum Player1MiB und Entity256KiB mit beliebigen opaquen Schemata bilden
+  exakt1.310.896 Canonicalbytes. Exactcap commit/read/no-op/reopen und ein Byte
+  zu kleines Capacityagreement ohne Write/Receipt sind gegen beide Backends
+  geprüft. Persistierte Capacity wird niemals beim Reopen zurückgesetzt.
+- Dieselbe Receipt-ID mit geänderten Payloads, Player-/Entityschema, GameMode,
+  Chunk, Proposalart, CAS-Expectation, Scope, Generation und Pair-/Singlekind
+  verweigert vor CAS. Identische committed Retries liefern Originalevidence,
+  einschließlich nach späterem Write/Delete/Recreate und mit alter Incarnation.
+- Reale redb-Cutpoints: BeforePlan, vor/nach jedem der12 tatsächlichen Rowwrites
+  eines Chunkmovepaars und BeforeCommit:26 Returnederrorpositionen lassen den
+  kompletten Rawsnapshot aller15 Tabellen auch nach Reopen unverändert.
+  AfterCommit-Lostreply und tatsächliche Workerpanic liefern ExecutionUncertain
+  mit Originalquery; ein tatsächlich fehlschlagender FileBackend.sync_data
+  beim Commit liefert CommitUncertain. Reopen/Receipt/Retry klärt beide möglichen
+  Commitzustände; keine garantierte Abortbehauptung bei I/O-Commitfehlern.
+- Persistierte Player-/EntityLiveRevisionMAX, beide TombRevisionMAX und alter/
+  neuer ChunkEpochMAX sind mit vorherigem full Reopen geprüft: echte Änderung
+  verweigert ohne Rawdelta/Receipt; erlaubte konsistente Live-No-ops bleiben
+  möglich. Fresh/Tomb-Delete ist AlreadyAbsent. Nach kompletter Deletion
+  verhindern retained History/Counter neue globale Descriptorfreshness.
+- Unabhängige SHA-/Header-/Receiptfixtures mit festen Offsets und extern
+  berechnetem Digest, exhaustive Short/Long-Parserproben,7 kontrollierte
+  Memorycorruptions und22 persistierte Header-/Receipt-/Meta-/Relationfehler
+  zeigen präzise Refusals ohne Repair. Zusätzliche Wrongtype/Extra/Missing-
+  Catalog-/Multimapfälle und genuine Mehrscopedescriptoren werden geprüft.
+- Readonly UUIDpoint/page prüft dieselbe Ownerstate einschließlich eines
+  beschädigten Lookahead: kein teilweise publizierter Pageprefix. Sämtliche
+  sieben Calls verweigern bei Default/Legacy/Metadata/UUID; alle alten Player-/
+  wire-/UUIDwriter und Moves verweigern inOwnership, auch leere Batches.
+- Scanrow-/Rawbytebudget exact/one-over nutzt den unabhängig gezählten vollständigen
+  Rawsnapshot. Nichtleere Journalreceiptranges erzeugen den tatsächlichen
+  begrenzten Diskindex; exact extent inklusive redbCloseflush wird admittiert,
+  ein Byte kleiner verweigert ScratchCapacity. Success/failure entfernt nur
+  eigene Scratchfiles; ein foreign Replacement wird nach Inodewechsel erhalten.
+  Die Replacementprobe verwendet denselben konkreten JournalValidationproducer,
+  den Format6scan wiederverwendet, ohne einen globalen Scan-/I/O-Testhook.
+- Ownership-PluginIDs4096/4097 prüfen namespaceIsolation und alle vier Bounds
+  vor Zugriff, inklusive redbReopen. Record-/Header-/Receiptlimits behaupten
+  weder eine komplette Prozess-RSS-Grenze noch einen permanenten Diskquota.
+
+### Referenz und ehrliche Grenzen
+
+Referenzpin bleibt MinecraftJava1.21.8/protocol772, Paper1.21.8 Build60,
+Commit`29c8822d90899c89d2689338e81a98f690bcba12`. Alle16 Hashes der relevanten
+vollständigen Servermethods und Applied-/Featurepatches wurden geprüft;
+Referenzmanifest `.codex-tmp/dur03_1-reference.sha256`, SHA256
+`7d172f9a6b59b4a0790eb729d3fcfa3637781defbc828438ba95239ce802a10c`.
+Die gelesene Pickup-/Drop-/Inventory-/Save-/Moonrise-Reihenfolge ist oben
+festgehalten. Sourceinspection ist keine Paper-Runtime-/Plugin-Differentialabnahme.
+
+DUR03.1 allein aktiviert keine App-/Simpfade, keine spielbaren Playerinventare,
+keine Mengenkonservation/Pluginmutationssemantik und keine Survivalverifikation.
+DUR04.1 übernimmt unmittelbar die tatsächlichen besessenen Playerinventare und
+Drop-/Pickup-/Pending-/Ackconsumer, DUR05 die produktive Driveraktivierung.
+5→6-Migration, Capacityerweiterung, Crossdimension und Container-/Hopper-/
+Mehrressourcentransfers bleiben ausdrücklich separate Tickets. Processkill/
+Powerloss-/Hardwareabnahme wurde nicht durchgeführt.
+
+### Finale Checks und Freeze
+
+Die Prüfungen laufen mit Rust1.99.0, Edition2021, `-j2`, eigenem Tasktarget
+`.codex-tmp/target-dur03_1` im von Root bereitgestellten unveränderten
+Baselinecheckout `.codex-tmp/dur03_1-author-checkout` (Archivbaseline`d3fab745`).
+Nur dessen Storagecopy wird vom Live-owned Crate aktualisiert; laufende fremde
+World-/Itemsarbeit wird weder verändert noch als vermeintlicher Fehler unterdrückt.
+Alle folgenden Autorchecks sind mit Exit0 abgeschlossen:
+
+| Check | Konkreter Aufruf / Ergebnis | Ergebnislog |
+| --- | --- | --- |
+| Storage Debug | `cargo +1.99.0 test -p ferrumc-storage -j2`:214 Unit +52 Integration +12 Rustdoc =278 bestanden,0 failed/ignored | `.codex-tmp/dur03_1-debug.log` |
+| Storage Release | `cargo +1.99.0 test -p ferrumc-storage --release -j2`:dieselben278 bestanden,0 failed/ignored | `.codex-tmp/dur03_1-release.log` |
+| Strict all-target Clippy | `cargo +1.99.0 clippy -p ferrumc-storage --all-targets -j2 -- -D warnings` | `.codex-tmp/dur03_1-clippy.log` |
+| Strict Rustdoc | `RUSTDOCFLAGS='-D warnings' cargo +1.99.0 doc -p ferrumc-storage --no-deps -j2` | `.codex-tmp/dur03_1-rustdoc.log` |
+| Owned fmt | `rustfmt +1.99.0 --edition 2021 --check` über sämtliche owned Rustfiles | `.codex-tmp/dur03_1-fmt.log` |
+| Diffwhitespace | `git diff --check` über owned Scope | Exit0 |
+| Referenzpin | `sha256sum -c .codex-tmp/dur03_1-reference.sha256`:alle16 Dateien unverändert | `.codex-tmp/dur03_1-reference-check.log` |
+
+Read-only Scopeprüfungen bestätigen unveränderte Cargo-/Lockfiles, den
+Format5validator und beide Migrationproducer. Die Storagefiles im isolierten
+Autorcheckout stimmen bytegenau mit dem Live-owned Crate überein.
+
+Exakter Freeze:21 Dateien, aufgeführt in
+`.codex-tmp/dur03_1-owned-files.txt`, gehasht in
+`.codex-tmp/dur03_1-author.sha256`. Die vollständigen Checkresultate und der
+Manifestdigest stehen in `.codex-tmp/dur03_1-author-results.json`.
+Dieser Autorstand wird nach Übergabe nicht weiter verändert; unabhängiges
+CLEAN und Rootintegration bleiben eigene Abnahmeschritte.

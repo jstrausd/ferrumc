@@ -56,7 +56,11 @@ pub(crate) fn validate_uuid_plugin_scope(
     plugin: &PluginId,
 ) -> std::result::Result<(), StorageError> {
     let len = plugin.as_str().len();
-    if mode == crate::generation::GenerationMode::UuidEntities && len > MAX_UUID_STORE_PLUGIN_ID_LEN
+    if matches!(
+        mode,
+        crate::generation::GenerationMode::UuidEntities
+            | crate::generation::GenerationMode::Ownership
+    ) && len > MAX_UUID_STORE_PLUGIN_ID_LEN
     {
         return Err(StorageError::UuidStorePluginIdTooLong {
             len,
