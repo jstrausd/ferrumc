@@ -4,7 +4,20 @@ use ferrumc_core::ServerError;
 use ferrumc_math::{BlockPos, ChunkPos};
 use ferrumc_world::{BlockEntityCodecError, GenerationError, GenerationIdentity};
 
-use crate::{GenerationKey, JournalBatchId};
+use crate::{ChunkKey, GenerationKey, JournalBatchId, PersistentEntityKey};
+
+/// Exact reason a transient entity cursor cannot publish a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistentEntityCursorRejection {
+    /// Cursor belongs to another backend incarnation, including a closed owner.
+    Backend,
+    /// Caller requested another world/dimension/chunk column.
+    Chunk,
+    /// Caller supplied another complete immutable generator identity.
+    GenerationIdentity,
+    /// The chunk entity set changed since the previous page.
+    Epoch,
+}
 
 /// A classified storage failure.
 ///
@@ -21,6 +34,92 @@ use crate::{GenerationKey, JournalBatchId};
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StorageError {
+    /// This backend has not explicitly adopted UUID entity persistence.
+    #[error("UUID entity persistence is not supported by this storage mode")]
+    PersistentEntitiesUnsupported,
+
+    /// UUID mode deliberately refuses legacy wire-keyed entity operations.
+    #[error("wire-keyed entity persistence is not supported in UUID storage mode")]
+    WireEntityPersistenceUnsupported,
+
+    /// A Format5 namespace exceeded its UTF-8 byte admission before key allocation.
+    #[error("UUID-mode plugin ID is {len} UTF-8 bytes (maximum {max})")]
+    UuidStorePluginIdTooLong {
+        /// Actual UTF-8 byte count.
+        len: usize,
+        /// Format5-specific namespace maximum.
+        max: usize,
+    },
+
+    /// Format3/4 needs the separate explicit offline UUID migration.
+    #[error(
+        "UUID entity persistence requires explicit offline migration from format {format} to 5"
+    )]
+    PersistentEntityMigrationRequired {
+        /// Existing durable layout version.
+        format: u64,
+    },
+
+    /// A directly encountered UUID row or relationship is inconsistent.
+    #[error("corrupt UUID entity storage in {table}: {reason}")]
+    PersistentEntityCorruption {
+        /// Table containing the malformed row or inconsistent relation.
+        table: &'static str,
+        /// Classified grammar or relationship failure.
+        reason: &'static str,
+    },
+
+    /// A save batch supplied the same scoped key or world/UUID twice.
+    #[error("duplicate UUID save proposal for {key:?}")]
+    DuplicatePersistentEntityWrite {
+        /// Second proposal whose world/UUID already occurs in this batch.
+        key: PersistentEntityKey,
+    },
+
+    /// A world already stores the same UUID in a different dimension.
+    #[error("persistent entity {key:?} already belongs to another dimension")]
+    PersistentEntityWorldUuidConflict {
+        /// Requested scoped key that conflicts with the world locator.
+        key: PersistentEntityKey,
+    },
+
+    /// A move lacks an existing source or uses incompatible scoped keys.
+    #[error("invalid persistent entity move: {reason}")]
+    InvalidPersistentEntityMove {
+        /// Exact refused move precondition.
+        reason: &'static str,
+    },
+
+    /// A real chunk entity-set change cannot increment its historical epoch.
+    #[error("persistent entity epoch exhausted for {chunk:?}")]
+    PersistentEntityEpochExhausted {
+        /// Chunk whose persisted positive epoch is u64MAX.
+        chunk: ChunkKey,
+    },
+
+    /// A UUID request exceeded its encoded byte admission bound.
+    #[error("persistent entity request is {len} encoded bytes (maximum {max})")]
+    PersistentEntityBytesExceeded {
+        /// Encoded key-plus-envelope bytes requested.
+        len: usize,
+        /// Permitted encoded byte count.
+        max: usize,
+    },
+
+    /// A page requested more than64 entries.
+    #[error("persistent entity page limit {limit} exceeds64")]
+    PersistentEntityPageLimit {
+        /// Rejected nonzero page count.
+        limit: u16,
+    },
+
+    /// A cursor has another owner, scope, identity or snapshot epoch.
+    #[error("persistent entity cursor does not match the live backend snapshot: {reason:?}")]
+    InvalidPersistentEntityCursor {
+        /// Classified owner, scope, exact identity or epoch mismatch.
+        reason: PersistentEntityCursorRejection,
+    },
+
     /// This instance deliberately uses the legacy metadata-free contract.
     #[error("generation metadata is not supported by this storage mode")]
     GenerationMetadataUnsupported,
@@ -287,6 +386,10 @@ impl From<StorageError> for ServerError {
             | StorageError::ChunkBlockEntityTooLarge { .. }
             | StorageError::BatchTooLarge { .. }
             | StorageError::GenerationIdentityLimit { .. }
+            | StorageError::PersistentEntityBytesExceeded { .. }
+            | StorageError::PersistentEntityPageLimit { .. }
+            | StorageError::PersistentEntityEpochExhausted { .. }
+            | StorageError::UuidStorePluginIdTooLong { .. }
             | StorageError::JournalSequenceExhausted { .. } => Self::capacity(message),
             // A backend failure is an internal invariant violation.
             StorageError::JournalIdCollision { .. }
@@ -302,13 +405,21 @@ impl From<StorageError> for ServerError {
             | StorageError::BlockEntityOutsideChunk { .. }
             | StorageError::DuplicateBlockEntity { .. }
             | StorageError::TrailingChunkRecordBytes { .. }
-            | StorageError::Backend(_) => Self::internal(message),
+            | StorageError::Backend(_)
+            | StorageError::PersistentEntityCorruption { .. } => Self::internal(message),
             StorageError::JournalBatchConflict { .. }
             | StorageError::IncompatiblePreAlphaData
             | StorageError::GenerationMigrationRequired
             | StorageError::MissingGenerationIdentity { .. }
-            | StorageError::GenerationIdentityMismatch { .. } => Self::invalid_state(message),
-            StorageError::GenerationMetadataUnsupported => Self::unsupported(message),
+            | StorageError::GenerationIdentityMismatch { .. }
+            | StorageError::PersistentEntityMigrationRequired { .. }
+            | StorageError::DuplicatePersistentEntityWrite { .. }
+            | StorageError::PersistentEntityWorldUuidConflict { .. }
+            | StorageError::InvalidPersistentEntityMove { .. }
+            | StorageError::InvalidPersistentEntityCursor { .. } => Self::invalid_state(message),
+            StorageError::PersistentEntitiesUnsupported
+            | StorageError::WireEntityPersistenceUnsupported
+            | StorageError::GenerationMetadataUnsupported => Self::unsupported(message),
             StorageError::BlockEntityCodec { source, .. } => {
                 if matches!(
                     source,

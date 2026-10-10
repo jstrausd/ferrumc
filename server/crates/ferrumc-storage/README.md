@@ -212,3 +212,74 @@ without allocation so the worker can enforce byte-based backpressure.
 ## Invariants
 
 See `INVARIANTS.md` in this directory.
+
+## Explicit UUID entities: Format5
+
+[`PersistentEntityStore`] persists full [`ferrumc_core::EntityUuid`] values,
+independently of runtime wire IDs. Use [`InMemoryStore::with_uuid_entities`] or
+[`RedbStore::open_with_uuid_entities`] explicitly. Legacy and metadata-only
+instances return `Unsupported`; UUID mode refuses all old wire-keyed entity
+methods, including empty batches. The application does not activate this mode.
+
+```rust
+use ferrumc_core::{DimensionId, EntityUuid, WorldId};
+use ferrumc_math::ChunkPos;
+use ferrumc_storage::{EntityRecord, GenerationKey, InMemoryStore,
+    PersistentEntityKey, PersistentEntityRecord, PersistentEntityStore,
+    PersistentEntityWrite, SchemaVersion, WorldStore};
+use ferrumc_world::{GenerationIdentity, WorldSeed};
+
+# async fn uuid_example() -> ferrumc_core::Result<()> {
+let store = InMemoryStore::with_uuid_entities();
+let world = WorldId::new(0);
+let dimension = DimensionId::new(0);
+let identity = GenerationIdentity::flat_overworld(WorldSeed::new(42));
+store.ensure_generation_identity(GenerationKey::new(world, dimension), identity).await?;
+let key = PersistentEntityKey::new(world, dimension, EntityUuid::from_bytes([1; 16]));
+let record = PersistentEntityRecord::new(ChunkPos::new(0, 0),
+    EntityRecord::new(SchemaVersion::new(7), vec![1, 2, 3])?)?;
+store.save_persistent_entity(PersistentEntityWrite::new(key, identity, record)).await?;
+assert!(store.load_persistent_entity(key, identity).await?.is_some());
+# Ok(())
+# }
+```
+
+Saves admit at most 64 distinct world/UUID proposals and 4 MiB encoded bytes.
+One entity occupies24 key bytes plus22 envelope bytes plus its at-most 256 KiB
+opaque body. Exact expected generation identities and encountered relations
+are checked atomically. Save can change chunks in the same dimension; the
+separate move operation changes dimensions for the same world/UUID. Each
+changed chunk advances its positive persisted epoch once per commit; historical
+empty chunks retain epochs. An identical, consistent raw save is a no-op,
+including at the epoch maximum. Real changes at the maximum refuse atomically.
+
+Pages return 1..64 entries and at most 1 MiB of the same encoded-byte accounting,
+with at most one borrowed lookahead. Private transient cursors bind live backend,
+chunk, complete identity and epoch. Arc clones share authority; reopen creates a
+new incarnation. [`PersistentEntityCursorRejection`] classifies owner, chunk,
+identity and epoch mismatches. Cursors retain no database lifetime. A page with
+no continuation proves encountered chunk-prefix exhaustion; point calls do not
+search the world for unknown orphans.
+
+Format5 retains the nine metadata-layout tables and adds entity locator, chunk
+index and epoch tables. Existing Format5 opens validate the complete 12-table
+catalog, types, row grammars, both entity-index directions, actual descriptors
+and unchanged journal/receipt rules once. Validation streams one bounded record
+at a time and uses a disposable disk receipt index with 16 MiB cache; the main
+redb cache is 64 MiB. Decoder heap, bounded request/plan/page buffers, redb internals
+and object/map overhead are additional to caches and encoded-byte limits.
+Receipt-index cleanup checks owned file identity. Validation of nonempty receipt
+ranges currently requires Unix and refuses unsupported platforms explicitly.
+
+UUID mode bounds `PluginStore` namespace IDs to 4096 UTF-8 bytes on all four
+methods before key allocation/read/write. This Format5 policy makes admitted
+plugin rows valid at strict reopen; generic `PluginId` and older mode contracts
+remain unchanged. Plugin keys and values keep their existing bounds.
+
+Existing formats3/4 receive [`StorageError::PersistentEntityMigrationRequired`]
+without raw-row/catalog changes. Format4→5 migration is a separate offline
+ticket; this opener performs no migration or normalization. Existing formats5
+are not claimed physically hash-invariant across redb open/recovery. Save,
+delete and move provide no ownership CAS, general replay-safe retry, durable
+operation receipt or Player↔Entity transaction. Gameplay codecs, entity-load
+reservation, App/Sim activation and transfer durability remain separate.

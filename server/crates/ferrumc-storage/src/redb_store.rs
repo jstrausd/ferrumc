@@ -55,6 +55,8 @@ use crate::{
 };
 
 pub(crate) mod migration;
+mod uuid_entities;
+mod uuid_validation;
 
 /// On-disk layout version recorded in the metadata table.
 ///
@@ -246,6 +248,27 @@ fn world_state_is_empty(txn: &redb::WriteTransaction) -> Result<bool> {
             return Ok(false);
         }
     }
+    let has_uuid_layout = txn
+        .list_tables()
+        .map_err(backend_err)?
+        .any(|table| table.name() == uuid_entities::EPOCH_TABLE.name());
+    if has_uuid_layout {
+        for definition in [
+            uuid_entities::LOCATOR_TABLE,
+            uuid_entities::INDEX_TABLE,
+            uuid_entities::EPOCH_TABLE,
+        ] {
+            match txn.open_table(definition) {
+                Ok(table) => {
+                    if !table.is_empty().map_err(backend_err)? {
+                        return Ok(false);
+                    }
+                }
+                Err(redb::TableError::TableDoesNotExist(_)) => {}
+                Err(error) => return Err(backend_err(error)),
+            }
+        }
+    }
     Ok(true)
 }
 
@@ -416,6 +439,7 @@ pub struct RedbStore {
     /// `spawn_blocking` closure; it never leaves this crate.
     db: Arc<Database>,
     generation_mode: GenerationMode,
+    entity_incarnation: Arc<()>,
 }
 
 impl fmt::Debug for RedbStore {
@@ -452,6 +476,17 @@ impl RedbStore {
         Self::open_mode(path.as_ref(), GenerationMode::Metadata)
     }
 
+    /// Opens fresh or strictly validates existing Format5 UUID entity storage.
+    ///
+    /// Existing formats3/4 refuse with an explicit offline-migration error.
+    /// Startup performs a complete streaming validator; runtime calls check
+    /// encountered relationships. The main redb cache is64MiB; validation's
+    /// disposable receipt index has16MiB in addition to one decoded record.
+    /// This synchronous startup I/O must stay outside the async hot path.
+    pub fn open_with_uuid_entities(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_mode(path.as_ref(), GenerationMode::UuidEntities)
+    }
+
     fn open_mode(path: &Path, mode: GenerationMode) -> Result<Self> {
         let (db, origin) = match OpenOptions::new()
             .read(true)
@@ -460,19 +495,39 @@ impl RedbStore {
             .open(path)
         {
             Ok(file) => (
-                Database::builder().create_file(file).map_err(backend_err)?,
+                {
+                    let mut builder = Database::builder();
+                    if mode == GenerationMode::UuidEntities {
+                        builder.set_cache_size(64 * 1024 * 1024);
+                    }
+                    builder.create_file(file).map_err(backend_err)?
+                },
                 StoreOrigin::Fresh,
             ),
             Err(err) if err.kind() == ErrorKind::AlreadyExists => (
-                Database::open(path).map_err(database_open_err)?,
+                {
+                    if mode == GenerationMode::UuidEntities {
+                        Database::builder()
+                            .set_cache_size(64 * 1024 * 1024)
+                            .open(path)
+                            .map_err(database_open_err)?
+                    } else {
+                        Database::open(path).map_err(database_open_err)?
+                    }
+                },
                 StoreOrigin::Existing,
             ),
             Err(err) => return Err(backend_err(err)),
         };
-        Self::initialize(&db, origin, mode)?;
+        if mode == GenerationMode::UuidEntities {
+            uuid_validation::initialize(&db, origin, path)?;
+        } else {
+            Self::initialize(&db, origin, mode)?;
+        }
         Ok(Self {
             db: Arc::new(db),
             generation_mode: mode,
+            entity_incarnation: Arc::new(()),
         })
     }
 
@@ -483,6 +538,7 @@ impl RedbStore {
         let version = match mode {
             GenerationMode::Legacy => STORE_FORMAT_VERSION,
             GenerationMode::Metadata => GENERATION_STORE_FORMAT_VERSION,
+            GenerationMode::UuidEntities => 5,
         };
         {
             // The format marker is the gate for every table and record below.
@@ -974,6 +1030,9 @@ impl WorldStore for RedbStore {
     }
 
     async fn load_entity(&self, key: EntityKey) -> Result<Option<EntityRecord>> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Option<EntityRecord>> {
             let txn = db.begin_read().map_err(backend_err)?;
@@ -988,6 +1047,9 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
@@ -1012,6 +1074,9 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_entities(&self, entities: Vec<(EntityKey, EntityRecord)>) -> Result<()> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         if entities.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: entities.len(),
@@ -1047,6 +1112,9 @@ impl WorldStore for RedbStore {
     }
 
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<bool> {
             let txn = db.begin_write().map_err(backend_err)?;
@@ -1119,6 +1187,7 @@ impl PlayerStore for RedbStore {
 #[async_trait]
 impl PluginStore for RedbStore {
     async fn get(&self, plugin: &PluginId, key: &StorageKey) -> Result<Option<Vec<u8>>> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         let key_bytes = codec::plugin_key_bytes(plugin, key);
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>> {
@@ -1133,6 +1202,7 @@ impl PluginStore for RedbStore {
     }
 
     async fn put(&self, plugin: &PluginId, key: StorageKey, value: Vec<u8>) -> Result<()> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         if value.len() > MAX_PLUGIN_VALUE_LEN {
             return Err(StorageError::ValueTooLarge {
                 len: value.len(),
@@ -1157,6 +1227,7 @@ impl PluginStore for RedbStore {
     }
 
     async fn delete(&self, plugin: &PluginId, key: &StorageKey) -> Result<bool> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         let key_bytes = codec::plugin_key_bytes(plugin, key);
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<bool> {
@@ -1173,6 +1244,7 @@ impl PluginStore for RedbStore {
     }
 
     async fn keys(&self, plugin: &PluginId) -> Result<Vec<StorageKey>> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         let prefix = codec::plugin_prefix(plugin);
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Vec<StorageKey>> {

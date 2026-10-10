@@ -8,16 +8,23 @@ mod generation;
 mod journal;
 mod key;
 mod memory;
+mod persistent_entity;
 mod record;
 mod redb_store;
 mod schema;
 mod store;
 
-pub use error::StorageError;
+pub use error::{PersistentEntityCursorRejection, StorageError};
 pub use generation::{GenerationInitialization, GenerationKey, MAX_GENERATION_IDENTITIES};
 pub use journal::{JournalAppendReceipt, JournalBatchId};
 pub use key::{ChunkKey, EntityKey, StorageKey, MAX_PLUGIN_KEY_LEN};
 pub use memory::InMemoryStore;
+pub use persistent_entity::{
+    PersistentEntityCursor, PersistentEntityEntry, PersistentEntityEpoch, PersistentEntityKey,
+    PersistentEntityPage, PersistentEntityRecord, PersistentEntityStore, PersistentEntityWrite,
+    MAX_PERSISTENT_ENTITY_BATCH_BYTES, MAX_PERSISTENT_ENTITY_PAGE_BYTES,
+    MAX_PERSISTENT_ENTITY_PAGE_ENTRIES, MAX_PERSISTENT_ENTITY_WRITES,
+};
 pub use record::{
     BlockMutationLogRecord, ChunkOverlayRecord, ChunkRecord, EntityRecord, MutationActor,
     MutationLogCause, PlayerRecord, MAX_CHUNK_BLOCK_ENTITY_DATA_LEN, MAX_CHUNK_RECORD_LEN,
@@ -31,4 +38,7 @@ pub use redb_store::migration::{
 };
 pub use redb_store::RedbStore;
 pub use schema::SchemaVersion;
-pub use store::{PlayerStore, PluginStore, WorldStore, MAX_PLUGIN_VALUE_LEN, MAX_SAVE_BATCH};
+pub use store::{
+    PlayerStore, PluginStore, WorldStore, MAX_PLUGIN_VALUE_LEN, MAX_SAVE_BATCH,
+    MAX_UUID_STORE_PLUGIN_ID_LEN,
+};

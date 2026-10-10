@@ -66,6 +66,7 @@ pub(crate) enum GenerationMode {
     #[default]
     Legacy,
     Metadata,
+    UuidEntities,
 }
 
 pub(crate) fn decode_identity(

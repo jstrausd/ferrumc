@@ -45,6 +45,27 @@ pub const MAX_SAVE_BATCH: usize = 4096;
 /// generous for key-value state while capping a single entry.
 pub const MAX_PLUGIN_VALUE_LEN: usize = 1024 * 1024;
 
+/// Format5 UUID-mode plugin namespace limit, measured in UTF-8 bytes.
+///
+/// This4096-byte admission applies to Put/Get/Delete/Keys only in explicit
+/// UUID mode. It does not change the generic `PluginId` or older mode contracts.
+pub const MAX_UUID_STORE_PLUGIN_ID_LEN: usize = 4096;
+
+pub(crate) fn validate_uuid_plugin_scope(
+    mode: crate::generation::GenerationMode,
+    plugin: &PluginId,
+) -> std::result::Result<(), StorageError> {
+    let len = plugin.as_str().len();
+    if mode == crate::generation::GenerationMode::UuidEntities && len > MAX_UUID_STORE_PLUGIN_ID_LEN
+    {
+        return Err(StorageError::UuidStorePluginIdTooLong {
+            len,
+            max: MAX_UUID_STORE_PLUGIN_ID_LEN,
+        });
+    }
+    Ok(())
+}
+
 /// Persists and retrieves world data: chunk columns and entities.
 ///
 /// Reads of a missing key return `Ok(None)` (or `Ok(Vec::new())`), never an

@@ -8,7 +8,7 @@
 //! worker-thread backend lands in a later milestone.
 
 use std::collections::HashMap;
-use std::sync::{RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use async_trait::async_trait;
 use ferrumc_core::{PlayerId, PluginId, Result};
@@ -27,6 +27,8 @@ use crate::{
     GenerationInitialization, GenerationKey, JournalAppendReceipt, JournalBatchId,
     MAX_GENERATION_IDENTITIES,
 };
+
+mod uuid_entities;
 
 /// One committed idempotent batch, retained for exact normalized-payload replay.
 #[derive(Debug)]
@@ -62,6 +64,8 @@ pub struct InMemoryStore {
     /// The append-only block-mutation journal and its storage-owned sequence.
     mutation_log: RwLock<MutationJournalState>,
     entities: RwLock<HashMap<EntityKey, EntityRecord>>,
+    uuid_entities: RwLock<crate::persistent_entity::engine::MemoryState>,
+    entity_incarnation: Arc<()>,
     players: RwLock<HashMap<PlayerId, PlayerRecord>>,
     /// Each plugin id maps to its own private key-value namespace. Nesting the
     /// maps is what enforces cross-plugin isolation: a lookup can only ever
@@ -82,6 +86,15 @@ impl InMemoryStore {
     pub fn with_generation_metadata() -> Self {
         Self {
             generation_mode: GenerationMode::Metadata,
+            ..Self::default()
+        }
+    }
+
+    /// Creates an empty store explicitly adopting UUID persistence and exact baselines.
+    #[must_use]
+    pub fn with_uuid_entities() -> Self {
+        Self {
+            generation_mode: GenerationMode::UuidEntities,
             ..Self::default()
         }
     }
@@ -138,6 +151,14 @@ impl InMemoryStore {
                 .read()
                 .map_err(|_| poisoned("player"))?
                 .is_empty()
+        {
+            return Ok(false);
+        }
+        if !self
+            .uuid_entities
+            .read()
+            .map_err(|_| poisoned("UUID entity"))?
+            .is_empty()
         {
             return Ok(false);
         }
@@ -388,11 +409,17 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn load_entity(&self, key: EntityKey) -> Result<Option<EntityRecord>> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         let map = self.entities.read().map_err(|_| poisoned("entity"))?;
         Ok(map.get(&key).cloned())
     }
 
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         let _boundary = self.mutation_guard()?;
         self.require_generation(Some(GenerationKey::new(key.world(), key.dimension())))?;
         let mut map = self.entities.write().map_err(|_| poisoned("entity"))?;
@@ -401,6 +428,9 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn save_entities(&self, entities: Vec<(EntityKey, EntityRecord)>) -> Result<()> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         if entities.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: entities.len(),
@@ -420,6 +450,9 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
+        if self.generation_mode == GenerationMode::UuidEntities {
+            return Err(StorageError::WireEntityPersistenceUnsupported.into());
+        }
         let _boundary = self.mutation_guard()?;
 
         let mut map = self.entities.write().map_err(|_| poisoned("entity"))?;
@@ -453,11 +486,13 @@ impl PlayerStore for InMemoryStore {
 #[async_trait]
 impl PluginStore for InMemoryStore {
     async fn get(&self, plugin: &PluginId, key: &StorageKey) -> Result<Option<Vec<u8>>> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         let map = self.plugins.read().map_err(|_| poisoned("plugin"))?;
         Ok(map.get(plugin).and_then(|ns| ns.get(key)).cloned())
     }
 
     async fn put(&self, plugin: &PluginId, key: StorageKey, value: Vec<u8>) -> Result<()> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         if value.len() > MAX_PLUGIN_VALUE_LEN {
             return Err(StorageError::ValueTooLarge {
                 len: value.len(),
@@ -471,6 +506,7 @@ impl PluginStore for InMemoryStore {
     }
 
     async fn delete(&self, plugin: &PluginId, key: &StorageKey) -> Result<bool> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         let mut map = self.plugins.write().map_err(|_| poisoned("plugin"))?;
         let Some(ns) = map.get_mut(plugin) else {
             return Ok(false);
@@ -479,6 +515,7 @@ impl PluginStore for InMemoryStore {
     }
 
     async fn keys(&self, plugin: &PluginId) -> Result<Vec<StorageKey>> {
+        crate::store::validate_uuid_plugin_scope(self.generation_mode, plugin)?;
         let map = self.plugins.read().map_err(|_| poisoned("plugin"))?;
         Ok(map
             .get(plugin)

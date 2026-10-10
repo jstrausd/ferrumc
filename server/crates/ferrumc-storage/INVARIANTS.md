@@ -125,3 +125,64 @@
   backup, after closing all handles and separately preserving the replaced
   state. No blind backup overwrite or automatic rollback after an ambiguous
   commit. Processkill/power-loss evidence and App/Sim activation remain separate.
+
+## Explicit UUID entity mode (Format5)
+
+- `PersistentEntityStore` is separate and dyn-compatible; unsupported defaults
+  and Legacy/Metadata backends refuse even empty requests. UUID-mode instances
+  refuse all four old wire-keyed entity methods before processing any input.
+- Persistent keys preserve WorldId/DimensionId and all 128 UUID bits. Chunk
+  origin plus local offset 15 must fit i32 block coordinates. Simulation bodies
+  remain opaque and at most 256 KiB; envelope schema, payload schema, generator
+  identity and database layout are independent versions.
+- Format5 has exactly 12 typed tables. Entity24/FCUE22, locator20/12,
+  chunk-index32/empty and epoch16/8 grammars are exact big-endian byte encodings.
+  A world/UUID has at most one dimension. Relationships never repair themselves.
+- Runtime calls check encountered local records, world locators, precise chunk
+  indexes, positive epochs and real scope descriptors. They do not discover
+  unknown orphan rows with a global runtime scan. Existing Format5 opens run
+  the complete streaming validator once, checking both relation directions,
+  all 12 grammars, descriptors, contiguous journal IDs/watermark, receipt shape,
+  range existence and nonoverlap. No declaration, flat baseline or seed 0 is
+  invented. Unscoped players/journal/receipts require at least one descriptor.
+- Savebatch admits at most 64 proposals and 4 MiB of 24+22+payload bytes. Duplicate
+  scoped keys and world/UUIDs refuse before mutation. Same UUID bits in distinct
+  worlds are independent. Save changes chunks within a dimension; move requires
+  same world/UUID, different dimensions, existing source and vacant destination.
+- Exact expected identities, encountered relationships and all epoch increments
+  preflight in the mutation boundary. Each distinct changed chunk increments
+  once, at most 128 chunks per batch. Consistent raw no-op at u64MAX is allowed;
+  a real change at MAX refuses the whole operation. Missing delete returns false.
+  Historical empty-chunk epochs persist forever and prevent fresh rebinding.
+- Memory holds all UUID records/indexes/epochs under one owned state lock within
+  the shared mutation boundary; no guard crosses await. redb checks and writes
+  within one real writer transaction on a blocking worker. Returned-error abort
+  leaves all rows unchanged; Memory application has no fallible returned-error
+  cutpoint after admission (allocation failure is not represented as rollback).
+- Pages admit 1..64 entries and at most 1 MiB of 24+22+payload bytes. First range
+  includes the raw Chunkprefix16, detecting short prefix keys; subsequent ranges
+  exclude the last emitted UUID. Prefix upper bound never wraps. Reads inspect
+  at most limit+1 indexes and one borrowed bounded lookahead before payload copy.
+- Private transient cursors bind a Weak backend incarnation, full ChunkKey,
+  complete expected identity, epoch and last emitted UUID. Arc clones share
+  authority; foreign backend/reopen, chunk, identity and epoch each have a typed
+  refusal before publishing entries. Cursors never extend backend lifetime.
+- UUID-mode PluginStore Put/Get/Delete/Keys admit at most 4096 UTF-8 namespace
+  bytes before key allocation/read/write. This is a Format5 policy; generic
+  PluginId and Legacy/Metadata contracts retain their previous behavior.
+- Main redb cache is 64 MiB; the disposable receipt range index adds 16 MiB cache.
+  One decoded bounded row, bounded input/encoding plan/page, redb internals and
+  object/map overhead are additional. Page/request byte limits are not a total
+  process-heap guarantee. Memory retains the complete owned stored data.
+- Receipt validation owns a uniquely created temporary file and removes only
+  that exact regular-file identity after releasing its transaction/database.
+  Replaced paths are preserved. Nonempty receipt ranges currently require Unix
+  file identity support; unsupported platforms refuse explicitly.
+- Existing formats3/4 refuse the UUID opener with migration-required and retain
+  raw rows/catalog. Existing5 validation performs no normalization writes.
+  No physical source-hash/recovery guarantee or power-loss proof is inferred.
+  Legacy openers and 3→4 migration remain separate unchanged contracts.
+- UUID save/delete/move are not ownership CAS, durable operation receipts,
+  replay-safe general retries or Player↔Entity transactions. App/Sim activation,
+  gameplay codecs, load reservations, transfer durability and 4→5 migration are
+  separate work; this producer does not claim playable entities or item safety.
