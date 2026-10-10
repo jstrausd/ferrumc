@@ -194,12 +194,24 @@ nonzero and leaves the fresh logs/world for diagnosis; cleanup reaps the owned
 server, including a bounded forced-stop fallback.
 
 A separate live check verifies a custom-named stack survives a full-bag close,
-reopen and chest switch, then returns it to one freed player slot before removing
-that setup item. Named components are deliberately not tested across restart:
-the current persistence codec stores componentless stacks. This gate exercises
-normal left-click exchanges only; it does not imply shift/drag/right-click or
-full vanilla inventory support. External-server mode is intentionally absent,
-because both process restarts are required assertions.
+reopen and chest switch. The schema-3 restart scenario preserves custom names,
+damage and component removals in player slots, armor, offhand and a full-bag
+cursor through rejoin and two process restarts. The script manages six server
+processes in total. Chest exchanges use normal left-clicks; this does not imply
+other chest click modes or full vanilla inventory support. External-server mode
+is intentionally absent because process restarts are required assertions.
+
+## Chest component persistence (S02)
+
+`MC_SERVER_BIN=/path/to/ferrumc node chest-component-persistence.mjs` manages
+a fresh world and three server processes. It deposits and retrieves an item
+through survival chest clicks across two real process restarts, checks total
+counts and compares exact Slot bytes using the independent Prismarine parser
+for field boundaries. The marker includes a custom name, damage, a removed
+component, duplicate NBT keys, NaN payload bits and signed zero. Creative mode
+only creates the fixture; all chest transfers run in survival mode. This proves
+container persistence for the tested stack, not complete survival gameplay or
+hard-kill atomicity across player and world records.
 
 ## Player inventory normal clicks (I03)
 
