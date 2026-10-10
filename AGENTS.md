@@ -31,6 +31,12 @@ future support separate from behavior actually implemented and tested.
 3. **Read that crate's INVARIANTS.md.**
 4. **Read the relevant docs/architecture/*.md and docs/adr/*.md.**
 5. **Confirm scope.** Your change should touch 1-2 crates max.
+6. **For Survival or Java/Paper behavior, read the pinned reference.** Follow
+   [PAPER_REFERENCE.md](docs/PAPER_REFERENCE.md): inspect the relevant real
+   server/API implementation and base/feature patches, record behavior,
+   event order and deviations, and distinguish source review from passed
+   differential acceptance. An API interface or patch excerpt alone is not
+   evidence for the full server method.
 
 If you skip these steps, your output will be wrong.
 

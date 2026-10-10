@@ -64,6 +64,14 @@ vor bereits wartendem Weltverkehr. Unabhängige Wire-Fixtures prüfen das Paket.
 
 ## Code-Prüfung
 
+Die ergänzende [Paper-Quellenprüfung](PAPER_REFERENCE.md) vom 10.10.2026
+verwendet den offiziell zugeordneten Paper-1.21.8-Build-60-Commit und das
+bereits gepinnte API-Sources-JAR. Gelesen wurden Serverpatches für Items und
+Container sowie CraftBukkit-Scheduler-/Lifecycle-Quellen. Vollständige
+Vanilla-Basisquellen und Vergleichsläufe gegen einen laufenden Paper-Server
+sind noch offen. Diese reine Referenzprüfung ergänzt die untenstehenden
+FerrumC-Tests und belegt keine weitere Gameplay- oder Plugin-Kompatibilität.
+
 Aktuelle lokale Vollabnahme der N02/I03/S02-Erweiterung; CI führt zusätzlich
 `cargo nextest run --workspace --all-targets --locked` aus. Ein erfolgreicher
 lokaler Cargo-Testlauf ist kein vorweggenommenes GitHub-Ergebnis.

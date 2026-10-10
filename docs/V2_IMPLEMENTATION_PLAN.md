@@ -32,6 +32,14 @@ kommt `ferrumc-testkit` für Testinfrastruktur hinzu. Änderungen über mehrere
 Schichten werden als aufeinander aufbauende Schritte umgesetzt. Generierte
 Protokolldateien werden ausschließlich über den Generator geändert.
 
+Für Survival und Java-/Paper-Verhalten gilt die versionsfeste
+[Paper-Implementierungsreferenz](PAPER_REFERENCE.md): echte API-Verträge,
+Serverquellen, beide Patchschichten und relevante Vanilla-Basis prüfen;
+Events, Grenzfälle und bewusste Abweichungen pro Feature festhalten.
+Die erste Quellenprüfung verwendet Paper 1.21.8 Build 60. Vollständige
+Basisquellenprüfung und Laufzeitvergleiche werden featureweise nachgeholt;
+sie sind noch keine bestandene Paritätsabnahme.
+
 ## Was bereits vorhanden ist
 
 | Bereich | Quellcode und bestehende Abdeckung | Tatsächliche Grenze |
@@ -280,7 +288,9 @@ bleiben offen.
 ## Abnahme eines Arbeitsschritts
 
 1. Invarianten und Abhängigkeiten der betroffenen Crate lesen; Verhalten und
-   Fehlerpfade vor der Änderung benennen.
+   Fehlerpfade vor der Änderung benennen. Bei Survival-/Java-API-Arbeit zusätzlich
+   die Quellen- und Verhaltensmatrix aus [PAPER_REFERENCE.md](PAPER_REFERENCE.md)
+   führen; fehlende Basiszweige und Referenzabnahmen sichtbar lassen.
 2. Deterministische Tests, bei Parsern auch fehlerhafte/maximale Eingaben.
    Uhren kontrollieren statt in Unit-Tests zu schlafen.
 3. Betroffene Tests, Format und Clippy; danach die vorgeschriebenen Workspace-,
