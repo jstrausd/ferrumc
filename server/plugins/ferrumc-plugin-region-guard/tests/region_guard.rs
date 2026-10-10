@@ -213,8 +213,8 @@ fn region_guard_identical_digest_builtin_vs_dynamic() {
     assert_eq!(builtin.digest().as_hex(), EXPECTED_DIGEST);
 
     let state = builtin.state();
-    assert!(builtin.diagnostics().is_empty());
-    assert!(dynamic.diagnostics().is_empty());
+    assert_eq!(builtin.diagnostics().len(), 0);
+    assert_eq!(dynamic.diagnostics().len(), 0);
     assert_eq!(
         state.messages(),
         [
@@ -224,10 +224,10 @@ fn region_guard_identical_digest_builtin_vs_dynamic() {
                 .expect("second expected message is bounded"),
         ]
     );
-    assert!(state.subscriptions().is_empty());
-    assert!(state.commands().is_empty());
-    assert!(state.storage().is_empty());
-    assert!(state.timers().is_empty());
+    assert_eq!(state.subscriptions().len(), 0);
+    assert_eq!(state.commands().len(), 0);
+    assert_eq!(state.storage().len(), 0);
+    assert_eq!(state.timers().len(), 0);
     assert_eq!(state.player_position(player()), None);
     for pos in [
         BlockPos::new(-16, i32::MIN, 16),
