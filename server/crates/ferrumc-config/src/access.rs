@@ -484,7 +484,7 @@ mod tests {
 
     #[test]
     fn deny_reasons_have_messages() {
-        assert!(!DenyReason::Banned.message().is_empty());
-        assert!(!DenyReason::NotWhitelisted.message().is_empty());
+        assert_ne!(DenyReason::Banned.message().len(), 0);
+        assert_ne!(DenyReason::NotWhitelisted.message().len(), 0);
     }
 }
