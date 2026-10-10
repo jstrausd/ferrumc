@@ -101,7 +101,7 @@ async fn missing_keys_return_none_not_error() {
     assert!(!store.delete_chunk(chunk_key).await.expect("ok"));
     assert!(!store.delete_player(player).await.expect("ok"));
     assert!(!store.delete(&plugin, &key).await.expect("ok"));
-    assert!(store.keys(&plugin).await.expect("ok").is_empty());
+    assert_eq!(store.keys(&plugin).await.expect("ok").len(), 0);
 }
 
 #[tokio::test]

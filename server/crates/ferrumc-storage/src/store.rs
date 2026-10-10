@@ -46,6 +46,8 @@ pub const MAX_PLUGIN_VALUE_LEN: usize = 1024 * 1024;
 ///
 /// Reads of a missing key return `Ok(None)` (or `Ok(Vec::new())`), never an
 /// error; an `Err` means the operation itself failed.
+// async_trait adds must_use to boxed futures that already carry that contract.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait WorldStore: Send + Sync {
     /// Loads the chunk at `key`, or `Ok(None)` if no chunk is stored there.
@@ -171,6 +173,8 @@ pub(crate) fn journal_id_range(
 ///
 /// Players are keyed by their globally unique [`PlayerId`]. Loading an unknown
 /// player returns `Ok(None)`, never an error.
+// Keep this allowance on the macro-generated contract rather than the crate.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait PlayerStore: Send + Sync {
     /// Loads the record for `id`, or `Ok(None)` if the player is unknown.
@@ -189,6 +193,8 @@ pub trait PlayerStore: Send + Sync {
 /// Every operation is scoped to a [`PluginId`]: a plugin can only read, write,
 /// or enumerate keys within its own namespace, and never observes another
 /// plugin's data. Loading an unknown key returns `Ok(None)`, never an error.
+// async_trait adds must_use to boxed futures that already carry that contract.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait PluginStore: Send + Sync {
     /// Returns the value stored for `key` in `plugin`'s namespace, or `Ok(None)`

@@ -1586,7 +1586,7 @@ mod tests {
             .await
             .expect_err("receipt cannot acknowledge a missing row");
         assert!(matches!(error, ServerError::Internal { .. }));
-        assert!(journal_snapshot(&store).is_empty());
+        assert_eq!(journal_snapshot(&store).len(), 0);
         assert_eq!(stored_last_id(&store), None);
         assert_eq!(receipt_count(&store), 1);
     }
@@ -1603,7 +1603,7 @@ mod tests {
                 .await
                 .expect("empty receipt");
             assert!(receipt.is_empty());
-            assert!(journal_snapshot(&store).is_empty());
+            assert_eq!(journal_snapshot(&store).len(), 0);
             assert_eq!(stored_last_id(&store), None);
             assert_eq!(receipt_count(&store), 1);
             receipt
@@ -1644,7 +1644,7 @@ mod tests {
             .await
             .expect_err("oversized batch must fail");
         assert!(matches!(error, ServerError::Capacity(_)));
-        assert!(journal_snapshot(&store).is_empty());
+        assert_eq!(journal_snapshot(&store).len(), 0);
         assert_eq!(stored_last_id(&store), None);
         assert_eq!(receipt_count(&store), 0);
     }
