@@ -71,9 +71,10 @@
   blocks. Existing `generate` calls use the same implementation as
   `ChunkGenerator::generate_chunk`. Generation marks network dirty sections
   0..7 and does not mark gameplay-persist dirty/edited sections.
-- Storage metadata, overlay compatibility gates, configured seed selection,
-  multiple dimensions and natural terrain are separate consumer work. This
-  contract alone does not protect restart or migrate existing worlds.
+- Storage metadata, overlay compatibility gates and configured numeric seed
+  selection belong to the separately implemented App/Sim/Storage consumers.
+  This pure contract alone does not protect restart or migrate existing worlds.
+  Multiple dimensions and natural terrain remain separate consumer work.
 
 ## Original random and noise primitives
 
@@ -134,6 +135,52 @@
   Simplex, Blended, and Mth original-JAR methods after original version detection
   and registry bootstrap; the oracle contains no copied numerical noise formula.
   Public sampling is immutable, allocation-free, synchronous and free of I/O.
+
+## Original cubic splines
+
+- `CubicSpline` retains only owned immutable graph data. Borrowed specifications
+  and point/range slices are not retained. Clones share immutable `Arc` data,
+  carry no sampling cache and remain valid after the source or original clone
+  is dropped. IDs address construction-local slice indices, not persistent or
+  globally unique handles; equal numbers cannot prove graph provenance.
+- Point/constant inputs are finite private-field values. Points per multipoint
+  are 1..=64 and strictly ascending; duplicate locations include both zeros.
+  Coordinate diagnostics are finite ordered pairs or explicit full unlimited
+  ranges. Reversed, NaN and one-sided-infinite ranges fail construction.
+- Before owned graph allocation, all specifications, including unreachable
+  nodes, satisfy the 1024-node, 64-coordinate, 64-point/node, 16,384-total-point
+  caps and valid root/child/coordinate indices. Fixed-capacity iterative DFS
+  rejects even long cycles before checking depth. Maximum DAG depth is 32,
+  counting a constant leaf as one. Failure releases no partial public graph.
+- Sampling accepts a caller budget in 1..=1,048,576. A node entry, coordinate
+  callback or binary-search comparison consumes one unit before that operation;
+  budget admission fails before callbacks. Shared subgraphs can require
+  exponential revisits, so depth alone never substitutes for this work cap.
+  Callback work and its allocations remain the caller's responsibility.
+- Binsearch finds the first location strictly greater than the sample; equality
+  enters the interval on its right. Lower/upper extensions evaluate only the
+  endpoint child, and a signed-zero derivative returns that child unchanged.
+  Interiors evaluate the left child before the right even at an exact interior
+  endpoint. Shared child/coordinate requests repeat without memoization.
+- Interpolation, extrapolation and diagnostics preserve original f32 order;
+  no deliberate FMA, algebraic reassociation or f64 interpolation. A future
+  density adapter must cast original f64 coordinates to f32 before sampling
+  and widen the f32 result after sampling, as the original does.
+- Original Java min/max propagate NaN and preserve signed-zero distinctions.
+  Diagnostic overflow/infinity/NaN is retained and never guards finite sample
+  coordinates. Reported coordinate ranges neither clamp callback values nor
+  bound arbitrary callback behavior.
+- Actual coordinate values and every child/root sample result must be finite.
+  Typed source failure, budget exhaustion or nonfinite value stops immediately;
+  this checked policy is additional FerrumC behavior. Nonfinite child errors
+  can skip right callbacks that Java would execute. Only successful finite
+  samples claim original bit and request-order parity. Prior callback effects
+  are not rolled back; the immutable graph is unchanged by every sample error.
+- The spline corpus calls hash-pinned original `CubicSpline` methods through
+  reflection and real `ToFloatFunction` proxies. Finite arithmetic, diagnostics
+  and source-error traces are compared separately from Rust nonfinite policy.
+  It supplies no copied `TerrainProvider` profiles, density/registry/router,
+  codec/visitor, aquifer, surface, biome or natural-chunk implementation.
 
 ## Block-entity persistence
 

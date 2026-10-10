@@ -39,12 +39,13 @@ exact length, allocates nothing, and classifies unsupported metadata without
 falling back. `ensure_compatible` requires exact supported identity equality.
 This envelope is `FerrumC` metadata, not Vanilla NBT or protocol data.
 
-The storage/load path does not yet persist or compare this identity. A separate
-storage contract and Sim/App adoption must guard regeneration and overlay
-application before different/configurable terrain is activated. The existing
-server still serves fixed-layer flat terrain. Natural Overworld generation,
-Nether/End, textual/random seed selection and restart migration remain later
-tickets. See [WG-001 notes](../../../docs/agent-tasks/WG-001_GENERATION_CONTRACT.md)
+The production App/Sim/Storage path now persists and verifies this identity
+before regeneration and overlay application. Existing legacy worlds require
+the explicit offline generation migration; they receive no inferred seed.
+See [WG-004](../../../docs/agent-tasks/WG-004_APP_GENERATION.md) for the consumer
+contract. The server still serves fixed-layer flat terrain. Natural Overworld generation,
+Nether/End, textual/random seed selection and migrations to future generator
+algorithms/revisions remain later tickets. See [WG-001 notes](../../../docs/agent-tasks/WG-001_GENERATION_CONTRACT.md)
 for pinned reference behavior and consumer dependencies.
 
 ## Original random and noise primitives
@@ -100,6 +101,44 @@ Density routing/sampling, End island density, `WorldgenRandom` feature/decoratio
 seeding, Overworld/Nether/End chunk consumers and complete world seed parity
 remain separate work. Primitive goldens do not establish complete terrain or
 cross-platform parity.
+
+## Original cubic splines
+
+`spline::CubicSpline` owns an immutable constant/multipoint DAG. Construction
+checks every borrowed specification, including unused nodes, before allocating
+the graph: at most 1024 nodes, 64 declared coordinates, 64 points per node,
+16,384 total points and depth 32 (constant leaf = 1). Locations must be strictly
+ascending; float inputs are finite; IDs are checked graph-local slice indices.
+They are not persistent handles and cannot identify their construction of origin.
+Clones share the immutable graph through `Arc`; no input slice is retained.
+
+`sample_with` requires 1..=1,048,576 work units. Node entries, coordinate callbacks
+and binary-search comparisons each charge one unit before execution. Sampling
+performs no internal heap allocation, mutation, I/O or random draw. A caller's
+callback owns its own effects and cost. Coordinates and shared children are
+requested repeatedly, without caching. Original endpoint extensions evaluate
+one child; interior intervals evaluate left then right, including exact interior
+locations. All interpolation preserves the original f32 operation order without
+deliberate FMA.
+
+Reported coordinate ranges are diagnostic: either finite ordered endpoints or
+the explicit full unlimited range. One-sided infinity is rejected. Min/max
+retain original Java signed-zero, infinity and NaN behavior; they do not clamp
+finite samples or provide bounds for arbitrary callbacks. Typed callback errors,
+exhausted budget and nonfinite coordinates/results stop immediately. A nonfinite
+child stops before remaining right callbacks, whereas Java can continue to a
+nonfinite root. This checked error policy is a deliberate `FerrumC` deviation;
+prior callback effects are not rolled back and graph data remain unchanged.
+
+The separate original-JAR corpus covers 38 synthetic graphs, 7,588 finite sample
+bits/traces, 353 nonfinite results, 45 source-exception traces and original range
+diagnostics. It includes adjacent floats, signed zeros, subnormals, overflow,
+depth 32 and repeated-child DAGs. It copies no terrain profiles. Exact pins,
+reproduction and limitations are in
+[GEN-04.3](../../../docs/agent-tasks/GEN-04_3_CUBIC_SPLINES.md).
+Codecs, builders with value transformers, coordinate visitors, registered terrain
+profiles and f64 density-coordinate adapters remain consumer work. This module
+adds no generator identity and activates no natural chunks.
 
 ## Block-entity storage codec
 
