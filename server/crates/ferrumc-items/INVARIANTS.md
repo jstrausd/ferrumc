@@ -32,5 +32,23 @@
   duplicate component-patch ids.
 - Opaque bytes originate from the checked server-authored passthrough type;
   their internal wire semantics are not newly interpreted by persistence.
+- Pure split/transfer planning validates both models before any result clone,
+  including no-op and incompatible transfers. It shares persistence's
+  allocation-free structural/count/encoded-byte preflight; preflight scratch
+  uses a fixed 64-entry size array and a fixed 96-id set.
+- A transfer never swaps/overwrites incompatible stacks. Item id plus exact
+  ordered model representation defines merge compatibility: variant tags,
+  opaque bytes, removals, NBT compound duplicates/order and float bits survive.
+  Identical NaN bits match; distinct NaN payloads and signed zeros do not.
+- Requests are bounded `u8` upper quantities. Total destination capacity is
+  independently capped by the registry maximum. An existing destination above
+  supplied capacity is an error, even for a zero request; no count is clamped.
+  Present-result counts and component quantities are conserved, while drained
+  results restore canonical empty.
+- Transfer plans are owned snapshots, not revision-checked commits or durable
+  transactions. The consumer must publish both outputs under exclusive
+  authority, supply gameplay/slot capacity policy, and separately implement
+  persistent atomicity/replay protection and aggregate memory limits. Encoded
+  component byte caps do not equal decoded/clone heap caps.
 - No unsafe code, no production `unwrap`/`expect`, no unbounded untrusted
   allocation, and rustdoc on every public item.

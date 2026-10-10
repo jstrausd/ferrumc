@@ -21,6 +21,8 @@ Brigadier `Commands` packet); this crate produces and consumes those bytes.
 - `encode_container_content_payload` — builds the `SetContainerContent` body.
 - `encode_persisted_stack` / `decode_persisted_stack` — a separate versioned,
   bounded storage codec that preserves the supported authoritative model.
+- `plan_split` / `plan_transfer` — checked pure separation and non-swapping
+  partial transfer plans, preserving exact supported component representation.
 
 ## Trusted vs untrusted slots
 
@@ -106,3 +108,53 @@ with `ItemPersistenceError`. A stored stack is never clamped or stripped.
 `max_stack_size` values must be in `1..=99`; they cannot raise the registry count
 ceiling. The codec preserves the current model's signed damage values and
 present-air representation without adding gameplay normalization.
+
+## Checked split and transfer plans
+
+`plan_split(source, requested)` returns a `StackTransferPlan` with the source
+remainder, a separated destination stack, and `moved()`. `plan_transfer(source,
+destination, requested, destination_capacity)` returns the same owned result
+for a non-swapping partial transfer. Neither API mutates its borrowed inputs.
+`into_stacks()` yields `(source_after, destination_after)` for the owning caller.
+
+The `u8` request is a bounded upper quantity: zero is a no-op and a request
+above the source quantity can move at most the source quantity. Capacity is the
+**total** destination count limit, not free space; all `u8` capacities are
+accepted and the item's registry maximum remains an independent upper bound.
+Thus capacity 255 cannot enlarge a stone stack beyond 64 or a sword beyond 1.
+An existing destination above the supplied capacity fails, even for a zero
+request; it is never silently reduced. Empty outputs are canonical empty.
+
+Both input models are validated before cloning, including no-op, full, and
+incompatible cases. Transfer and persistence use the same allocation-free
+preflight, including registry counts, 64 patch entries, valid/nonconflicting
+ids, typed values, NBT structure/depth, 8192 encoded bytes per component, and
+256 KiB total component payloads. Preflight uses a fixed 64-entry size array
+and a fixed 96-id set. These byte allowances describe encoding; they are not
+equal decoded-heap allowances. Successful plans own at most two copies of the
+validated logical component trees. Clone allocation is proportional to the
+logical entries, strings, arrays, and NBT nodes rather than the caller's retained
+vector capacities; decoded enum/container and allocator overhead is additional.
+Consumers must separately bound the number of simultaneous plans/records.
+
+A present destination merges only the identical item and exact ordered patch
+representation. Typed and opaque representations, removal order, duplicate NBT
+keys, compound order, and float bits are distinct. Identical NaN bits match;
+different NaN payloads and +0/-0 do not. This comparison preserves representation
+and does not use the NBT model's derived IEEE float equality. Incompatible
+stacks yield a zero-movement plan and never swap or overwrite.
+
+This is a model primitive, not Paper's complete inventory policy. Paper resolves
+prototype/default component maps and uses semantic Java component equality;
+these plans deliberately do not normalize defaults, reorder maps, collapse
+duplicate NBT keys, decode opaque components, or evaluate damage/stackability.
+The later consumer must enforce eligibility and supply a capacity reflecting
+resolved `max_stack_size` and slot limits. The existing model still permits
+present-air and signed durability values. Nothing in this API activates drops,
+pickup, hopper transfers, or Java events.
+
+The caller must hold exclusive authority when publishing **both** outputs.
+Plans do not contain inventory revisions, compare-and-swap checks, replay guards,
+transaction identifiers, storage writes, or crash recovery. Applying one output,
+reusing a stale plan, or saving the outputs separately can lose or duplicate
+items. Persistent item conservation remains a separate consumer/Storage contract.

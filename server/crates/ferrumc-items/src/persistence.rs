@@ -136,32 +136,16 @@ pub enum ItemPersistenceError {
 /// invalid typed payloads, oversized payloads, or invalid/oversized NBT. It does
 /// not perform the lossy normalization used for creative network input.
 pub fn encode_persisted_stack(stack: &ItemStack) -> Result<Vec<u8>, ItemPersistenceError> {
+    let preflight = preflight_stack(stack)?;
     let Some(item) = stack.item() else {
         let mut out = MAGIC.to_vec();
         out.extend_from_slice(&VERSION.to_be_bytes());
         out.push(0);
         return Ok(out);
     };
-    validate_count(item, stack.count())?;
     let patch = stack.components();
-    validate_patch_count(patch.added().len(), patch.removed().len())?;
-    let mut seen = ComponentIds::new();
-    let mut payload_sizes = Vec::with_capacity(patch.added().len());
-    let mut total = 0;
-    for value in patch.added() {
-        seen.insert(value.type_id())?;
-        let size = component_payload_size(value)?;
-        check_component_size(value.type_id(), size)?;
-        accumulate_payload(&mut total, size)?;
-        payload_sizes.push(size);
-    }
-    for removed in patch.removed() {
-        seen.insert(removed.get())?;
-    }
     let name = item.name().as_bytes();
-    check_name_size(name.len())?;
-    let capacity = 12 + name.len() + patch.added().len() * 9 + patch.removed().len() * 4 + total;
-    let mut out = Vec::with_capacity(capacity);
+    let mut out = Vec::with_capacity(preflight.capacity);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&VERSION.to_be_bytes());
     out.push(1);
@@ -170,13 +154,58 @@ pub fn encode_persisted_stack(stack: &ItemStack) -> Result<Vec<u8>, ItemPersiste
     out.push(stack.count());
     out.push(patch.added().len() as u8);
     out.push(patch.removed().len() as u8);
-    for (value, size) in patch.added().iter().zip(payload_sizes) {
+    for (value, size) in patch.added().iter().zip(preflight.payload_sizes) {
         write_component(&mut out, value, size)?;
     }
     for removed in patch.removed() {
         out.extend_from_slice(&removed.get().to_be_bytes());
     }
     Ok(out)
+}
+
+/// Validates the authoritative model without encoding, allocation, or changes.
+///
+/// Transfer and persistence share these limits so neither clones an unchecked
+/// component tree. Encoded byte caps do not imply an equal decoded heap cap.
+pub(crate) fn validate_authoritative_stack(stack: &ItemStack) -> Result<(), ItemPersistenceError> {
+    preflight_stack(stack).map(|_| ())
+}
+
+struct StackPreflight {
+    payload_sizes: [usize; MAX_COMPONENTS],
+    capacity: usize,
+}
+
+fn preflight_stack(stack: &ItemStack) -> Result<StackPreflight, ItemPersistenceError> {
+    let mut payload_sizes = [0; MAX_COMPONENTS];
+    let Some(item) = stack.item() else {
+        return Ok(StackPreflight {
+            payload_sizes,
+            capacity: 7,
+        });
+    };
+    validate_count(item, stack.count())?;
+    let patch = stack.components();
+    validate_patch_count(patch.added().len(), patch.removed().len())?;
+    let mut seen = ComponentIds::new();
+    let mut total = 0;
+    for (value, slot) in patch.added().iter().zip(&mut payload_sizes) {
+        seen.insert(value.type_id())?;
+        let size = component_payload_size(value)?;
+        check_component_size(value.type_id(), size)?;
+        accumulate_payload(&mut total, size)?;
+        *slot = size;
+    }
+    for removed in patch.removed() {
+        seen.insert(removed.get())?;
+    }
+    let name = item.name().as_bytes();
+    check_name_size(name.len())?;
+    let capacity = 12 + name.len() + patch.added().len() * 9 + patch.removed().len() * 4 + total;
+    Ok(StackPreflight {
+        payload_sizes,
+        capacity,
+    })
 }
 
 /// Decodes exactly one persisted stack, rejecting corruption without changes.
