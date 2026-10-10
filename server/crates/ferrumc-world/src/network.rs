@@ -377,7 +377,7 @@ mod tests {
         // value 0 = 2) + biome single-plains container (2) = 6. No long-array
         // count prefixes since 1.21.5.
         assert_eq!(blob.len(), SECTION_COUNT * 6);
-        for section in blob.chunks_exact(6) {
+        for section in blob.as_chunks::<6>().0 {
             assert_eq!(section, &[0, 0, 0, 0, 0, 0]);
         }
         let headers = client_parse_blob(&blob);
@@ -507,8 +507,8 @@ mod tests {
         let light = ChunkLightData::full_bright();
 
         assert_eq!(light.sky_light_mask(), &[0x03FF_FFFF_i64]);
-        assert!(light.block_light_mask().is_empty());
-        assert!(light.empty_sky_light_mask().is_empty());
+        assert_eq!(light.block_light_mask().len(), 0);
+        assert_eq!(light.empty_sky_light_mask().len(), 0);
         assert_eq!(light.empty_block_light_mask(), &[0x03FF_FFFF_i64]);
 
         // One 2048-byte 0xFF array per light section.
@@ -518,7 +518,7 @@ mod tests {
             assert_eq!(array.len(), LIGHT_SECTION_BYTES);
             assert!(array.iter().all(|&byte| byte == 0xFF));
         }
-        assert!(light.block_light().is_empty());
+        assert_eq!(light.block_light().len(), 0);
 
         // The mask word has exactly the low 26 bits set.
         assert_eq!(0x03FF_FFFF_i64, (1i64 << 26) - 1);

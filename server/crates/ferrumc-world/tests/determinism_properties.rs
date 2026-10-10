@@ -171,7 +171,7 @@ impl PaletteOracle {
 
 fn indirect_bits(palette_len: usize) -> u8 {
     assert!(palette_len >= 2);
-    let needed = usize::BITS - (palette_len - 1).leading_zeros();
+    let needed = (palette_len - 1).bit_width();
     u8::try_from(needed)
         .expect("palette bit width fits u8")
         .max(4)

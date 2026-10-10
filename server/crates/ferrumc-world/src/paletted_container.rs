@@ -88,7 +88,7 @@ const fn index_bits_for_len(len: usize) -> u32 {
     if len <= 1 {
         0
     } else {
-        usize::BITS - (len - 1).leading_zeros()
+        (len - 1).bit_width()
     }
 }
 

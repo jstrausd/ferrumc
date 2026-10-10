@@ -177,7 +177,7 @@ mod tests {
         let arr = PackedArray::new(5, 0).unwrap();
         assert!(arr.is_empty());
         assert_eq!(arr.len(), 0);
-        assert!(arr.words().is_empty());
+        assert_eq!(arr.words().len(), 0);
         assert_eq!(arr.get(0), None);
     }
 
