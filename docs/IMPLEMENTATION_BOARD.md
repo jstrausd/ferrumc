@@ -124,16 +124,18 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | WG-004 / GEN-12.1 | `select_world_ticket`, Review `item_transfer_primitives` und Root | `server/app/**`, eigenes Taskdoc | Geprüft und integriert `62a5b74d`: produktive Format-4-/Seed-/Generatorbindung, verifizierte Tickcapture, Retry-/Unload-/Stopbarrieren und Offline-Migrations-CLI. Fremdreview CLEAN; sieben Rootclientharnesses und zusätzliche Migration/Read-only-Restartprobe grün. Flat-v1 bleibt der aktive Generator. |
 | SIM-03.2 | `feature_catalog`, Review `select_world_ticket` und Root | `server/crates/ferrumc-sim/**`, eigenes Taskdoc | Geprüft und integriert `916251da`: begrenzter UUID-/Wire-/Handle-/Chunkindex und Tickadmission. Fremdreview CLEAN nach F1-RED→GREEN; unabhängige Debug-/Releaseprüfung jeweils227 und12.000 Modellinterleavings grün. Keine aktivierten Mobs oder Itemconsumer. |
 | GEN-04.3 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigenes Taskdoc | CLEAN geprüft und integriert245134eb:163 Worlddebugtests, Rootrelease20 und bytegleicher Originalreexport. Zusätzlich32 Graphen/4294 Originalrecords einschließlich3462Samples/160Sourceexceptions; strictchecks nach dokumentarischem F1 grün. CI des Gesamtstands3a5b4d62 erfolgreich; Terrainaktivierung bleibt offen. |
-| STORAGE-ENTITY001.1 | `select_world_ticket`, Designreview `feature_catalog` und Root | `server/crates/ferrumc-storage/**`, eigenes Taskdoc | In Umsetzung nach R1–R4 und freigegebenem API-/Mode-/Validatorplan: fresh/strict Format5-UUIDproducer mit bounded Pages, Locator/Chunkindex/Epoch und Memory/redb-Parität. Vorhandenes Format4 wird unverändert verweigert; Migration .2 und DUR-03 folgen. |
+| STORAGE-ENTITY001.1 | `select_world_ticket`, Review `feature_catalog` und Root | `server/crates/ferrumc-storage/**`, eigenes Taskdoc | CLEAN geprüft und integriert `a5d11819`: unabhängige Debug-/Releaseprüfung je212 Tests plus9 eigene Probes,39 echte Writeabortcutpoints und Lostreply/Reopen; strictchecks grün. Fresh/strict Format5-UUIDproducer mit bounded Pages und Indizes; vorhandenes Format4 unverändert verweigert. Migration/Gameplaytransfers bleiben getrennt. |
+| STORAGE-ENTITY001.2 | `select_world_ticket`, Designreview Root | `server/crates/ferrumc-storage/**`, eigener .2-Brief | Konkrete explizite4→5-Migration durch Root freigegeben und in Umsetzung: voller Validator, unverändertes hashgebundenes Backup, immutable344-Byte-Checkpoint, bounded Prüfkopien und exakte Delta/Resume-Abnahme. Keine automatische Appmigration. |
 | REG-WORLDGEN001 | `feature_catalog`, Review Root | `server/crates/ferrumc-registry/**`, eigenes Taskdoc | CLEAN geprüft und auf main integriert555ee2aa:60 Noiseparameter,35 Densityresources und7 Noisesettings. Root Debug/Release jeweils69,4 eigene negative/Bitproben, strictchecks und102 Originalressourcen normal/-O grün. Statische Daten; Worldcompiler/Terrainaktivierung bleiben offen. |
 | GEN-05.1 | `item_transfer_primitives`, separater Codec-Oracleagent | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Freigegebener bounded Densitycompiler in Umsetzung: alle35 Definitionen und7 Router, echte Holder-/Splinecodecstruktur, private IR mit4096Vertices/8192Edges/Depth96. JSONnumbertokens für direkte f32-Decodierung. Separate Original-JAR-Proben; keine Seed-/Sample-/Chunkaktivierung. |
 
-Aktuell arbeiten neben Root der Weltcompileragent, dessen separater
-`gen05_1_codec_oracle`-Agent und der Storageagent. Registryimplementer
-`feature_catalog` hat seine Lieferung abgeschlossen. Nach Abschluss des
-Oracleauftrags geht der frei werdende Slot an das unabhängige Storage-
-Implementationreview; die aktuelle Vergabe überschreitet die drei Childslots
-nicht. Compilerproduktion und Oraclefixtures haben getrennten Dateibesitz.
+Aktuell arbeiten neben Root der Weltcompileragent `item_transfer_primitives`,
+der unabhängige Storage-Reviewer `feature_catalog` und der Storageagent
+`select_world_ticket`. Der separate `gen05_1_codec_oracle`-Auftrag ist beendet.
+Der Storageimplementer setzt nach .1-Integration die freigegebene explizite
+.2-Migration um. Der bisherige Reviewer bereitet den konkreten Item-Entity-
+Consumervertrag in Sim vor; dessen Runtimefreigabe folgt der Vertragsprüfung. Die Vergabe
+überschreitet die drei Childslots nicht; Root prüft den finalen Worldcompiler.
 
 Root hat die integrierte Runtime `62a5b74d` in einem detached Checkout
 geprüft: 2.304 Tests, 38 Doctests, strict Clippy/fmt und Generatorcheck grün,

@@ -186,18 +186,31 @@ Indizes und Zustände. Eine weitere unabhängige Probe prüft alle151 Typen:
 150 Non-playertypen angenommen, Player verweigert; signed Wireextrema und ±0.
 Das belegt Typ-/Owneridentität und keine Verhaltensimplementation dieser Mobs.
 
+## Gesamt-CI nach Originalregistryintegration
+
+Der veröffentlichte Gesamtstand **`9c35e769`**, einschließlich der geprüften
+REG-WORLDGEN001-Daten, hat die komplette
+[GitHub-CI](https://github.com/jstrausd/ferrumc/actions/runs/38077316149)
+erfolgreich abgeschlossen. Rust-Workspace, Java- und Plugincontracts,
+Originaldaten-/Generator-/Claimchecks und alle sieben unabhängigen Clientgates
+sind grün. Die noch unintegrierten Storage- und Worldcompileränderungen gehören
+nicht zu diesem Lauf.
+
 ## Laufende Folgearbeit
 
-- `feature_catalog`: REG-WORLDGEN001, Originaldatenproducer für60 Noiseparameter,
-  35 Densityresources und7 Noisesettings abgeschlossen555ee2aa. Immutable
-  Originaldefinitionen benötigen noch den fertig geprüften Worldcompiler.
+- `feature_catalog`: REG-WORLDGEN001 abgeschlossen555ee2aa; STORAGE-ENTITY001.1 unabhängig CLEAN geprüft und
+  integriert `a5d11819`. Jetzt konkreter Sim-Item-Entity-Vertrag; keine
+  vorzeitige Gameplayaktivierung.
 - `item_transfer_primitives`: GEN-04.3 originale kubische Splines integriert;
-  freigegebene GEN-05.1-Compilerimplementierung mit separatem echten JAR-Codec-
-  und Strukturoracle. Holderhelper-/Splinepflichtfelder und kombinierte Tiefe
+  freigegebene GEN-05.1-Compilerimplementierung. Der separate echte JAR-Codec-
+  und Strukturoracle-Auftrag ist beendet. Holderhelper-/Splinepflichtfelder und kombinierte Tiefe
   werden gegen die Originalcodecs geprüft. Anschließend
   Densityregistry/-router, NoiseChunk, Aquifers, Surface/Biome und Chunkgeneration.
-- `select_world_ticket`: STORAGE-ENTITY001.1 fresh/strict UUID-Storageproducer.
-  API-/Mode-/Validatorvertrag freigegeben, in Umsetzung.
+- `select_world_ticket`: STORAGE-ENTITY001.1 integriert `a5d11819`;
+  unabhängige Debug-/Releaseabnahme je212 Tests plus9 eigene Probes,39 tatsächliche
+  Writeabortcutpoints und Lostreply/Reopen sowie strictchecks grün.
+  [Implementationreview](agent-tasks/STORAGE-ENTITY001_1_UUID_STORE_REVIEW.md) CLEAN.
+  Konkrete .2-Migration nach vollständigem Rootdesignreview in Umsetzung.
   Root reserviert die vier Präzisierungen des unabhängigen Designreviews;
   Online prüft angetroffene Beziehungen, Pages sind nach tatsächlichen Bytes
   begrenzt, Änderungen haben definierte Epoch-/No-opregeln. Explizite4→5-
