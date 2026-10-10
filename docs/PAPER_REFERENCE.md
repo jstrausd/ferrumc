@@ -12,7 +12,7 @@ Tests bedeuten nicht, dass die entsprechenden Funktionen bereits laufen.
 | --- | --- |
 | Minecraft | Java Edition 1.21.8, Protokoll 772; dieselbe Version wie FerrumC. |
 | Paper-Server | **1.21.8 Build 60**, Commit `29c8822d90899c89d2689338e81a98f690bcba12`. Die [offiziellen Build-Metadaten](https://fill.papermc.io/v3/projects/paper/versions/1.21.8/builds/60) ordnen diesen Commit dem Build zu. |
-| Paper-Serverartefakt | Laut Build-Metadaten `paper-1.21.8-60.jar`, SHA-256 `8de7c52c3b02403503d16fac58003f1efef7dd7a0256786843927fa92ee57f1e`. Das JAR wurde in dieser Prüfung weder heruntergeladen noch gestartet; dies ist der veröffentlichte Sollwert. |
+| Paper-Serverartefakt | `paper-1.21.8-60.jar`, 52.811.717 Bytes, SHA-256 `8de7c52c3b02403503d16fac58003f1efef7dd7a0256786843927fa92ee57f1e`. In der dritten Welle vom offiziellen Build-Endpunkt heruntergeladen und Größe/Hash geprüft; lokale Referenz unter `.codex-tmp/paper-runtime-1.21.8-60/`. Noch kein gestarteter Paper-Vergleichslauf. |
 | Bridge-API | `io.papermc.paper:paper-api:1.21.8-R0.1-20250906.215025-55`, festgelegt in [pom.xml](../server/java-bridge/pom.xml). Der API-Pin ersetzt keinen Server-Pin. |
 | Bridge-API-Quellen | [Offizielles Sources-JAR](https://repo.papermc.io/repository/maven-public/io/papermc/paper/paper-api/1.21.8-R0.1-SNAPSHOT/paper-api-1.21.8-R0.1-20250906.215025-55-sources.jar), lokal geprüfte SHA-256 `f9ecfe790b21408eb0c108bc27daab63b104dbb5eb644776f4ca5f270c19050d`. |
 | Basis und Werkzeugkette | Im gepinnten [Server-Build](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/paper-server/build.gradle.kts): Mache `1.21.8+build.2`, Spigot BuildData `436eac9815c211be1a2a6ca0702615f995e81c44`; Java 21. |

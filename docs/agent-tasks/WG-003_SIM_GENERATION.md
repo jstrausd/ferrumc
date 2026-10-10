@@ -101,7 +101,7 @@ stays dirty, and deferred higher keys precede repeatedly re-dirtied lower keys.
    empty successes, legacy fallbacks or chunk misses. Sim owns no retry queue,
    database handle or flush policy.
 
-## Explicit legacy compatibility
+## Explicit historic format-3 API
 
 `LoadedChunkMap::new_legacy` and `with_legacy_schema_version` select the historic
 MC 1.21.8 / FerrumC flat revision 1 / Overworld / seed-0 baseline explicitly.
@@ -115,7 +115,7 @@ maps. A declared incompatible legacy generator refuses before generation or
 existing-resident ticket increment. A forged same-identity implementation would
 violate `ChunkGenerator`'s trusted deterministic contract.
 
-The synchronous source-compatible
+The existing synchronous signature
 `try_take_persist_dirty_bounded(u64, NonZeroUsize) -> Result<Batch, StorageError>`
 remains legacy-only. For a metadata map it returns
 `GenerationMetadataUnsupported` because this API has no target authorization.

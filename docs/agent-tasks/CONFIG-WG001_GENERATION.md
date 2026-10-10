@@ -15,7 +15,7 @@ config.anvil_import_dir() -> Option<&Path>
 ```
 
 Both new fields are private. The preset is a closed supported set with
-`#[non_exhaustive]` for future source-compatible extension; only the implemented
+`#[non_exhaustive]` so downstream matches already require a fallback arm; only the implemented
 `FerrumcFlat` variant is representable/accepted today. Its exact TOML spelling
 is `"ferrumc_flat"`. There is no free-form string/catch-all fallback or default
 enum value. Typed construction cannot represent a seed outside `i64` or an
@@ -29,7 +29,7 @@ text/random tokens, floats, boolean/container values and overflow are rejected.
 Unknown presets/field names and duplicate choices refuse parsing.
 
 `with_generation` replaces optional declarations and preserves import. The
-historical public `anvil_import_dir` field remains for field-access compatibility;
+historical public `anvil_import_dir` field retains existing direct field reads/writes;
 no new public fields were introduced. Adding private fields prevents external
 struct literals, which must now use `Default`, the typed builder or serde. No
 external `WorldConfig { ... }` literals were found in existing repository
