@@ -15,6 +15,47 @@ use crate::observe;
 use super::context::ConnContext;
 use super::write_all;
 
+/// Delivers only actor-validated current-player messages; console output is
+/// logged locally and never opens a route to another network connection.
+pub(super) fn send_java_messages(
+    ctx: &ConnContext,
+    writer: &mut PlayWriter,
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+    messages: Vec<crate::java_bridge::JavaMessage>,
+) -> anyhow::Result<()> {
+    for message in messages {
+        if message.player.is_some() {
+            send_java_feedback(ctx, writer, debug, compression, &message.text)?;
+        } else {
+            tracing::info!(message = %message.text, "Java plugin console");
+        }
+    }
+    Ok(())
+}
+
+/// Sends bounded Java callback feedback through this connection's normal writer.
+pub(super) fn send_java_feedback(
+    ctx: &ConnContext,
+    writer: &mut PlayWriter,
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+    text: &str,
+) -> anyhow::Result<()> {
+    let outcome = enqueue_traced_classified(
+        writer,
+        debug,
+        compression,
+        &ctx.clock,
+        ferrumc_session::system_chat(&ferrumc_core::TextComponent::text(text), false),
+    );
+    anyhow::ensure!(
+        outcome.is_enqueued(),
+        "outbound overflow while delivering Java plugin feedback"
+    );
+    Ok(())
+}
+
 /// Enqueues an `AcknowledgeBlockChange` echoing `sequence`, ending the client's
 /// optimistic prediction for that block action.
 ///

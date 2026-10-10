@@ -214,26 +214,50 @@ pub(super) async fn enter_play(
     // always-open player inventory lives in `inventory`; this tracks the at-most-one
     // container window layered on top of it.
     let mut window_state = WindowState::new();
-    if let Err(err) = pump_serverbound(
-        &mut decoder,
-        &compression,
-        ctx,
-        player,
-        name.as_str(),
-        &mut writer,
-        &mut chunk_stream,
-        &mut chat_limiter,
-        &mut budget,
-        &mut inventory,
-        &mut window_state,
-        &mut player_yaw,
-        &mut player_pitch,
-        &mut debug,
-        &mut liveness,
-    )
-    .await
-    {
-        deferred_break = Some(err);
+    if let Some(bridge) = &ctx.java_bridge {
+        let outcome = bridge
+            .event(true, ctx.java_player(player, name.as_str()))
+            .await;
+        match outcome {
+            Ok(messages) => {
+                if let Err(error) = super::outbound::send_java_messages(
+                    ctx,
+                    &mut writer,
+                    &mut debug,
+                    &compression,
+                    messages,
+                ) {
+                    deferred_break = Some(error);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, player = name.as_str(), "Java join callback failed");
+                deferred_break = Some(error.into());
+            }
+        }
+    }
+    if deferred_break.is_none() {
+        if let Err(err) = pump_serverbound(
+            &mut decoder,
+            &compression,
+            ctx,
+            player,
+            name.as_str(),
+            &mut writer,
+            &mut chunk_stream,
+            &mut chat_limiter,
+            &mut budget,
+            &mut inventory,
+            &mut window_state,
+            &mut player_yaw,
+            &mut player_pitch,
+            &mut debug,
+            &mut liveness,
+        )
+        .await
+        {
+            deferred_break = Some(err);
+        }
     }
     if deferred_break.is_none() {
         // The join position (or the latest valid movement pipelined during the
@@ -483,6 +507,26 @@ pub(super) async fn enter_play(
     // Deadlines close the peer before persistence teardown, whose durability
     // awaits may legitimately take longer than a network response window.
     drop(stream);
+
+    if let Some(bridge) = &ctx.java_bridge {
+        match bridge
+            .event(false, ctx.java_player(player, name.as_str()))
+            .await
+        {
+            Ok(messages) => {
+                for message in messages {
+                    // The peer has already closed; quit callbacks run, but a message
+                    // addressed to that departed player cannot be sent to a socket.
+                    if message.player.is_none() {
+                        tracing::info!(message = %message.text, "Java plugin console");
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, player = name.as_str(), "Java quit callback failed");
+            }
+        }
+    }
 
     // The play link has ended (clean close, EOF, shutdown, or error). Sample the
     // final outbound queue depth and dump the retained traces (acceptance:

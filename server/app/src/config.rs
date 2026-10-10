@@ -205,6 +205,14 @@ pub struct AppConfig {
     /// Directory containing strict trusted-native plugin bundles, or `None` to
     /// skip native plugin loading.
     plugins_dir: Option<PathBuf>,
+    /// Optional Java plugin directory; requires the compatibility-host JAR.
+    java_plugins_dir: Option<PathBuf>,
+    /// Executable compatibility-host JAR, never a Paper server JAR.
+    java_bridge_jar: Option<PathBuf>,
+    /// Java executable launched directly without a shell.
+    java_executable: String,
+    /// Absolute per-RPC budget, including queue time.
+    java_bridge_timeout: Duration,
     /// Whether the application registers its built-in plugin set.
     builtin_plugins: bool,
     /// Spawn-protection radius, in blocks (Chebyshev) around the spawn column.
@@ -341,6 +349,30 @@ impl AppConfig {
     #[must_use]
     pub fn plugins_dir(&self) -> Option<&Path> {
         self.plugins_dir.as_deref()
+    }
+
+    /// Optional directory containing Java plugins for the compatibility host.
+    #[must_use]
+    pub fn java_plugins_dir(&self) -> Option<&Path> {
+        self.java_plugins_dir.as_deref()
+    }
+
+    /// Optional shaded compatibility-host JAR. Both Java paths must be configured.
+    #[must_use]
+    pub fn java_bridge_jar(&self) -> Option<&Path> {
+        self.java_bridge_jar.as_deref()
+    }
+
+    /// Java executable, invoked directly with `-jar`.
+    #[must_use]
+    pub fn java_executable(&self) -> &str {
+        &self.java_executable
+    }
+
+    /// Absolute Java RPC budget, including queue admission and pipe I/O.
+    #[must_use]
+    pub const fn java_bridge_timeout(&self) -> Duration {
+        self.java_bridge_timeout
     }
 
     /// Returns whether the built-in plugin set is enabled.
@@ -504,6 +536,32 @@ impl AppConfig {
     /// Validates every runtime-facing numeric and cross-field invariant.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.java_plugins_dir.is_some() == self.java_bridge_jar.is_some(),
+            "java_plugins_dir and java_bridge_jar must be configured together"
+        );
+        anyhow::ensure!(
+            !self.java_executable.is_empty()
+                && self.java_executable.len() <= 4_096
+                && !self.java_executable.contains('\0'),
+            "java_executable must be a nonempty executable path up to 4096 bytes"
+        );
+        anyhow::ensure!(
+            (Duration::from_millis(100)..=Duration::from_secs(30))
+                .contains(&self.java_bridge_timeout),
+            "java_bridge_timeout_ms must be in 100..=30000"
+        );
+        for path in [&self.java_plugins_dir, &self.java_bridge_jar]
+            .into_iter()
+            .flatten()
+        {
+            anyhow::ensure!(
+                !path.as_os_str().is_empty()
+                    && path.as_os_str().len() <= 4_096
+                    && path.to_str().is_some_and(|text| !text.contains('\0')),
+                "Java bridge paths must be nonempty UTF-8 paths up to 4096 bytes"
+            );
+        }
         anyhow::ensure!(
             (1..=MAX_CONNECTIONS).contains(&self.max_connections),
             "max_connections must be in 1..={MAX_CONNECTIONS}, got {}",
@@ -726,6 +784,10 @@ impl Default for AppConfig {
             spawn_chunk_radius: DEFAULT_SPAWN_CHUNK_RADIUS,
             ticks_per_second: DEFAULT_TICKS_PER_SECOND,
             plugins_dir: None,
+            java_plugins_dir: None,
+            java_bridge_jar: None,
+            java_executable: "java".to_owned(),
+            java_bridge_timeout: Duration::from_secs(5),
             builtin_plugins: DEFAULT_BUILTIN_PLUGINS,
             spawn_protect_radius: DEFAULT_SPAWN_PROTECT_RADIUS,
             spawn_protect_bypass: Vec::new(),
@@ -790,6 +852,11 @@ struct RawConfig {
     ticks_per_second: Option<u32>,
     /// Override for [`AppConfig::plugins_dir`], as a filesystem path.
     plugins_dir: Option<String>,
+    /// Java compatibility host configuration; disabled when both paths are absent.
+    java_plugins_dir: Option<String>,
+    java_bridge_jar: Option<String>,
+    java_executable: Option<String>,
+    java_bridge_timeout_ms: Option<u64>,
     /// Override for [`AppConfig::builtin_plugins`].
     builtin_plugins: Option<bool>,
     /// Override for [`AppConfig::spawn_protect_radius`].
@@ -884,6 +951,12 @@ impl RawConfig {
                 .unwrap_or(defaults.spawn_chunk_radius),
             ticks_per_second,
             plugins_dir: self.plugins_dir.map(PathBuf::from).or(defaults.plugins_dir),
+            java_plugins_dir: self.java_plugins_dir.map(PathBuf::from),
+            java_bridge_jar: self.java_bridge_jar.map(PathBuf::from),
+            java_executable: self.java_executable.unwrap_or(defaults.java_executable),
+            java_bridge_timeout: self
+                .java_bridge_timeout_ms
+                .map_or(defaults.java_bridge_timeout, Duration::from_millis),
             builtin_plugins: self.builtin_plugins.unwrap_or(defaults.builtin_plugins),
             spawn_protect_radius,
             spawn_protect_bypass: self
@@ -929,6 +1002,37 @@ mod tests {
     fn empty_toml_yields_defaults() {
         let parsed = AppConfig::from_toml_str("").expect("empty config is valid");
         assert_eq!(parsed, AppConfig::default());
+    }
+
+    #[test]
+    fn java_bridge_requires_paired_paths_and_a_bounded_rpc_budget() {
+        let config = AppConfig::from_toml_str(
+            "java_plugins_dir = '/srv/java-plugins'\njava_bridge_jar = '/opt/bridge.jar'\n\
+             java_executable = '/opt/jdk/bin/java'\njava_bridge_timeout_ms = 100\n",
+        )
+        .expect("complete Java configuration");
+        assert_eq!(
+            config.java_plugins_dir(),
+            Some(Path::new("/srv/java-plugins"))
+        );
+        assert_eq!(config.java_bridge_jar(), Some(Path::new("/opt/bridge.jar")));
+        assert_eq!(config.java_executable(), "/opt/jdk/bin/java");
+        assert_eq!(config.java_bridge_timeout(), Duration::from_millis(100));
+        for invalid in [
+            "java_plugins_dir = '/srv/java-plugins'",
+            "java_bridge_jar = '/opt/bridge.jar'",
+            "java_executable = ''",
+            "java_bridge_timeout_ms = 99",
+            "java_bridge_timeout_ms = 30001",
+            "java_plugins_dir = ''\njava_bridge_jar = '/opt/bridge.jar'",
+            "java_plugins_dir = '/srv/java-plugins'\njava_bridge_jar = ''",
+            "java_executable = \"bad\\u0000path\"",
+        ] {
+            assert!(AppConfig::from_toml_str(invalid).is_err(), "{invalid:?}");
+        }
+        assert!(AppConfig::from_toml_str("java_bridge_timeout_ms = 30000").is_ok());
+        let excessive = format!("java_executable = '{}'", "x".repeat(4097));
+        assert!(AppConfig::from_toml_str(&excessive).is_err());
     }
 
     #[test]

@@ -19,6 +19,7 @@ mod config;
 mod connection;
 mod driver;
 mod inventory;
+mod java_bridge;
 mod observe;
 mod player_data;
 mod plugins;

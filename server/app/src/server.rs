@@ -26,6 +26,7 @@ use ferrumc_sim::{GameInput, ShardPartitioner, SimShard};
 use crate::config::AppConfig;
 use crate::connection::{build_status_response, handle_connection, ConnContext};
 use crate::driver;
+use crate::java_bridge::JavaBridgeRuntime;
 use crate::plugins::build_play_policy;
 use crate::registries::ConfigRegistries;
 use crate::storage_worker::{run_storage_worker, StorageFlushRequest};
@@ -66,6 +67,8 @@ pub struct RunningServer {
     /// mutation journal. It stays alive until the driver drops its sender and its
     /// final flush has been committed or reported as failed.
     storage_worker_task: JoinHandle<ServerResult<()>>,
+    /// Optional compatibility process, stopped after every connection quit hook.
+    java_runtime: Option<JavaBridgeRuntime>,
     /// The shared metric registry, fed by the driver and every connection task.
     /// Exposed for an on-demand metrics snapshot (see [`metrics`](Self::metrics)).
     metrics: Arc<CounterRegistry>,
@@ -152,7 +155,14 @@ impl RunningServer {
         // the worker observes the closed channel, drains everything pending, and
         // exits. Polling all joins together does not change that channel ordering,
         // and guarantees an early failure never detaches another task.
-        await_server_tasks(self.accept_task, self.driver_task, self.storage_worker_task).await
+        let tasks =
+            await_server_tasks(self.accept_task, self.driver_task, self.storage_worker_task).await;
+        let java = match self.java_runtime {
+            Some(runtime) => runtime.shutdown().await.map_err(anyhow::Error::new),
+            None => Ok(()),
+        };
+        tasks?;
+        java
     }
 }
 
@@ -237,12 +247,12 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     // Bundle discovery, hashing, dynamic-library loading, and initialization are
     // synchronous filesystem/native work, so keep them off Tokio's async workers.
     let plugin_config = config.clone();
-    let (policy, block_events) =
+    let (mut policy, block_events) =
         tokio::task::spawn_blocking(move || build_play_policy(&plugin_config))
             .await
             .context("plugin policy build task failed")?
             .context("building the plugin play policy")?;
-    let policy = Arc::new(policy);
+    let native_labels = block_events.command_labels()?;
     let block_events = Arc::new(block_events);
 
     let mut router = SessionRouter::new();
@@ -255,6 +265,41 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     // position. This is still single-shard behavior: no second worker, ownership
     // claim, or cross-shard transfer is introduced here.
     let shard_rx = register_world_owner(&mut router, &setup.shard)?;
+
+    // Resolve every fallible listener/access/status prerequisite before spawning
+    // any driver or compatibility actor. A load failure never leaves server tasks.
+    let listener = TcpListener::bind(config.bind()).await.with_context(|| {
+        format!(
+            "binding to {}; choose another port if it is already in use",
+            config.bind()
+        )
+    })?;
+    let local_addr = listener.local_addr()?;
+    let max_players = u32::try_from(config.max_connections())
+        .map_err(|_| anyhow::anyhow!("validated max_connections does not fit in u32"))?;
+    let status_response = Arc::new(build_status_response(max_players)?);
+    let (access, per_ip) = build_access(config)?;
+    let java_runtime = match (config.java_bridge_jar(), config.java_plugins_dir()) {
+        (Some(jar), Some(plugins)) => {
+            let runtime = JavaBridgeRuntime::start(
+                config.java_executable(),
+                jar,
+                plugins,
+                config.java_bridge_timeout(),
+            )
+            .await?;
+            if let Err(error) =
+                policy.register_java_commands(runtime.bridge().commands(), &native_labels)
+            {
+                let _ = runtime.shutdown().await;
+                return Err(error);
+            }
+            Some(runtime)
+        }
+        _ => None,
+    };
+    let java_bridge = java_runtime.as_ref().map(JavaBridgeRuntime::bridge);
+    let policy = Arc::new(policy);
 
     let (commands_tx, commands_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -309,34 +354,6 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         shutdown_rx.clone(),
     ));
 
-    // A port clash is the common operator mistake, so name the port and the fix
-    // instead of surfacing a bare "Address already in use (os error 48)".
-    let listener = match TcpListener::bind(config.bind()).await {
-        Ok(listener) => listener,
-        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
-            return Err(anyhow::anyhow!(
-                "port {} is already in use (bind {}). Another server may be running — \
-                 pick a different port with --port <PORT> (or set `bind` in config.toml), \
-                 or find what holds it with `lsof -i :{}`.",
-                config.bind().port(),
-                config.bind(),
-                config.bind().port(),
-            ));
-        }
-        Err(err) => return Err(anyhow::anyhow!("binding to {}: {err}", config.bind())),
-    };
-    let local_addr = listener.local_addr()?;
-
-    // Render the server-list status response once; it advertises the connection
-    // ceiling as the player max and never changes for the server's lifetime. A
-    // ceiling above `u32::MAX` saturates rather than wrapping to a tiny max.
-    let max_players = u32::try_from(config.max_connections())
-        .map_err(|_| anyhow::anyhow!("validated max_connections does not fit in u32"))?;
-    let status_response = Arc::new(build_status_response(max_players)?);
-
-    // Resolve access control once at startup and build the per-IP limiter from it.
-    let (access, per_ip) = build_access(config)?;
-
     let ctx = ConnContext {
         limits: ConnectionLimits::default(),
         io_timeout: config.io_timeout(),
@@ -349,6 +366,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         player_store,
         policy,
         block_events,
+        java_bridge,
         status_response,
         view_distance: config.view_distance(),
         metrics: Arc::clone(&metrics),
@@ -372,6 +390,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         accept_task,
         driver_task,
         storage_worker_task,
+        java_runtime,
         metrics,
         snapshots,
     })

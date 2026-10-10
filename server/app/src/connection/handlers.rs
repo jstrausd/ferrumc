@@ -841,8 +841,55 @@ async fn handle_command(
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
     let policy = &ctx.policy;
+    if let Some(bridge) = &ctx.java_bridge {
+        let mut tokens = command.split_whitespace();
+        if let Some(label) = tokens
+            .next()
+            .filter(|label| bridge.find_command(label).is_some())
+        {
+            let descriptor = bridge
+                .find_command(label)
+                .ok_or_else(|| anyhow::anyhow!("Java command metadata disappeared"))?;
+            if descriptor
+                .permission
+                .as_ref()
+                .is_some_and(|node| !policy.java_permission_allowed(player, node))
+            {
+                return super::outbound::send_java_feedback(
+                    ctx,
+                    writer,
+                    debug,
+                    compression,
+                    "You do not have permission to run this command",
+                );
+            }
+            match bridge
+                .command(
+                    label,
+                    tokens.take(65).map(str::to_owned).collect(),
+                    ctx.java_player(player, name),
+                )
+                .await
+            {
+                Ok(messages) => {
+                    super::outbound::send_java_messages(ctx, writer, debug, compression, messages)?;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, player = name, "Java command failed");
+                    super::outbound::send_java_feedback(
+                        ctx,
+                        writer,
+                        debug,
+                        compression,
+                        &error.to_string(),
+                    )?;
+                }
+            }
+            return Ok(());
+        }
+    }
     let source = CommandSource::for_player(player, name, policy.permission_level(player));
-    let allowed = |node: &str| policy.permissions().is_allowed(player, node);
+    let allowed = |node: &str| ctx.command_permission_allowed(player, node);
     let result = match policy
         .command_tree()
         .dispatch_with(command, &source, &allowed)
@@ -1801,7 +1848,7 @@ fn handle_tab_complete(
     compression: &CompressionState,
 ) {
     let level = ctx.policy.permission_level(player);
-    let allowed = |node: &str| ctx.policy.permissions().is_allowed(player, node);
+    let allowed = |node: &str| ctx.command_permission_allowed(player, node);
     let (start, length, suggestions) =
         tab_complete_reply(ctx.policy.command_tree(), level, &allowed, text);
 
@@ -2161,6 +2208,7 @@ mod tests {
             player_store: setup.player_store,
             policy: Arc::new(policy),
             block_events: Arc::new(BlockEventDispatcher::new(host)),
+            java_bridge: None,
             status_response: Arc::new(build_status_response(1).expect("build status response")),
             view_distance: config.view_distance(),
             metrics: Arc::new(CounterRegistry::new()),

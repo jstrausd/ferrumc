@@ -105,6 +105,14 @@
 # means no dynamic plugins are loaded.
 # plugins_dir = "plugins"
 
+# Optional Java compatibility host (Java 21). Set BOTH paths to enable; absent
+# paths preserve native mode. This JAR is the FerrumC host, not a Paper server.
+# java_plugins_dir = "java-plugins"
+# java_bridge_jar = "/usr/local/share/ferrumc/ferrumc-java-bridge.jar"
+# java_executable = "java"
+# Absolute RPC budget including queued work (100..=30000 ms).
+# java_bridge_timeout_ms = 5000
+
 # --- Observability dashboard ---
 
 # Whether the read-only observability dashboard starts alongside the server.

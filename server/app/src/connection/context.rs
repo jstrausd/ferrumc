@@ -74,6 +74,8 @@ pub(crate) struct ConnContext {
     /// receive the host's documented connection-side sentinel context and retain
     /// their process-level failure limits.
     pub(crate) block_events: Arc<BlockEventDispatcher>,
+    /// Optional process-isolated Java plugin bridge, owned by `RunningServer`.
+    pub(crate) java_bridge: Option<crate::java_bridge::JavaBridge>,
     /// The prebuilt server-list status response, rendered once at startup and
     /// replayed for every status (`next_state == 1`) handshake. Behind an [`Arc`]
     /// so cloning the context per connection is a pointer bump, not a re-render.
@@ -106,6 +108,45 @@ pub(crate) struct ConnContext {
 }
 
 impl ConnContext {
+    /// Builds a Rust-derived canonical sender snapshot from Rust-owned policy only.
+    pub(super) fn java_player(
+        &self,
+        player: PlayerId,
+        name: &str,
+    ) -> crate::java_bridge::JavaPlayer {
+        let permissions = self.java_bridge.as_ref().map_or_else(Vec::new, |bridge| {
+            bridge
+                .commands()
+                .iter()
+                .filter_map(|command| command.permission.as_ref())
+                .filter(|permission| self.policy.java_permission_allowed(player, permission))
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        });
+        crate::java_bridge::JavaPlayer {
+            name: name.to_owned(),
+            uuid: player.as_uuid().to_string(),
+            op: self.policy.is_operator(player),
+            permissions,
+        }
+    }
+
+    /// Shared command-node checker, including Java nodes resolved by Rust policy.
+    pub(super) fn command_permission_allowed(&self, player: PlayerId, node: &str) -> bool {
+        let java_node = self.java_bridge.as_ref().is_some_and(|bridge| {
+            bridge
+                .commands()
+                .iter()
+                .any(|command| command.permission.as_deref() == Some(node))
+        });
+        if java_node {
+            self.policy.java_permission_allowed(player, node)
+        } else {
+            self.policy.permissions().is_allowed(player, node)
+        }
+    }
     /// The active compression threshold (`>= 0`), or `None` when disabled.
     pub(super) fn enabled_threshold(&self) -> Option<i32> {
         self.compression_threshold

@@ -276,6 +276,19 @@ pub(crate) struct BlockEventDispatcher {
 }
 
 impl BlockEventDispatcher {
+    /// Native command literals reserved against Java command/alias collisions.
+    pub(crate) fn command_labels(&self) -> anyhow::Result<BTreeSet<String>> {
+        let host = self
+            .host
+            .lock()
+            .map_err(|_| anyhow::anyhow!("plugin host lock poisoned"))?;
+        let graph = host.command_tree().to_brigadier(u8::MAX, &|_| true);
+        Ok(graph.nodes()[graph.root_index() as usize]
+            .children()
+            .iter()
+            .filter_map(|index| graph.nodes()[*index as usize].name().map(str::to_owned))
+            .collect())
+    }
     /// Wraps an enabled [`PluginHost`] for shared dispatch.
     pub(crate) fn new(host: PluginHost) -> Self {
         Self {
@@ -589,6 +602,69 @@ pub(crate) struct PlayPolicy {
 }
 
 impl PlayPolicy {
+    /// Configured operator identity, independent of the default permission level.
+    pub(crate) fn is_operator(&self, player: PlayerId) -> bool {
+        self.ops.contains(&player)
+    }
+
+    /// Applies the Rust permission policy to a declared Java permission node.
+    pub(crate) fn java_permission_allowed(&self, player: PlayerId, node: &str) -> bool {
+        self.is_operator(player) || self.permissions.is_allowed(player, node)
+    }
+
+    /// Adds bounded Java command metadata to the real client graph/suggestions.
+    /// Runtime dispatch uses the process bridge; the graph has no Java callbacks.
+    pub(crate) fn register_java_commands(
+        &mut self,
+        commands: &[crate::java_bridge::JavaCommand],
+        native: &BTreeSet<String>,
+    ) -> anyhow::Result<()> {
+        let graph = self.command_tree.to_brigadier(u8::MAX, &|_| true);
+        let mut labels = native
+            .iter()
+            .map(|label| label.to_ascii_lowercase())
+            .collect::<BTreeSet<_>>();
+        labels.extend(
+            graph.nodes()[graph.root_index() as usize]
+                .children()
+                .iter()
+                .filter_map(|index| {
+                    graph.nodes()[*index as usize]
+                        .name()
+                        .map(str::to_ascii_lowercase)
+                }),
+        );
+        // Validate the complete set before registering any command.
+        for command in commands {
+            for label in command.routes() {
+                anyhow::ensure!(
+                    labels.insert(label.clone()),
+                    "Java command/alias {label:?} collides with an existing command"
+                );
+            }
+        }
+        for command in commands {
+            for label in command.routes() {
+                let completed = || {
+                    ferrumc_command::CommandResult::success(ferrumc_core::TextComponent::text(""))
+                };
+                let mut node = ferrumc_command::literal(label.clone())
+                    .executes(move |_| completed())
+                    .then(
+                        ferrumc_command::argument(
+                            "args",
+                            ferrumc_command::ArgumentType::GreedyString,
+                        )
+                        .executes(move |_| completed()),
+                    );
+                if let Some(permission) = &command.permission {
+                    node = node.requires_permission(permission);
+                }
+                self.command_tree.register(node);
+            }
+        }
+        Ok(())
+    }
     /// Returns the configured spawn-protection policy.
     ///
     /// Informational only: when built-ins are active, this is the value read back
@@ -800,6 +876,90 @@ mod tests {
             OPERATOR_PERMISSION_LEVEL
         );
         assert_eq!(policy.permission_level(PlayerId::offline("Random")), 0);
+    }
+
+    fn java_command() -> crate::java_bridge::JavaCommand {
+        let mut command: crate::java_bridge::JavaCommand = serde_json::from_value(serde_json::json!({
+            "name":"javafixture", "description":"fixture", "permission":"fixture.use", "aliases":["jfixture"]
+        }))
+        .expect("Java descriptor");
+        command.bind_namespace("Fixture");
+        command
+    }
+
+    #[test]
+    fn java_privileges_require_configured_ops_even_with_default_level_four() {
+        let config = AppConfig::from_toml_str("ops = ['Admin']\ndefault_permission_level = 4")
+            .expect("valid policy");
+        let (policy, _) = build_play_policy(&config).expect("policy builds");
+        let admin = PlayerId::offline("Admin");
+        let guest = PlayerId::offline("Guest");
+        assert!(policy.is_operator(admin));
+        assert!(!policy.is_operator(guest));
+        assert!(policy.java_permission_allowed(admin, "fixture.use"));
+        assert!(!policy.java_permission_allowed(guest, "fixture.use"));
+    }
+
+    #[test]
+    fn java_graph_filters_plain_alias_and_namespace_routes_by_rust_permissions() {
+        let config = AppConfig::from_toml_str("ops = ['Admin']\ndefault_permission_level = 4")
+            .expect("valid policy");
+        let (mut policy, _) = build_play_policy(&config).expect("policy builds");
+        policy
+            .register_java_commands(&[java_command()], &BTreeSet::new())
+            .expect("unique routes");
+        for (name, allowed) in [("Admin", true), ("Guest", false)] {
+            let player = PlayerId::offline(name);
+            let graph = policy
+                .command_tree()
+                .to_brigadier(policy.permission_level(player), &|node| {
+                    policy.java_permission_allowed(player, node)
+                });
+            let labels = graph
+                .nodes()
+                .iter()
+                .filter_map(|node| node.name())
+                .collect::<BTreeSet<_>>();
+            for label in [
+                "javafixture",
+                "jfixture",
+                "fixture:javafixture",
+                "fixture:jfixture",
+            ] {
+                assert_eq!(labels.contains(label), allowed, "{name} {label}");
+            }
+        }
+    }
+
+    #[test]
+    fn java_registration_rejects_builtin_native_alias_and_namespace_collisions_atomically() {
+        for reserved in ["spawn", "jfixture", "JFIXTURE", "fixture:javafixture"] {
+            let (mut policy, _) = build_play_policy(&AppConfig::default()).expect("policy builds");
+            let mut command = java_command();
+            let native = if reserved == "spawn" {
+                command.name = "spawn".to_owned();
+                command.bind_namespace("Fixture");
+                BTreeSet::new()
+            } else {
+                BTreeSet::from([reserved.to_owned()])
+            };
+            let before = policy
+                .command_tree()
+                .to_brigadier(u8::MAX, &|_| true)
+                .encode();
+            assert!(
+                policy.register_java_commands(&[command], &native).is_err(),
+                "{reserved}"
+            );
+            assert_eq!(
+                policy
+                    .command_tree()
+                    .to_brigadier(u8::MAX, &|_| true)
+                    .encode(),
+                before,
+                "collision must not partially register commands"
+            );
+        }
     }
 
     // --- BlockEventDispatcher: the wired intent boundary ----------------------
