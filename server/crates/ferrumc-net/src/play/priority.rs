@@ -109,7 +109,9 @@ impl OutboundPriority {
     /// [`World`](Self::World) with the rest of the bulk world content.
     pub fn for_packet(packet: &ClientboundPlayPacket) -> Self {
         match packet {
-            ClientboundPlayPacket::ClientboundKeepAlive(_) => Self::Critical,
+            ClientboundPlayPacket::ClientboundKeepAlive(_)
+            // A terminal reason must precede any queued bulk/state traffic.
+            | ClientboundPlayPacket::PlayDisconnect(_) => Self::Critical,
             // The login/join handshake packets are all connection state the client
             // needs to enter the world consistently: `GameEvent` (the
             // chunks-load-start cue), `SetCenterChunk`, and the default-spawn and
@@ -259,6 +261,7 @@ impl Criticality {
     pub fn for_packet(packet: &ClientboundPlayPacket) -> Self {
         match packet {
             ClientboundPlayPacket::ClientboundKeepAlive(_)
+            | ClientboundPlayPacket::PlayDisconnect(_)
             | ClientboundPlayPacket::JoinGame(_)
             | ClientboundPlayPacket::SynchronizePlayerPosition(_)
             | ClientboundPlayPacket::PlayerInfoUpdate(_)
