@@ -7,11 +7,13 @@
 //! entities and players have no shared model yet, so their records carry an
 //! opaque, length-bounded serialized payload owned by the simulation layer.
 
+use std::collections::BTreeSet;
+
 use ferrumc_core::{GameMode, PlayerId};
 use ferrumc_math::{BlockPos, ChunkPos, LocalBlockPos};
 use ferrumc_world::{
-    decode_block_entity, encode_block_entity, BlockStateId, Chunk, MAX_BLOCK_ENTITIES,
-    MAX_BLOCK_ENTITY_PAYLOAD_LEN, SECTION_COUNT, SECTION_VOLUME,
+    decode_block_entity, encode_block_entity, try_encode_block_entity, BlockStateId, Chunk,
+    MAX_BLOCK_ENTITIES, MAX_BLOCK_ENTITY_PAYLOAD_LEN, SECTION_COUNT, SECTION_VOLUME,
 };
 
 use crate::error::StorageError;
@@ -61,6 +63,70 @@ pub const MAX_ENTITY_DATA_LEN: usize = 256 * 1024;
 /// entity but still bounded. 1 MiB is generous while capping a single record.
 pub const MAX_PLAYER_DATA_LEN: usize = 1024 * 1024;
 
+/// Maximum combined encoded block-entity tail of a chunk or overlay.
+///
+/// Includes 12 coordinate bytes and a four-byte payload length per entity.
+/// All entities share 2 MiB; allowing 4096 separate 16 KiB payloads would permit
+/// about 64 MiB for one chunk. Even 4096 versioned empty chests fit this cap.
+/// This is an encoded-byte allowance, not a decoded-heap budget.
+pub const MAX_CHUNK_BLOCK_ENTITY_DATA_LEN: usize = 2 * 1024 * 1024;
+
+/// Maximum whole encoded full-chunk or overlay record before parsing.
+///
+/// Three MiB covers all 24 dense block sections and the aggregate 2 MiB entity
+/// tail. Existing legacy records above these caps are rejected without being
+/// truncated, silently rewritten, or automatically migrated on disk.
+pub const MAX_CHUNK_RECORD_LEN: usize = 3 * 1024 * 1024;
+
+pub(crate) fn check_record_size(len: usize, max: usize) -> Result<(), StorageError> {
+    if len > max {
+        return Err(StorageError::RecordTooLarge { len, max });
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_chunk_position(pos: ChunkPos) -> Result<(), StorageError> {
+    for coordinate in [pos.x(), pos.z()] {
+        if coordinate
+            .checked_mul(16)
+            .and_then(|origin| origin.checked_add(15))
+            .is_none()
+        {
+            return Err(StorageError::ChunkPositionOutsideDomain { pos });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_entity_position(chunk: ChunkPos, pos: BlockPos) -> Result<(), StorageError> {
+    if pos.to_chunk_pos() != chunk || !(-64..320).contains(&pos.y()) {
+        return Err(StorageError::BlockEntityOutsideChunk { chunk, pos });
+    }
+    Ok(())
+}
+
+pub(crate) fn add_entity_size(total: &mut usize, payload_len: usize) -> Result<(), StorageError> {
+    *total = total.saturating_add(16).saturating_add(payload_len);
+    check_record_size(*total, MAX_CHUNK_BLOCK_ENTITY_DATA_LEN)
+}
+
+pub(crate) fn capture_block_entities(
+    chunk: &Chunk,
+) -> Result<Vec<(BlockPos, Vec<u8>)>, StorageError> {
+    validate_chunk_position(chunk.pos())?;
+    let mut total = 0;
+    let mut entities = Vec::new();
+    for (pos, entity) in chunk.block_entities() {
+        validate_entity_position(chunk.pos(), pos)?;
+        let mut payload = Vec::new();
+        try_encode_block_entity(entity, &mut payload)
+            .map_err(|source| StorageError::BlockEntityCodec { pos, source })?;
+        add_entity_size(&mut total, payload.len())?;
+        entities.push((pos, payload));
+    }
+    Ok(entities)
+}
+
 /// A versioned, persistable snapshot of one chunk column.
 ///
 /// Wraps a fully structured [`Chunk`] together with the [`SchemaVersion`] under
@@ -77,13 +143,28 @@ pub struct ChunkRecord {
 impl ChunkRecord {
     /// Builds a chunk record stamped with `schema_version`.
     ///
-    /// A chunk is a fixed-shape value, so no length bound applies and this never
-    /// fails.
+    /// This legacy constructor does not validate the chunk's variable-sized
+    /// entities. Both backends validate before saving; prefer [`Self::try_new`]
+    /// to receive the same checked failure at construction.
     pub fn new(schema_version: SchemaVersion, chunk: Chunk) -> Self {
         Self {
             schema_version,
             chunk,
         }
+    }
+
+    /// Builds a record only after its entity encodings and aggregate caps pass.
+    ///
+    /// Invalid item components, unrepresentable coordinates, and exceeded
+    /// per-entity or aggregate allowances return a classified error.
+    pub fn try_new(schema_version: SchemaVersion, chunk: Chunk) -> Result<Self, StorageError> {
+        capture_block_entities(&chunk)?;
+        Ok(Self::new(schema_version, chunk))
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), StorageError> {
+        capture_block_entities(&self.chunk)?;
+        Ok(())
     }
 
     /// Returns the schema version this record was written under.
@@ -158,7 +239,7 @@ impl OverlaySection {
 ///
 /// Unlike [`ChunkRecord`] (a whole chunk column), an overlay carries just the
 /// player-modified sections; the clean sections are reconstructed on load by
-/// regenerating the flat baseline and then [applying](Self::apply_to_chunk) the
+/// regenerating the flat baseline and then [applying](Self::try_apply_to_chunk) the
 /// overlay over it. A freshly generated, never-edited chunk has an empty
 /// persist-dirty set (see [`Chunk::persist_dirty_sections`]) and therefore yields
 /// **no** overlay record at all, so untouched terrain occupies zero storage.
@@ -174,13 +255,13 @@ impl OverlaySection {
 /// Unlike block states (carried only for the persist-dirty sections, with the
 /// clean sections reconstructed from the regenerated baseline), block entities
 /// have **no** baseline source — the flat generator produces none — so an overlay
-/// attempts to carry every block entity whenever it is emitted. Each is stored
+/// carries every block entity whenever checked capture succeeds. Each is stored
 /// as its [`BlockPos`] plus an opaque payload produced by `ferrumc-world`
-/// (storage stays ignorant of sign/chest internals). The current infallible
-/// capture omits an entity whose encoded payload exceeds
-/// [`MAX_BLOCK_ENTITY_PAYLOAD_LEN`]; representable payloads are decoded by
-/// [`apply_to_chunk`](Self::apply_to_chunk), which skips an individually corrupt
-/// one rather than failing the chunk load.
+/// (storage stays ignorant of sign/chest internals). Checked capture preserves
+/// all item components and enforces both [`MAX_BLOCK_ENTITY_PAYLOAD_LEN`] and
+/// [`MAX_CHUNK_BLOCK_ENTITY_DATA_LEN`]. Checked apply fails atomically on any
+/// malformed payload. The old infallible capture/apply methods retain lossy
+/// omission and skip behavior only for source compatibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkOverlayRecord {
     schema_version: SchemaVersion,
@@ -195,8 +276,52 @@ pub struct ChunkOverlayRecord {
 }
 
 impl ChunkOverlayRecord {
+    /// Captures a complete, lossless overlay without modifying the source chunk.
+    ///
+    /// Every edited section and every entity is captured, or the whole operation
+    /// fails. No invalid entity is omitted. Component storage uses the checked
+    /// versioned world codec. Callers clear their dirty masks only after this
+    /// capture and the rest of their selected batch have succeeded.
+    pub fn try_from_chunk(
+        schema_version: SchemaVersion,
+        pos: ChunkPos,
+        chunk: &Chunk,
+        updated_at_tick: u64,
+    ) -> Result<Self, StorageError> {
+        if pos != chunk.pos() {
+            return Err(StorageError::ChunkPositionMismatch {
+                expected: pos,
+                actual: chunk.pos(),
+            });
+        }
+        let block_entities = capture_block_entities(chunk)?;
+        let mut sections = Vec::new();
+        let mut mask = 0;
+        for index in chunk.persist_edited_sections().dirty_indices() {
+            let section = chunk
+                .section(index)
+                .ok_or_else(|| StorageError::backend("edited section is outside the chunk"))?;
+            let mut blocks = Vec::with_capacity(SECTION_VOLUME);
+            for flat in 0..SECTION_VOLUME {
+                blocks.push(section.get(overlay_local_pos(flat)));
+            }
+            mask |= 1_u32 << index;
+            sections.push(OverlaySection::new(index as u8, blocks)?);
+        }
+        Self::from_parts(
+            schema_version,
+            pos,
+            mask,
+            sections,
+            updated_at_tick,
+            block_entities,
+        )
+    }
     /// Captures the persist-*edited* sections of `chunk` into an overlay record
     /// stamped with `schema_version` and `updated_at_tick`.
+    ///
+    /// This legacy infallible API can omit entities and discard item components.
+    /// Durable callers should use [`Self::try_from_chunk`] instead.
     ///
     /// The cumulative [`Chunk::persist_edited_sections`] set is captured — **every**
     /// section a gameplay edit has touched since the chunk's baseline, not just those
@@ -250,7 +375,7 @@ impl ChunkOverlayRecord {
             encode_block_entity(entity, &mut payload);
             // The infallible capture cannot report a representability failure;
             // omit an oversized payload rather than persist bytes the decoder
-            // must reject. A fallible capture API is tracked as durability debt.
+            // must reject. Durable callers use `try_from_chunk` instead.
             if payload.len() > MAX_BLOCK_ENTITY_PAYLOAD_LEN {
                 continue;
             }
@@ -283,6 +408,7 @@ impl ChunkOverlayRecord {
         updated_at_tick: u64,
         block_entities: Vec<(BlockPos, Vec<u8>)>,
     ) -> Result<Self, StorageError> {
+        validate_chunk_position(pos)?;
         // No section beyond the world's section count may be claimed.
         if dirty_section_mask >> SECTION_COUNT != 0 {
             return Err(StorageError::backend(format!(
@@ -301,9 +427,12 @@ impl ChunkOverlayRecord {
                 sections.len()
             )));
         }
-        for section in &sections {
+        for (expected_index, section) in (0..SECTION_COUNT)
+            .filter(|index| (dirty_section_mask >> index) & 1 == 1)
+            .zip(&sections)
+        {
             let index = usize::from(section.index());
-            if index >= SECTION_COUNT || (dirty_section_mask >> index) & 1 == 0 {
+            if index != expected_index || section.blocks.len() != SECTION_VOLUME {
                 return Err(StorageError::backend(format!(
                     "overlay section index {index} not present in mask {dirty_section_mask:#x}"
                 )));
@@ -315,14 +444,25 @@ impl ChunkOverlayRecord {
                 block_entities.len()
             )));
         }
+        let mut entity_bytes = 0;
+        let mut positions = BTreeSet::new();
         for (be_pos, payload) in &block_entities {
+            validate_entity_position(pos, *be_pos)?;
+            if !positions.insert(*be_pos) {
+                return Err(StorageError::DuplicateBlockEntity { pos: *be_pos });
+            }
             if payload.len() > MAX_BLOCK_ENTITY_PAYLOAD_LEN {
                 return Err(StorageError::backend(format!(
                     "block-entity payload at {be_pos:?} is {} bytes (maximum {MAX_BLOCK_ENTITY_PAYLOAD_LEN})",
                     payload.len()
                 )));
             }
+            add_entity_size(&mut entity_bytes, payload.len())?;
         }
+        check_record_size(
+            36 + sections.len() * (1 + SECTION_VOLUME * 4) + entity_bytes,
+            MAX_CHUNK_RECORD_LEN,
+        )?;
         Ok(Self {
             schema_version,
             pos,
@@ -331,6 +471,88 @@ impl ChunkOverlayRecord {
             updated_at_tick,
             block_entities,
         })
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), StorageError> {
+        // Private constructors establish shape, ordering, positions, and caps.
+        // The infallible legacy capture still needs aggregate validation here.
+        validate_chunk_position(self.pos)?;
+        let mut total = 0;
+        let mut positions = BTreeSet::new();
+        for (pos, payload) in &self.block_entities {
+            validate_entity_position(self.pos, *pos)?;
+            if !positions.insert(*pos) {
+                return Err(StorageError::DuplicateBlockEntity { pos: *pos });
+            }
+            add_entity_size(&mut total, payload.len())?;
+            decode_block_entity(payload)
+                .map_err(|source| StorageError::BlockEntityCodec { pos: *pos, source })?;
+        }
+        check_record_size(self.encoded_len(), MAX_CHUNK_RECORD_LEN)
+    }
+
+    /// Returns the complete encoded overlay size without allocating a buffer.
+    ///
+    /// Includes its 36-byte envelope/count fields, dense section data, and all
+    /// coordinate/length/payload entity fields. Checked records have an exact
+    /// bounded size; arithmetic saturates defensively for legacy unchecked
+    /// records. Queue owners can use this value for byte-based backpressure.
+    #[must_use]
+    pub fn encoded_len(&self) -> usize {
+        let section_bytes = self.sections.len().saturating_mul(1 + SECTION_VOLUME * 4);
+        self.block_entities.iter().fold(
+            36_usize.saturating_add(section_bytes),
+            |total, (_, payload)| total.saturating_add(16).saturating_add(payload.len()),
+        )
+    }
+
+    /// Applies a complete overlay atomically, rejecting every invalid entity.
+    ///
+    /// Validates record bounds and the target column before cloning the bounded
+    /// load-path target. All block and entity edits occur on the private copy;
+    /// the caller's chunk, including dirty masks and entity contents, is replaced
+    /// only after the entire application succeeds. Existing entities at other
+    /// positions remain present, matching the legacy apply contract; simulation
+    /// separately decides whether the overlay replaces an imported base map.
+    pub fn try_apply_to_chunk(&self, chunk: &mut Chunk) -> Result<(), StorageError> {
+        if self.pos != chunk.pos() {
+            return Err(StorageError::ChunkPositionMismatch {
+                expected: self.pos,
+                actual: chunk.pos(),
+            });
+        }
+        self.validate()?;
+        // Refuse an unbounded/unrepresentable target before the deep clone, too.
+        capture_block_entities(chunk)?;
+        let mut staged = chunk.clone();
+        for section in &self.sections {
+            let base_y = overlay_section_base_y(usize::from(section.index))
+                .ok_or_else(|| StorageError::backend("overlay section is outside chunk"))?;
+            let origin = self.pos.origin_block(base_y);
+            for (flat, &state) in section.blocks.iter().enumerate() {
+                let local = overlay_local_pos(flat);
+                let block = BlockPos::new(
+                    origin.x() + i32::from(local.x()),
+                    base_y + i32::from(local.y()),
+                    origin.z() + i32::from(local.z()),
+                );
+                staged
+                    .set_block(block, state)
+                    .map_err(|source| StorageError::backend(source.to_string()))?;
+            }
+        }
+        for (pos, payload) in &self.block_entities {
+            let entity = decode_block_entity(payload)
+                .map_err(|source| StorageError::BlockEntityCodec { pos: *pos, source })?;
+            staged
+                .set_block_entity(*pos, entity)
+                .map_err(|source| StorageError::backend(source.to_string()))?;
+        }
+        // Merging into a pre-existing map can exceed the aggregate byte cap
+        // even when each input separately fit. Validate the complete result.
+        capture_block_entities(&staged)?;
+        *chunk = staged;
+        Ok(())
     }
 
     /// Returns the schema version this record was written under.
@@ -730,6 +952,9 @@ impl BlockMutationLogRecord {
         self.cause
     }
 }
+
+#[cfg(test)]
+mod persistence_tests;
 
 #[cfg(test)]
 mod tests {

@@ -420,12 +420,27 @@ impl WorldStore for RedbStore {
             let Some(guard) = table.get(key_bytes.as_slice()).map_err(backend_err)? else {
                 return Ok(None);
             };
-            Ok(Some(codec::decode_chunk_record(guard.value())?))
+            let record = codec::decode_chunk_record(guard.value())?;
+            if key.pos() != record.chunk().pos() {
+                return Err(StorageError::ChunkPositionMismatch {
+                    expected: key.pos(),
+                    actual: record.chunk().pos(),
+                }
+                .into());
+            }
+            Ok(Some(record))
         });
         join.await.map_err(join_err)?
     }
 
     async fn save_chunk(&self, key: ChunkKey, record: ChunkRecord) -> Result<()> {
+        if key.pos() != record.chunk().pos() {
+            return Err(StorageError::ChunkPositionMismatch {
+                expected: key.pos(),
+                actual: record.chunk().pos(),
+            }
+            .into());
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
@@ -459,6 +474,13 @@ impl WorldStore for RedbStore {
                 // flush rather than one commit per chunk.
                 let mut table = txn.open_table(CHUNK_TABLE).map_err(backend_err)?;
                 for (key, record) in &chunks {
+                    if key.pos() != record.chunk().pos() {
+                        return Err(StorageError::ChunkPositionMismatch {
+                            expected: key.pos(),
+                            actual: record.chunk().pos(),
+                        }
+                        .into());
+                    }
                     let key_bytes = codec::chunk_key_bytes(*key);
                     let value = codec::encode_chunk_record(record)?;
                     table
@@ -497,7 +519,15 @@ impl WorldStore for RedbStore {
             let Some(guard) = table.get(key_bytes.as_slice()).map_err(backend_err)? else {
                 return Ok(None);
             };
-            Ok(Some(codec::decode_chunk_overlay_record(guard.value())?))
+            let record = codec::decode_chunk_overlay_record(guard.value())?;
+            if key.pos() != record.pos() {
+                return Err(StorageError::ChunkPositionMismatch {
+                    expected: key.pos(),
+                    actual: record.pos(),
+                }
+                .into());
+            }
+            Ok(Some(record))
         });
         join.await.map_err(join_err)?
     }
@@ -521,8 +551,15 @@ impl WorldStore for RedbStore {
                 // `save_chunks`.
                 let mut table = txn.open_table(CHUNK_OVERLAY_TABLE).map_err(backend_err)?;
                 for (key, record) in &overlays {
+                    if key.pos() != record.pos() {
+                        return Err(StorageError::ChunkPositionMismatch {
+                            expected: key.pos(),
+                            actual: record.pos(),
+                        }
+                        .into());
+                    }
                     let key_bytes = codec::chunk_key_bytes(*key);
-                    let value = codec::encode_chunk_overlay_record(record);
+                    let value = codec::encode_chunk_overlay_record(record)?;
                     table
                         .insert(key_bytes.as_slice(), value.as_slice())
                         .map_err(backend_err)?;
@@ -1259,6 +1296,80 @@ mod tests {
         assert!(error
             .to_string()
             .contains("trailing bytes after full chunk record"));
+    }
+
+    #[tokio::test]
+    async fn redb_load_rejects_valid_records_stored_under_foreign_chunk_keys() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("foreign-column.redb");
+        let key = chunk_key(ChunkPos::ORIGIN);
+        let foreign_pos = ChunkPos::new(3, -2);
+        let foreign_chunk = Chunk::new(foreign_pos);
+        let full_bytes = codec::encode_chunk_record(&ChunkRecord::new(
+            SchemaVersion::new(7),
+            foreign_chunk.clone(),
+        ))
+        .expect("foreign full record is valid");
+        let overlay_bytes = codec::encode_chunk_overlay_record(
+            &ChunkOverlayRecord::try_from_chunk(
+                SchemaVersion::new(7),
+                foreign_pos,
+                &foreign_chunk,
+                41,
+            )
+            .expect("foreign overlay is valid"),
+        )
+        .expect("foreign overlay encodes");
+        {
+            let store = RedbStore::open(&path).expect("open store");
+            let txn = store.db.begin_write().expect("write transaction");
+            let key_bytes = codec::chunk_key_bytes(key);
+            {
+                let mut full = txn.open_table(CHUNK_TABLE).expect("chunk table");
+                full.insert(key_bytes.as_slice(), full_bytes.as_slice())
+                    .expect("seed mismatched full record");
+                let mut overlays = txn.open_table(CHUNK_OVERLAY_TABLE).expect("overlay table");
+                overlays
+                    .insert(key_bytes.as_slice(), overlay_bytes.as_slice())
+                    .expect("seed mismatched overlay record");
+            }
+            txn.commit().expect("commit corruption");
+        }
+
+        let reopened = RedbStore::open(&path).expect("reopen store");
+        for error in [
+            reopened
+                .load_chunk(key)
+                .await
+                .expect_err("foreign full record"),
+            reopened
+                .load_chunk_overlay(key)
+                .await
+                .expect_err("foreign overlay record"),
+        ] {
+            assert!(matches!(error, ServerError::Internal { .. }));
+            assert!(error.to_string().contains("position"));
+        }
+        // Refusing a mismatched record never rewrites its persisted bytes.
+        let txn = reopened.db.begin_read().expect("read transaction");
+        let key_bytes = codec::chunk_key_bytes(key);
+        let full = txn.open_table(CHUNK_TABLE).expect("chunk table");
+        assert_eq!(
+            full.get(key_bytes.as_slice())
+                .expect("read full")
+                .expect("full remains")
+                .value(),
+            full_bytes.as_slice()
+        );
+        let overlays = txn.open_table(CHUNK_OVERLAY_TABLE).expect("overlay table");
+        assert_eq!(
+            overlays
+                .get(key_bytes.as_slice())
+                .expect("read overlay")
+                .expect("overlay remains")
+                .value(),
+            overlay_bytes.as_slice()
+        );
     }
 
     #[tokio::test]

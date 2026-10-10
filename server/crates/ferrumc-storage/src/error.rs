@@ -1,7 +1,8 @@
 //! The classifying error type for the storage layer.
 
 use ferrumc_core::ServerError;
-use ferrumc_math::BlockPos;
+use ferrumc_math::{BlockPos, ChunkPos};
+use ferrumc_world::BlockEntityCodecError;
 
 use crate::JournalBatchId;
 
@@ -67,6 +68,48 @@ pub enum StorageError {
     #[error("chunk block entity at {pos:?} cannot be represented losslessly by the storage codec")]
     ChunkBlockEntityNotRepresentable {
         /// Position of the block entity that would lose data.
+        pos: BlockPos,
+    },
+
+    /// The checked world-owned codec rejected an entity without dropping data.
+    #[error("invalid chunk block entity at {pos:?}: {source}")]
+    BlockEntityCodec {
+        /// Position of the rejected entity.
+        pos: BlockPos,
+        /// Classified world/item encoding or decoding failure.
+        #[source]
+        source: BlockEntityCodecError,
+    },
+
+    /// The chunk coordinate cannot be represented by this model's block positions.
+    #[error("chunk position {pos:?} is outside the i32 block-coordinate domain")]
+    ChunkPositionOutsideDomain {
+        /// Rejected chunk column.
+        pos: ChunkPos,
+    },
+
+    /// A capture, apply, or save paired data with another chunk column.
+    #[error("chunk position mismatch: expected {expected:?}, found {actual:?}")]
+    ChunkPositionMismatch {
+        /// Column named by the operation or record.
+        expected: ChunkPos,
+        /// Column named by its source/target chunk.
+        actual: ChunkPos,
+    },
+
+    /// A stored block entity lies outside its parent chunk's column or height.
+    #[error("block entity at {pos:?} is outside chunk {chunk:?}")]
+    BlockEntityOutsideChunk {
+        /// Parent chunk column.
+        chunk: ChunkPos,
+        /// Rejected block entity position.
+        pos: BlockPos,
+    },
+
+    /// An overlay supplied the same block entity position more than once.
+    #[error("duplicate block entity at {pos:?}")]
+    DuplicateBlockEntity {
+        /// Position whose duplicate was rejected.
         pos: BlockPos,
     },
 
@@ -200,10 +243,26 @@ impl From<StorageError> for ServerError {
             | StorageError::JournalReceiptMissingRecord { .. }
             | StorageError::MalformedJournalKey { .. }
             | StorageError::ChunkBlockEntityNotRepresentable { .. }
+            | StorageError::ChunkPositionOutsideDomain { .. }
+            | StorageError::ChunkPositionMismatch { .. }
+            | StorageError::BlockEntityOutsideChunk { .. }
+            | StorageError::DuplicateBlockEntity { .. }
             | StorageError::TrailingChunkRecordBytes { .. }
             | StorageError::Backend(_) => Self::internal(message),
             StorageError::JournalBatchConflict { .. } | StorageError::IncompatiblePreAlphaData => {
                 Self::invalid_state(message)
+            }
+            StorageError::BlockEntityCodec { source, .. } => {
+                if matches!(
+                    source,
+                    BlockEntityCodecError::PayloadTooLarge { .. }
+                        | BlockEntityCodecError::StackTooLarge { .. }
+                        | BlockEntityCodecError::StringTooLong { .. }
+                ) {
+                    Self::capacity(message)
+                } else {
+                    Self::internal(message)
+                }
             }
         }
     }

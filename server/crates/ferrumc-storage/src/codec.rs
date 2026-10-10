@@ -36,15 +36,17 @@
 use ferrumc_core::{GameMode, PlayerId, PluginId};
 use ferrumc_math::{BlockPos, ChunkPos, LocalBlockPos};
 use ferrumc_world::{
-    decode_block_entity, encode_block_entity, BlockStateId, Chunk, MAX_BLOCK_ENTITIES,
-    MAX_BLOCK_ENTITY_PAYLOAD_LEN, SECTION_COUNT, SECTION_VOLUME,
+    decode_block_entity, BlockStateId, Chunk, MAX_BLOCK_ENTITIES, MAX_BLOCK_ENTITY_PAYLOAD_LEN,
+    SECTION_COUNT, SECTION_VOLUME,
 };
 
 use crate::error::StorageError;
 use crate::key::{ChunkKey, EntityKey, StorageKey};
 use crate::record::{
-    BlockMutationLogRecord, ChunkOverlayRecord, ChunkRecord, EntityRecord, MutationActor,
-    OverlaySection, PlayerRecord, MAX_OVERLAY_BLOCK_ENTITIES,
+    add_entity_size, capture_block_entities, check_record_size, validate_chunk_position,
+    validate_entity_position, BlockMutationLogRecord, ChunkOverlayRecord, ChunkRecord,
+    EntityRecord, MutationActor, OverlaySection, PlayerRecord, MAX_CHUNK_RECORD_LEN,
+    MAX_ENTITY_DATA_LEN, MAX_OVERLAY_BLOCK_ENTITIES, MAX_PLAYER_DATA_LEN,
 };
 use crate::schema::SchemaVersion;
 
@@ -265,13 +267,13 @@ fn local_pos(index: usize) -> LocalBlockPos {
 
 /// Encodes a [`ChunkRecord`] to the current full-snapshot format.
 ///
-/// Encoding is fallible because the world-owned block-entity payload codec has
-/// explicit bounds and currently cannot represent every possible in-memory
-/// item component. A full snapshot rejects such an entity instead of silently
-/// dropping or rewriting it.
+/// The checked world codec preserves all current item component variants and
+/// opaque component bytes. Invalid components or exceeded entity/aggregate byte
+/// allowances reject the whole snapshot instead of dropping or rewriting data.
 pub(crate) fn encode_chunk_record(record: &ChunkRecord) -> Result<Vec<u8>, StorageError> {
     let chunk = record.chunk();
     let sections = chunk.sections();
+    let block_entities = capture_block_entities(chunk)?;
 
     let mut out = Vec::new();
     out.extend_from_slice(&record.schema_version().get().to_be_bytes());
@@ -298,22 +300,11 @@ pub(crate) fn encode_chunk_record(record: &ChunkRecord) -> Result<Vec<u8>, Stora
     // lossless. The explicit count still lets the decoder reject hostile bytes
     // before doing any per-entry work.
     out.extend_from_slice(&(chunk.block_entity_count() as u32).to_be_bytes());
-    for (pos, entity) in chunk.block_entities() {
-        let mut payload = Vec::new();
-        encode_block_entity(entity, &mut payload);
-        if payload.len() > MAX_BLOCK_ENTITY_PAYLOAD_LEN {
-            return Err(StorageError::ChunkBlockEntityTooLarge {
-                pos,
-                len: payload.len(),
-                max: MAX_BLOCK_ENTITY_PAYLOAD_LEN,
-            });
-        }
-        let decoded = decode_block_entity(&payload)
-            .map_err(|_| StorageError::ChunkBlockEntityNotRepresentable { pos })?;
-        if &decoded != entity {
-            return Err(StorageError::ChunkBlockEntityNotRepresentable { pos });
-        }
-
+    for (pos, payload) in block_entities {
+        check_record_size(
+            out.len().saturating_add(16).saturating_add(payload.len()),
+            MAX_CHUNK_RECORD_LEN,
+        )?;
         out.extend_from_slice(&pos.x().to_be_bytes());
         out.extend_from_slice(&pos.y().to_be_bytes());
         out.extend_from_slice(&pos.z().to_be_bytes());
@@ -327,10 +318,12 @@ pub(crate) fn encode_chunk_record(record: &ChunkRecord) -> Result<Vec<u8>, Stora
 /// Decodes a [`ChunkRecord`] from bytes, rejecting malformed input with
 /// a classified [`StorageError`].
 pub(crate) fn decode_chunk_record(bytes: &[u8]) -> Result<ChunkRecord, StorageError> {
+    check_record_size(bytes.len(), MAX_CHUNK_RECORD_LEN)?;
     let mut reader = Reader::new(bytes);
     let schema = SchemaVersion::new(reader.read_u32()?);
     let x = reader.read_i32()?;
     let z = reader.read_i32()?;
+    validate_chunk_position(ChunkPos::new(x, z))?;
     let magic = reader
         .take(CHUNK_RECORD_MAGIC.len())
         .map_err(|_| StorageError::IncompatiblePreAlphaData)?;
@@ -390,8 +383,10 @@ pub(crate) fn decode_chunk_record(bytes: &[u8]) -> Result<ChunkRecord, StorageEr
             "chunk declares {block_entity_count} block entities (maximum {MAX_BLOCK_ENTITIES})"
         )));
     }
+    let mut entity_bytes = 0;
     for _ in 0..block_entity_count {
         let entity_pos = BlockPos::new(reader.read_i32()?, reader.read_i32()?, reader.read_i32()?);
+        validate_entity_position(chunk.pos(), entity_pos)?;
         if chunk.block_entity(entity_pos).is_some() {
             return Err(corrupt(format!(
                 "duplicate chunk block entity at {entity_pos:?}"
@@ -404,24 +399,20 @@ pub(crate) fn decode_chunk_record(bytes: &[u8]) -> Result<ChunkRecord, StorageEr
                 "chunk block-entity payload is {payload_len} bytes (maximum {MAX_BLOCK_ENTITY_PAYLOAD_LEN})"
             )));
         }
+        add_entity_size(&mut entity_bytes, payload_len)?;
         let payload = reader.take(payload_len)?;
         let entity = decode_block_entity(payload).map_err(|error| {
             corrupt(format!(
                 "invalid chunk block entity at {entity_pos:?}: {error}"
             ))
         })?;
-        let replaced = chunk
+        chunk
             .set_block_entity(entity_pos, entity)
             .map_err(|error| {
                 corrupt(format!(
                     "chunk block entity at {entity_pos:?} is out of range: {error}"
                 ))
             })?;
-        if replaced.is_some() {
-            return Err(corrupt(format!(
-                "duplicate chunk block entity at {entity_pos:?}"
-            )));
-        }
     }
 
     if reader.remaining() != 0 {
@@ -457,7 +448,10 @@ const ACTOR_TAG_PLAYER: u8 = 1;
 /// payload is the opaque `ferrumc-world` block-entity blob. The independent
 /// envelope version owns this grammar; `schema` is preserved only as payload
 /// metadata and never changes which bytes are present.
-pub(crate) fn encode_chunk_overlay_record(record: &ChunkOverlayRecord) -> Vec<u8> {
+pub(crate) fn encode_chunk_overlay_record(
+    record: &ChunkOverlayRecord,
+) -> Result<Vec<u8>, StorageError> {
+    record.validate()?;
     let mut out = Vec::new();
     out.extend_from_slice(&record.schema_version().get().to_be_bytes());
     out.extend_from_slice(&record.pos().x().to_be_bytes());
@@ -483,7 +477,7 @@ pub(crate) fn encode_chunk_overlay_record(record: &ChunkOverlayRecord) -> Vec<u8
         out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
         out.extend_from_slice(payload);
     }
-    out
+    Ok(out)
 }
 
 /// Decodes a [`ChunkOverlayRecord`] from bytes, rejecting malformed input with
@@ -492,6 +486,7 @@ pub(crate) fn encode_chunk_overlay_record(record: &ChunkOverlayRecord) -> Vec<u8
 pub(crate) fn decode_chunk_overlay_record(
     bytes: &[u8],
 ) -> Result<ChunkOverlayRecord, StorageError> {
+    check_record_size(bytes.len(), MAX_CHUNK_RECORD_LEN)?;
     if bytes.len() < OVERLAY_RECORD_ENVELOPE_LEN {
         return Err(StorageError::IncompatiblePreAlphaData);
     }
@@ -500,6 +495,7 @@ pub(crate) fn decode_chunk_overlay_record(
     let schema = SchemaVersion::new(reader.read_u32()?);
     let x = reader.read_i32()?;
     let z = reader.read_i32()?;
+    validate_chunk_position(ChunkPos::new(x, z))?;
     let magic = reader
         .take(OVERLAY_RECORD_MAGIC.len())
         .map_err(|_| StorageError::IncompatiblePreAlphaData)?;
@@ -550,10 +546,17 @@ pub(crate) fn decode_chunk_overlay_record(
         )));
     }
     let mut block_entities = Vec::with_capacity(count);
+    let mut entity_bytes = 0;
+    let mut positions = std::collections::BTreeSet::new();
     for _ in 0..count {
         let bx = reader.read_i32()?;
         let by = reader.read_i32()?;
         let bz = reader.read_i32()?;
+        let entity_pos = BlockPos::new(bx, by, bz);
+        validate_entity_position(ChunkPos::new(x, z), entity_pos)?;
+        if !positions.insert(entity_pos) {
+            return Err(StorageError::DuplicateBlockEntity { pos: entity_pos });
+        }
         let len = usize::try_from(reader.read_u32()?)
             .map_err(|_| corrupt("overlay block-entity payload length overflow"))?;
         if len > MAX_BLOCK_ENTITY_PAYLOAD_LEN {
@@ -561,6 +564,7 @@ pub(crate) fn decode_chunk_overlay_record(
                 "overlay block-entity payload is {len} bytes (maximum {MAX_BLOCK_ENTITY_PAYLOAD_LEN})"
             )));
         }
+        add_entity_size(&mut entity_bytes, len)?;
         let payload = reader.take(len)?.to_vec();
         block_entities.push((BlockPos::new(bx, by, bz), payload));
     }
@@ -569,14 +573,16 @@ pub(crate) fn decode_chunk_overlay_record(
         return Err(corrupt("trailing bytes after overlay record"));
     }
 
-    ChunkOverlayRecord::from_parts(
+    let record = ChunkOverlayRecord::from_parts(
         schema,
         ChunkPos::new(x, z),
         mask,
         sections,
         tick,
         block_entities,
-    )
+    )?;
+    record.validate()?;
+    Ok(record)
 }
 
 /// Encodes a [`BlockMutationLogRecord`] to bytes.
@@ -668,8 +674,9 @@ pub(crate) fn encode_entity_record(record: &EntityRecord) -> Vec<u8> {
 pub(crate) fn decode_entity_record(bytes: &[u8]) -> Result<EntityRecord, StorageError> {
     let mut reader = Reader::new(bytes);
     let schema = SchemaVersion::new(reader.read_u32()?);
-    let data = reader.rest().to_vec();
-    EntityRecord::new(schema, data)
+    let data = reader.rest();
+    check_record_size(data.len(), MAX_ENTITY_DATA_LEN)?;
+    EntityRecord::new(schema, data.to_vec())
 }
 
 /// Encodes a [`PlayerRecord`] to bytes.
@@ -688,8 +695,9 @@ pub(crate) fn decode_player_record(bytes: &[u8]) -> Result<PlayerRecord, Storage
     let mode_id = reader.read_u8()?;
     let game_mode = GameMode::from_id(mode_id)
         .ok_or_else(|| corrupt(format!("invalid game mode {mode_id}")))?;
-    let data = reader.rest().to_vec();
-    PlayerRecord::new(schema, game_mode, data)
+    let data = reader.rest();
+    check_record_size(data.len(), MAX_PLAYER_DATA_LEN)?;
+    PlayerRecord::new(schema, game_mode, data.to_vec())
 }
 
 #[cfg(test)]
@@ -697,6 +705,7 @@ mod tests {
     use super::*;
     use crate::record::MutationLogCause;
     use ferrumc_core::{DimensionId, EntityId, WorldId};
+    use ferrumc_world::encode_block_entity;
 
     /// Offset of the section-count byte in the current full-record envelope.
     const CHUNK_SECTION_COUNT_OFFSET: usize = 20;
@@ -750,6 +759,7 @@ mod tests {
             &Chunk::new(ChunkPos::ORIGIN),
             0,
         ))
+        .expect("empty overlay encodes")
     }
 
     /// Builds the old implicit overlay layout for refusal tests.
@@ -1032,7 +1042,7 @@ mod tests {
             .expect("sign position is in the chunk");
         assert!(matches!(
             encode_chunk_record(&ChunkRecord::new(SchemaVersion::new(1), chunk)),
-            Err(StorageError::ChunkBlockEntityNotRepresentable { pos: found }) if found == pos
+            Err(StorageError::BlockEntityCodec { pos: found, source: ferrumc_world::BlockEntityCodecError::StringTooLong { len: 1025, .. } }) if found == pos
         ));
 
         let mut maximum_line = Sign::new(SignKind::Sign);
@@ -1063,7 +1073,7 @@ mod tests {
             .expect("sign position is in the chunk");
         assert!(matches!(
             encode_chunk_record(&ChunkRecord::new(SchemaVersion::new(1), chunk)),
-            Err(StorageError::ChunkBlockEntityTooLarge {
+            Err(StorageError::BlockEntityCodec {
                 pos: found,
                 ..
             }) if found == pos
@@ -1083,6 +1093,38 @@ mod tests {
         assert_eq!(decoded.schema_version(), SchemaVersion::new(5));
         assert_eq!(decoded.game_mode(), GameMode::Spectator);
         assert_eq!(decoded.data(), &[9]);
+    }
+
+    #[test]
+    fn opaque_record_decoders_enforce_payload_caps_before_copy() {
+        let mut entity_bytes = vec![0xA5; 4 + MAX_ENTITY_DATA_LEN];
+        entity_bytes[..4].copy_from_slice(&7_u32.to_be_bytes());
+        let entity = decode_entity_record(&entity_bytes).expect("exact entity cap is valid");
+        assert_eq!(entity.data().len(), MAX_ENTITY_DATA_LEN);
+        entity_bytes.push(0xA5);
+        assert!(matches!(
+            decode_entity_record(&entity_bytes),
+            Err(StorageError::RecordTooLarge { len, max })
+                if len == MAX_ENTITY_DATA_LEN + 1 && max == MAX_ENTITY_DATA_LEN
+        ));
+
+        let mut player_bytes = vec![0x5A; 5 + MAX_PLAYER_DATA_LEN];
+        player_bytes[..4].copy_from_slice(&7_u32.to_be_bytes());
+        player_bytes[4] = GameMode::Survival.as_id();
+        let player = decode_player_record(&player_bytes).expect("exact player cap is valid");
+        assert_eq!(player.data().len(), MAX_PLAYER_DATA_LEN);
+        player_bytes.push(0x5A);
+        assert!(matches!(
+            decode_player_record(&player_bytes),
+            Err(StorageError::RecordTooLarge { len, max })
+                if len == MAX_PLAYER_DATA_LEN + 1 && max == MAX_PLAYER_DATA_LEN
+        ));
+        // Invalid fixed headers still fail before any payload is copied.
+        player_bytes[4] = 200;
+        assert!(matches!(
+            decode_player_record(&player_bytes),
+            Err(StorageError::Backend(_))
+        ));
     }
 
     #[test]
@@ -1120,7 +1162,7 @@ mod tests {
         for schema in [0, 3, u32::MAX] {
             let record =
                 ChunkOverlayRecord::from_chunk(SchemaVersion::new(schema), pos, &chunk, 99);
-            let encoded = encode_chunk_overlay_record(&record);
+            let encoded = encode_chunk_overlay_record(&record).expect("overlay encodes");
             assert_eq!(&encoded[0..4], &schema.to_be_bytes());
             assert_eq!(
                 &encoded[OVERLAY_MAGIC_OFFSET..OVERLAY_FORMAT_VERSION_OFFSET],
@@ -1217,7 +1259,7 @@ mod tests {
             .expect("set sign");
         chunk.mark_persist_dirty(edited);
         let record = ChunkOverlayRecord::from_chunk(SchemaVersion::new(2), pos, &chunk, 17);
-        let bytes = encode_chunk_overlay_record(&record);
+        let bytes = encode_chunk_overlay_record(&record).expect("overlay encodes");
 
         for end in 0..OVERLAY_RECORD_ENVELOPE_LEN {
             assert!(
@@ -1260,7 +1302,8 @@ mod tests {
             pos,
             &chunk,
             0,
-        ));
+        ))
+        .expect("overlay encodes");
         let first_section_index_offset = OVERLAY_MASK_OFFSET + size_of::<u32>() + size_of::<u64>();
         bytes[first_section_index_offset] = bytes[first_section_index_offset]
             .checked_add(1)
@@ -1310,7 +1353,7 @@ mod tests {
             let record =
                 ChunkOverlayRecord::from_chunk(SchemaVersion::new(schema), pos, &chunk, 10);
             assert_eq!(record.block_entity_count(), 2);
-            let encoded = encode_chunk_overlay_record(&record);
+            let encoded = encode_chunk_overlay_record(&record).expect("overlay encodes");
             if let Some(expected) = &encoded_payload {
                 assert_eq!(
                     &encoded[4..],

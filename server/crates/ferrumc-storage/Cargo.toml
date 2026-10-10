@@ -45,6 +45,9 @@ tracing = { workspace = true }
 # Backs the `RedbStore` round-trip/persistence tests with a throwaway on-disk
 # database under a temp directory. Test-only; not linked into the library.
 tempfile = { workspace = true }
+# Verify exact authoritative item/NBT component persistence across both backends.
+ferrumc-items = { workspace = true }
+ferrumc-nbt = { workspace = true }
 
 [lints]
 workspace = true

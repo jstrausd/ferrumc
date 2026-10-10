@@ -84,6 +84,14 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn save_chunk(&self, key: ChunkKey, record: ChunkRecord) -> Result<()> {
+        if key.pos() != record.chunk().pos() {
+            return Err(StorageError::ChunkPositionMismatch {
+                expected: key.pos(),
+                actual: record.chunk().pos(),
+            }
+            .into());
+        }
+        record.validate()?;
         let mut map = self.chunks.write().map_err(|_| poisoned("chunk"))?;
         map.insert(key, record);
         Ok(())
@@ -96,6 +104,16 @@ impl WorldStore for InMemoryStore {
                 max: MAX_SAVE_BATCH,
             }
             .into());
+        }
+        for (key, record) in &chunks {
+            if key.pos() != record.chunk().pos() {
+                return Err(StorageError::ChunkPositionMismatch {
+                    expected: key.pos(),
+                    actual: record.chunk().pos(),
+                }
+                .into());
+            }
+            record.validate()?;
         }
         let mut map = self.chunks.write().map_err(|_| poisoned("chunk"))?;
         for (key, record) in chunks {
@@ -124,6 +142,16 @@ impl WorldStore for InMemoryStore {
                 max: MAX_SAVE_BATCH,
             }
             .into());
+        }
+        for (key, record) in &overlays {
+            if key.pos() != record.pos() {
+                return Err(StorageError::ChunkPositionMismatch {
+                    expected: key.pos(),
+                    actual: record.pos(),
+                }
+                .into());
+            }
+            record.validate()?;
         }
         let mut map = self.overlays.write().map_err(|_| poisoned("overlay"))?;
         for (key, record) in overlays {
