@@ -343,8 +343,8 @@ impl LoginServerConfig {
 
     /// Overrides the ceiling on concurrent connections.
     ///
-    /// See [`crate::accept`] for the backpressure contract: at the ceiling the
-    /// acceptor stops accepting and further peers wait in the kernel backlog.
+    /// At the ceiling the shared `accept` module stops accepting and further
+    /// peers wait in the kernel backlog.
     #[must_use]
     pub fn with_max_connections(mut self, max_connections: usize) -> Self {
         self.max_connections = max_connections;

@@ -31,7 +31,7 @@
 //!   identity with [`ferrumc_core::PlayerId::offline`] and reuses the
 //!   [`CompressionState`] framing when a compression threshold is configured.
 //!
-//! The [`play`] module (M15) adds the play-phase reader/writer infrastructure on
+//! The `play` module (M15) adds the play-phase reader/writer infrastructure on
 //! top of the framing: [`PlayReader`] (budgeted serverbound decode), [`PlayWriter`]
 //! (bounded per-[`OutboundPriority`] queues drained into batches), the
 //! [`MovementCoalescer`] hook, the [`DisconnectReason`] policy, and placeholder

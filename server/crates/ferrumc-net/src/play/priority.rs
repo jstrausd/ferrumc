@@ -57,7 +57,7 @@ pub enum OutboundPriority {
     Critical,
     /// Connection/world state the client needs to stay consistent: join game,
     /// position synchronization, player-info updates, and the entity
-    /// spawn/despawn pair (so neither is tail-dropped behind bulk world traffic).
+    /// spawn/despawn pair, entity metadata, item pickup, and entity velocity.
     State,
     /// Bulk world content: chunk data, block updates, and entity movement.
     World,
@@ -81,18 +81,17 @@ impl OutboundPriority {
         }
     }
 
-    /// `true` when a *full* queue of this class is a fatal condition the caller
-    /// must escalate to a disconnect rather than absorb as a drop.
+    /// Whether this priority alone requires a caller to escalate a full writer
+    /// queue to a disconnect.
     ///
-    /// Only [`Critical`](Self::Critical) traffic is undroppable: losing a
-    /// keep-alive or a disconnect frame breaks the connection contract, whereas
-    /// state, world, and cosmetic frames can be shed (the client recovers via a
-    /// later full update or simply misses a visual effect).
+    /// This returns `true` only for [`Critical`](Self::Critical), such as a
+    /// keep-alive or disconnect. It does **not** prove that a packet at another
+    /// priority is safe to drop: [`Criticality::Mandatory`] also requires caller
+    /// escalation, including for entity metadata, motion, and item pickup.
     ///
-    /// This governs the connection writer's drain ("Layer B") only. The
-    /// authoritative must-deliver-or-disconnect signal for the per-player outbound
-    /// *channel* ("Layer A", the router's [`mpsc`](tokio::sync::mpsc) sender) is
-    /// [`Criticality`], which the router applies per send site.
+    /// The writer ("Layer B") has no criticality and returns a drop outcome for
+    /// any full queue. The caller must retain the packet's [`Criticality`] from
+    /// the outbound channel ("Layer A") and escalate a mandatory writer refusal.
     pub fn is_drop_fatal(self) -> bool {
         matches!(self, Self::Critical)
     }
@@ -129,6 +128,12 @@ impl OutboundPriority {
             // tail-dropped behind bulk chunk traffic, so they ride State, not World.
             | ClientboundPlayPacket::SpawnEntity(_)
             | ClientboundPlayPacket::RemoveEntities(_)
+            // Shared State FIFO preserves spawn -> metadata -> motion and
+            // pickup -> remove when each dependent packet is admitted. This is
+            // a local policy, not an atomic bundle or a restriction on overrides.
+            | ClientboundPlayPacket::SetEntityData(_)
+            | ClientboundPlayPacket::SetEntityMotion(_)
+            | ClientboundPlayPacket::TakeItemEntity(_)
             | ClientboundPlayPacket::GameEvent(_)
             | ClientboundPlayPacket::SetCenterChunk(_)
             // The block-change ack confirms the client's optimistic prediction for
@@ -213,7 +218,9 @@ impl OutboundPriority {
 /// This is the authoritative droppability signal for the per-player outbound
 /// *channel* ("Layer A": the router's [`mpsc`](tokio::sync::mpsc) sender),
 /// distinct from [`OutboundPriority`], which only orders the connection writer's
-/// drain ("Layer B"). A [`Mandatory`](Self::Mandatory) packet is delivered or the
+/// drain ("Layer B"). The writer itself returns a refusal outcome without
+/// criticality; its caller must also escalate a mandatory refusal. A
+/// [`Mandatory`](Self::Mandatory) packet is delivered or the
 /// slow client is disconnected — never silently dropped — because losing it
 /// corrupts the client's later state (a missing ack strands a prediction, a
 /// missing spawn leaves an invisible body, a missing despawn ghosts an entity). A
@@ -238,7 +245,8 @@ pub enum Criticality {
 impl Criticality {
     /// The default criticality class for `packet`.
     ///
-    /// Mandatory: the block-change ack, the entity spawn ([`SpawnEntity`]) and its
+    /// Mandatory: entity metadata, motion, item pickup, the block-change ack,
+    /// the entity spawn ([`SpawnEntity`]) and its
     /// despawns ([`RemoveEntities`] / [`RemovePlayerInfo`]), the player-info add,
     /// the keep-alive, and the join / login-kit framing ([`JoinGame`],
     /// [`GameEvent`], [`SetCenterChunk`], [`SynchronizePlayerPosition`],
@@ -275,6 +283,12 @@ impl Criticality {
             // unrecoverable (later moves for an unknown entity id are ignored
             // client-side), so SpawnEntity is mandatory alongside the despawns.
             | ClientboundPlayPacket::SpawnEntity(_)
+            // Dirty metadata and pickup animations have no proven resend, and
+            // no outbound motion consumer proves healing of a lost impulse or
+            // stop. Conservatively mandatory; may increase State backpressure.
+            | ClientboundPlayPacket::SetEntityData(_)
+            | ClientboundPlayPacket::SetEntityMotion(_)
+            | ClientboundPlayPacket::TakeItemEntity(_)
             // Inventory/held-item updates are authoritative state: dropping one
             // leaves the client's view of its inventory desynced until the next
             // full container resync, so they are mandatory, not droppable.

@@ -15,11 +15,13 @@
 //! dropped (tail-drop) and a per-priority drop counter is incremented. Tail-drop
 //! preserves the order of already-queued frames, which matters because play
 //! packet order is significant (a block update must not overtake the chunk it
-//! sits in). Dropping state/world/cosmetic frames is tolerable — the client
-//! recovers via a later update or simply misses a visual effect — but a *full*
-//! [`Critical`](crate::OutboundPriority::Critical) queue means the client cannot
-//! drain even keep-alives; the caller should escalate that to a
-//! [`DisconnectReason::OutboundOverflow`](crate::DisconnectReason).
+//! sits in). This writer owns no [`Criticality`](crate::Criticality): it returns
+//! [`EnqueueOutcome::Dropped`] for any full queue. The caller must escalate a
+//! refused mandatory packet to a disconnect, even at State priority. Critical
+//! priority alone also requires escalation, since a full Critical queue means
+//! the client cannot drain even keep-alives. Only a packet classified droppable
+//! by its caller may be shed without disconnecting. A shared priority preserves
+//! admitted packets' FIFO but provides no atomic admission for a packet group.
 
 use std::collections::VecDeque;
 
@@ -152,7 +154,7 @@ impl PlayBatch {
 ///
 /// Construct with [`with_defaults`](Self::with_defaults) for the documented
 /// capacities and batch thresholds, or [`new`](Self::new) to override them. See
-/// the [module docs](self) for the drop/backpressure policy.
+/// [`enqueue`](Self::enqueue) for the drop/backpressure policy.
 #[derive(Debug)]
 pub struct PlayWriter {
     queues: [VecDeque<ClientboundPlayPacket>; PRIORITY_COUNT],
@@ -237,9 +239,11 @@ impl PlayWriter {
     ///
     /// Returns [`EnqueueOutcome::Enqueued`] with the new depth, or
     /// [`EnqueueOutcome::Dropped`] (incrementing the priority's drop counter)
-    /// when the queue is at capacity. See the [module docs](self) for why drops
-    /// are preferred to blocking, and when a drop should be escalated to a
-    /// disconnect.
+    /// when the queue is at capacity. The writer owns no
+    /// [`Criticality`](crate::Criticality): the caller must escalate a mandatory
+    /// refusal to a disconnect, including at State priority. Critical priority
+    /// alone also requires escalation. Tail-drop preserves the existing FIFO
+    /// without blocking; dependent packets have no atomic admission here.
     pub fn enqueue(
         &mut self,
         priority: OutboundPriority,

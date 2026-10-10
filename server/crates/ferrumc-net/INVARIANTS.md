@@ -77,8 +77,22 @@
 - Every `PlayWriter` priority queue is bounded. A full queue **tail-drops** the
   incoming packet (preserving the order of already-queued frames) and increments
   a per-priority drop counter; it never blocks and never grows without limit.
-  Only a full `Critical` queue is fatal — the caller escalates it to
-  `DisconnectReason::OutboundOverflow`.
+  The writer owns no `Criticality`: it returns `EnqueueOutcome::Dropped` for
+  every full queue. The caller retains criticality from the outbound message
+  and escalates **any Mandatory refusal**, including State traffic, to a
+  disconnect. `OutboundPriority::is_drop_fatal` only identifies Critical
+  priority and does not replace this mandatory check.
+- `SetEntityData`, `SetEntityMotion`, and `TakeItemEntity` default to
+  State/Mandatory alongside `SpawnEntity` and `RemoveEntities`. With successful
+  admission in the common State lane, FIFO preserves spawn -> metadata ->
+  motion and pickup -> remove across batch boundaries. Metadata raw tails,
+  quantized motion, and the original pickup count are transported unchanged.
+  Motion is conservatively mandatory until a consumer proves outbound
+  supersession/healing; this local policy may increase State backpressure.
+- Dependent packets have no atomic bundle/reservation here. A refused mandatory
+  follower needs caller escalation; an explicit priority override can reorder
+  metadata ahead of spawn or remove ahead of pickup. A future viewer consumer
+  must bind a common lane and handle both outbound-channel and writer refusal.
 - `drain_batch` drains in strict priority order (`Critical > State > World >
   Cosmetic`) and never sends a lower-priority frame ahead of a still-queued
   higher-priority one. It stops at the frame-count cap (hard) or the byte cap
