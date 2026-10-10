@@ -501,6 +501,8 @@ dependencies = [
  "ferrumc-core",
  "ferrumc-math",
  "ferrumc-registry",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

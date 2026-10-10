@@ -81,6 +81,7 @@ use std::collections::BTreeMap;
 
 use ferrumc_math::{BlockPos, Direction, Vec3};
 use ferrumc_registry::block_state::{block_metadata, compute_state_id, state_id_to_block_name};
+use ferrumc_registry::connection::{fence_family, is_connection_exception};
 
 /// Input context for a single block placement.
 ///
@@ -217,9 +218,29 @@ pub enum PlacementRule {
 /// computation is deterministic.
 pub trait NeighborQuery: Send + Sync {
     /// Returns `true` if the block at `position` should connect to a fence named
-    /// `fence_block_name` (the same fence, or a solid full cube). Returns `false`
-    /// for air, unloaded, or non-connectable neighbours.
+    /// `fence_block_name`. Returns `false` for air, unloaded, or non-connectable
+    /// neighbours. This legacy query has no face information; hosts implementing
+    /// state/face rules should override [`Self::is_fence_connectable_on_face`].
     fn is_fence_connectable(&self, position: BlockPos, fence_block_name: &str) -> bool;
+
+    /// Returns whether a fence connects to the neighbour's horizontal face.
+    ///
+    /// `position` belongs to the neighbour, and `neighbor_face` points from that
+    /// neighbour towards the fence. For a neighbour north of the fence, the face
+    /// is therefore [`Direction::South`]. Fresh placement and full recomputation
+    /// both use this method. Hosts can call [`fence_connects_to`] with a proven
+    /// full-face support fact; a bounding-box flag does not prove that fact.
+    ///
+    /// The default delegates to [`Self::is_fence_connectable`] to preserve
+    /// existing query implementations until they adopt directional evaluation.
+    fn is_fence_connectable_on_face(
+        &self,
+        position: BlockPos,
+        fence_block_name: &str,
+        _neighbor_face: Direction,
+    ) -> bool {
+        self.is_fence_connectable(position, fence_block_name)
+    }
 
     /// Returns the raw block-state id at `position`, or `None` when the cell is
     /// air, unloaded, or otherwise unreadable.
@@ -673,6 +694,69 @@ fn fence_gate_in_wall(
     has_wall(neighbors, position.offset(left)) || has_wall(neighbors, position.offset(right))
 }
 
+// The pinned Blocks registrations construct FenceGateBlock for these names.
+// Keeping the set explicit prevents a suffix from inventing class membership.
+const FENCE_GATE_BLOCKS: [&str; 12] = [
+    "oak_fence_gate",
+    "spruce_fence_gate",
+    "birch_fence_gate",
+    "jungle_fence_gate",
+    "acacia_fence_gate",
+    "cherry_fence_gate",
+    "dark_oak_fence_gate",
+    "pale_oak_fence_gate",
+    "mangrove_fence_gate",
+    "bamboo_fence_gate",
+    "crimson_fence_gate",
+    "warped_fence_gate",
+];
+
+/// Evaluates one horizontal fence connection using a caller-proven support fact.
+///
+/// `fence_name` accepts a bare or canonical `minecraft:` fence name;
+/// `neighbor_state` is the neighbour's pinned registry state. `neighbor_face`
+/// points from the neighbour towards the fence, so a neighbour north of the
+/// fence uses [`Direction::South`]. Returns `None` for an unknown/non-fence
+/// source, an unknown neighbour state, or a vertical face.
+///
+/// Applies the reviewed Paper 1.21.8 Build 60 rule: a non-exception with full
+/// face support, a same-family fence, or a fence gate facing perpendicular to
+/// the connection axis. Crimson and warped fences belong to the wooden family;
+/// nether brick belongs to the other family. Known gates are identified through
+/// the pinned registry and their horizontal `facing`; `open`, `in_wall` and
+/// `powered` do not affect their connection branch.
+///
+/// The caller must obtain `full_face_support` from the neighbour state's actual
+/// support shape on this face. This function never infers it from `boundingBox`
+/// or substitutes its own value: passing `true` can connect a different-family
+/// fence or a parallel gate through the non-exception support branch. Actual
+/// fence/gate shapes have no full horizontal support face, so their shape query
+/// supplies `false`. Dynamic datapack tags, world updates, fluid ticks and
+/// plugin events are outside this pure rule; source review is not Paper runtime
+/// differential acceptance.
+#[must_use]
+pub fn fence_connects_to(
+    fence_name: &str,
+    neighbor_state: u32,
+    neighbor_face: Direction,
+    full_face_support: bool,
+) -> Option<bool> {
+    let source_family = fence_family(fence_name)?;
+    if !is_horizontal(neighbor_face) {
+        return None;
+    }
+    let neighbor_name = state_id_to_block_name(neighbor_state)?;
+    let exception = is_connection_exception(neighbor_name)?;
+    let same_family = fence_family(neighbor_name) == Some(source_family);
+    let gate_perpendicular = if FENCE_GATE_BLOCKS.contains(&neighbor_name) {
+        let gate_facing = cardinal_from_name(state_property(neighbor_state, "facing")?)?;
+        !same_axis(gate_facing, neighbor_face)
+    } else {
+        false
+    };
+    Some((!exception && full_face_support) || same_family || gate_perpendicular)
+}
+
 /// Updates one horizontal connection of an existing fence state.
 ///
 /// Sets that direction to `connected`, preserving every other property,
@@ -702,8 +786,9 @@ pub fn update_fence_connection_state(
 /// Recomputes all four connections while preserving a fence's other properties.
 ///
 /// Each horizontal direction is explicitly set `true` or `false` using
-/// [`NeighborQuery::is_fence_connectable`]; `waterlogged` and any other properties
-/// keep their existing values. Returns `None` for an unknown or non-fence state.
+/// [`NeighborQuery::is_fence_connectable_on_face`]; `waterlogged` and any other
+/// properties keep their existing values. Returns `None` for an unknown or
+/// non-fence state.
 ///
 /// Use this only when all four neighbour observations are available. A normal
 /// one-direction neighbour notification should use
@@ -726,7 +811,7 @@ pub fn recompute_fence_connection_state(
     Some(state)
 }
 
-/// Evaluates the existing neighbour predicate in the shared cardinal order.
+/// Evaluates each neighbour's face towards the fence in shared cardinal order.
 fn fence_connections(
     fence_name: &str,
     position: BlockPos,
@@ -735,7 +820,11 @@ fn fence_connections(
     CARDINALS.map(|direction| {
         (
             direction,
-            neighbors.is_fence_connectable(position.offset(direction), fence_name),
+            neighbors.is_fence_connectable_on_face(
+                position.offset(direction),
+                fence_name,
+                direction.opposite(),
+            ),
         )
     })
 }
@@ -1389,6 +1478,9 @@ fn bed_state(name: &str, facing: Direction, part: &str, fallback: u32) -> u32 {
     props.insert("part", part);
     encode(name, &props, fallback)
 }
+
+#[cfg(test)]
+mod fence_connection_tests;
 
 #[cfg(test)]
 mod tests {

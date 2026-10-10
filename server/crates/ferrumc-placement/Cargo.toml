@@ -17,6 +17,9 @@ ferrumc-math = { workspace = true }
 ferrumc-registry = { workspace = true }
 
 [dev-dependencies]
+# Independent block/tag fixtures for connection-rule drift guards only.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
