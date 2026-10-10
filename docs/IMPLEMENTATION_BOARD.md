@@ -159,6 +159,18 @@ Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.
 
+## Vorbereitete unmittelbare Verbraucher
+
+Nach CLEAN folgen direkt
+[GEN-05.4 Aquifer/Ore/Material](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) und
+[DUR-04.1 Player-/Item-Entityconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md).
+Diese beiden konkreten Briefs sind vorbereitet und noch nicht vergeben.
+Root hat zusätzlich49 echte Paper-Materialloops mit3.325.952 States zur
+Ressourcenplanung ausgeführt; normal/-O bytegleich. Das ist keine Rust- oder
+Spielabnahme. DUR-04.1 berücksichtigt die tatsächliche verbleibende Lücke:
+das aktive Inventar gehört derzeit der Appconnection und muss für bestätigte
+Player↔Entitytransfers in dieselbe besessene Simauthority gelangen.
+
 ## Orchestrierung
 
 - Root priorisiert, nimmt Nutzerbefehle an, vergibt Tickets, organisiert Review
