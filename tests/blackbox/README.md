@@ -62,6 +62,14 @@ The smoke (`smoke.mjs`) runs the full alpha flow end to end:
     pattern survived — i.e. it was flushed to redb and read back, not just held
     in memory. *(Managed mode only — see below.)*
 
+The placement matrix also uses actual torch, soul-torch and redstone-torch
+items on real stone supports (floor and four walls), and edits beside an
+existing oak fence. Fence cases cover other wood including crimson, nether
+brick, both gate axes, leaves/pumpkin exceptions and glass. A later World-FIFO
+marker proves unchanged secondary states without relying on ACK priority or
+timeouts. Rejoin and restart read the final pattern through Prismarine chunks.
+Support loss, general collision/support shapes, fluids and redstone remain open.
+
 It exits `0` on success and non-zero with a clear diagnostic dump on failure.
 Along the way it does the housekeeping a real client must do to stay connected:
 replies to keep-alives and confirms server teleports.
@@ -136,6 +144,26 @@ logs land in `$MC_RUN_DIR/server-*.log` (default under the OS temp dir).
 - `run-smoke.sh` — runner; managed by default (builds the server, runs the full
   scenario incl. restart); `MC_MANAGE_SERVER=0` for an external server.
 - `README.md` — this file.
+
+## Live operator commands and local recovery
+
+`operator-commands.mjs` owns a native-only Rust process and three sequential runs
+on the same fresh world. Run it after building the server:
+
+```sh
+MC_SERVER_BIN=/path/to/ferrumc node operator-commands.mjs
+```
+
+Independent clients decode command graphs and actual game-mode events. They
+verify `/op` and `/deop`, immediate permission revocation, a grant to an offline
+name, and a durable revocation of a configured seed after process restart.
+The restarted server accepts `op`/`deop` through its actual stdin pipe, refreshes
+the connected clients, and remains usable after stdin EOF. Both runs must exit
+cleanly after SIGTERM; the third run reloads the console's grant and revocation.
+Malformed records, write failures, cancellation and
+shutdown-admission contracts are separate Rust tests. Signed commands, vanilla
+`ops.json`, selectors, client permission-status EntityEvents, Java runtime
+mutation and full Paper command behavior are outside this gate.
 
 ## Java plugin client contract
 

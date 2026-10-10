@@ -667,9 +667,50 @@ async function buildAndVerifyEdits(client, state) {
     await breakAndVerify(client, state, { label: `break neighboring ${item}`, loc: neighbor });
     await verifyFenceEast(false, `${item} break`);
   }
+
+  // No-op secondary states have no BlockUpdate. A later primary marker in the
+  // same World FIFO establishes that any earlier secondary update has arrived;
+  // an ACK alone cannot establish this because it has higher output priority.
+  async function fenceBarrierAndVerify(east, label) {
+    const marker = [7, 64, 10];
+    await placeStateful(client, state, {
+      label: `World FIFO marker after ${label}`, slot: 7, item: 'stone',
+      clickLoc: { x: 7, y: 63, z: 10 }, dir: 1,
+      expectLoc: marker, expectName: 'stone',
+    });
+    const got = decodeState(state.blockChanges.get(fenceKey));
+    assert(got.name === 'oak_fence' && got.props.east === east && got.props.waterlogged === false,
+      `${label}: existing oak fence after World FIFO marker is ${JSON.stringify(got)}`);
+    pass(`existing oak fence east=${east} after ${label} (World FIFO barrier)`);
+    await breakAndVerify(client, state, { label: 'remove FIFO marker', loc: marker });
+  }
+
+  await breakAndVerify(client, state, { label: 'remove final legacy stone neighbor', loc: neighbor });
+  await verifyFenceEast(false, 'stone removal before directional cases');
+  const directionalCases = [
+    { item: 'nether_brick_fence', east: false, props: { west: false }, label: 'different fence material family' },
+    { item: 'crimson_fence', east: true, props: { west: true }, label: 'crimson belongs to wooden fences' },
+    { item: 'oak_fence_gate', yaw: 0, east: true, props: { open: false }, label: 'gate facing across connection axis' },
+    { item: 'oak_fence_gate', yaw: 90, east: false, props: { open: false }, label: 'gate facing along connection axis' },
+    { item: 'oak_leaves', east: false, label: 'leaves connection exception' },
+    { item: 'pumpkin', east: false, label: 'pumpkin connection exception' },
+    { item: 'glass', east: true, label: 'full glass support without exception' },
+  ];
+  for (const [index, testCase] of directionalCases.entries()) {
+    await placeStateful(client, state, {
+      label: testCase.label, slot: 6, item: testCase.item, yaw: testCase.yaw,
+      clickLoc: { x: 6, y: 63, z: 10 }, dir: 1,
+      expectLoc: neighbor, expectName: testCase.item, expectProps: testCase.props,
+    });
+    await fenceBarrierAndVerify(testCase.east, testCase.label);
+    if (index === directionalCases.length - 1) break;
+    await breakAndVerify(client, state, { label: `break ${testCase.label}`, loc: neighbor });
+    await fenceBarrierAndVerify(false, `${testCase.item} break`);
+  }
   const fencePattern = [
     { pos: fence, name: 'oak_fence', props: { east: true, waterlogged: false } },
-    { pos: neighbor, name: 'stone' },
+    { pos: neighbor, name: 'glass' },
+    { pos: [7, 64, 10], name: 'air' },
   ];
 
   pass('Set-slot + stateful place + break all verified against the server response.');
@@ -762,6 +803,7 @@ function writeConfig() {
   const toml =
     `bind = "${HOST}:${PORT}"\n` +
     `world_dir = "${WORLD_DIR}"\n` +
+    `builtin_plugins = false\n` + // vanilla cases exclude intentional demo block replacements
     `dashboard_enabled = false\n` + // no dashboard port to collide with
     `keep_alive_interval_ms = 10000\n`;
   fs.writeFileSync(CONFIG_PATH, toml);
