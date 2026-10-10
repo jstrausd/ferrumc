@@ -346,3 +346,37 @@ Endradialabweichung widerlegt. Root hat eine ausdrücklich private PaperBuild60-
 Samplingbasis im neuen .3-Chunkpfad intern freigegeben; .2s öffentliche
 Vanilla-/Random-/Noiseverträge bleiben unverändert. Der Autor implementiert
 die Korrektur und der Oracleagent erweitert die tatsächlichen Vergleiche.
+
+DUR-03.1 ist nach unabhängigem [Rootreview](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md)
+CLEAN als `eaedabd2` auf main integriert. Root isoliert Debug/Release je280
+Tests einschließlich zwei eigener PublicAPIprobes; final strict Alltargetclippy,
+Fmt/Rustdoc grün. Alle21 Autorenfreezehashes,20 Storagefiles im Rootsnapshot,
+sämtliche Autorenlogpins und16 Referenzpins unabhängig geprüft. Rootreviewfreeze
+`.codex-tmp/dur03_1-root-review.freeze.json`, SHA256
+`47b27defa3bb2cd0249dac7da6602ada9ce9c688a4fb21bc6ac304ab266571a0`.
+Tatsächliche redb-Commit-/Worker-/History-/Readonly-/MAX-/Scan-/Scratchverträge
+sind abgenommen; kein App-/Sim-/Drop-/Pickup-/Gameplay-/Powerlosspass behauptet.
+`select_world_ticket` ist unmittelbar für DUR-04.1 vergeben und konkretisiert
+jetzt den tatsächlichen46-Slot-/Cursor-/FCPS3-Playerconsumer mit Reservations-
+und receiptgematchter Completionauthority. World- und Oracleagents bleiben aktiv.
+
+Root hat zusätzlich126 tatsächliche Paper-Materialchunks erzeugt:
+7.077.888 State-/Fluidflagrecords,35.389.440 Bytes, Original-Aquifer-/Ore-/
+Defaultmethods im vollständigen Driver. Alle25 Originalclassorigins und120
+Artefaktpins vor/nach geprüft, genaue84Near+42FarEndmatrix und normal/-O-
+Reexport bytegleich. BitsSHA
+`e27a497fbbed2adb8060e3bc9556f6341a0ecb6ab5eb0ef565e70570113ed384`,
+FreezeSHA `bb9f9f888d11e93c17ff099ac8e5452c6d76fc9c4c2a42ba4319fdf6541b0f3f`.
+Der [GEN-05.4-Brief](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) dokumentiert diese
+Vorbereitung und die private Paper-RNGpolicy. Noch kein Rustmaterialpass.
+
+Der unabhängige [GEN-05.3-Oracle](agent-tasks/GEN-05_3_CHUNK_ORACLE.md)
+ist abgeschlossen. Root hat alle117 Dateien im finalen Freeze mit Größe und
+SHA256 unabhängig geprüft; FreezeSHA
+`0ece7c737a023744d6124aa5fb3cf5b7d6bf9c53f9af094cf9466ba21dcf4582`,
+BriefSHA `c286861c39ce5761d79d891559c0fa2d609f88c6571ef857eaa6983d2af184bf`.
+Tatsächliche474 Kernrecords je Backend, Endseams und84 Vanilla-Vergleichschunks
+erhalten alle Driftbefunde. `feature_catalog` prüft jetzt die neue Rustimplementation
+unabhängig; finales CLEAN setzt den noch ausstehenden Autorenfreeze voraus.
+Die Gesamt-CI für `eaedabd2` wurde ausdrücklich gestartet und läuft noch:
+[38087498562](https://github.com/jstrausd/ferrumc/actions/runs/38087498562).

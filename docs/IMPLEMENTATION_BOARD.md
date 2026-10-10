@@ -130,19 +130,22 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | GEN-05.1 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Unabhängig CLEAN und integriert `c4e3dc76`: alle35 Definitionen/7 Router,128 tatsächliche Original-JAR-Records, Debug/Release je177 und3 eigene Probes grün. Frischer Originalreexport normal/-O bytegleich, Freeze17/17 und strictchecks grün. [Review](agent-tasks/GEN-05_1_DENSITY_COMPILER_REVIEW.md); Seed-/Sample-/Chunkconsumer folgen. |
 | GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN und integriert `290e5343`: Debug/Release je188, drei zusätzliche unabhängige Debug-/Releaseprobes, strictchecks und29/29 Freezehashes grün. Frischer normal/-O Originalreexport bytegleich;17.213 tatsächliche JAR-Records. [Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md). Chunk-/Terrainconsumer bleiben offen. |
 | GEN-05.3 | `item_transfer_primitives`, Designreview Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Vollständiger konkreter NoiseChunkentwurf geprüft und intern freigegeben; Runtimeimplementierung begonnen. Originale Wrapperidentitäten, Arraydispatch/Interpolation, Preliminary Surface und Climate; explizite PaperBuild60-Endarithmetik im neuen Chunkpfad, bestehende .2-Vanillaverträge unverändert. Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
-| DUR-03.1 | `select_world_ticket`, Designreview Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Vollständiger Format6-/CAS-/Receiptentwurf geprüft und intern zur Runtimeimplementierung freigegeben. Scoped Player, monotone Revisionen/Tombstones, bounded Retryreceipts, ein echter joint redb-Commit und vereinheitlichte Memoryauthority; kein Onlineconsumer aktiviert. |
+| DUR-03.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Unabhängig CLEAN und integriert `eaedabd2`: Debug/Release jeweils280 Tests einschließlich zwei zusätzlicher Rootprobes, strictchecks und21/21 Freezehashes grün. Tatsächliche joint redb-Transaction, Memoryauthority, CAS/Tombstone/Receipts, Cutpoints/Uncertainty und Grenzen. [Review](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md); Onlineconsumer folgt. |
+| DUR-04.1 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener [Consumerbrief](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) | Nach DUR-03.1-CLEAN konkret vergeben; Entwurf am tatsächlichen46-Slot-/Cursor-/FCPS3-Consumer in Arbeit. Playerowner/Clone-/Rejoin-/Scopegates und Pending-/Receiptcompletion vor Drop/Pickupveröffentlichung. Appdriver folgt DUR-05. |
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
 Aktuell arbeiten neben Root drei Agents parallel: `item_transfer_primitives`
 implementiert GEN-05.3 NoiseChunk/Interpolation, `select_world_ticket`
-implementiert [DUR-03.1](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md),
-`feature_catalog` hat SRV-05.1 CLEAN abgeschlossen und erzeugt jetzt den
-unabhängigen [GEN-05.3-Restoracle](agent-tasks/GEN-05_3_CHUNK_ORACLE.md)
-mit getrenntem Scratch-/Briefbesitz; er verändert keine Worldruntime.
-Die drei Runtimeentwürfe sind vollständig durch Root geprüft und intern
-freigegeben; vorhandene Format-/Scalarverträge bleiben erhalten. Der
-Original-JAR-Oracleagent ist fertig. GEN-05.2 ist CLEAN auf `main`; nach .3
+hat DUR-03.1 CLEAN integriert und bearbeitet jetzt
+[DUR-04.1](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md),
+`feature_catalog` hat den unabhängigen
+[GEN-05.3-Restoracle](agent-tasks/GEN-05_3_CHUNK_ORACLE.md) abgeschlossen und
+prüft jetzt die Worldruntime unabhängig, ohne deren Dateien zu verändern.
+Root hat alle117 Oraclefreezehashes und den Briefhash unabhängig geprüft.
+GEN-05.3 ist intern zur Umsetzung freigegeben; DUR-04.1 konkretisiert zuerst
+seinen Consumerentwurf. Vorhandene Format-/Scalarverträge bleiben erhalten.
+GEN-05.2 ist CLEAN auf `main`; nach .3
 folgen direkt Aquifer/Material/Ore und Biome/Surface/Bedrock bis zu echter
 Chunkgeneration. Die Vergabe überschreitet drei Childslots nicht.
 
@@ -160,6 +163,8 @@ Die neue Gesamt-CI für `290e5343`, einschließlich GEN-05.2, ist erfolgreich:
 Gesamt-CI für `572083d1`, einschließlich aller normalen Craftingrezepte, ist
 ebenfalls erfolgreich:
 [Lauf38085964215](https://github.com/jstrausd/ferrumc/actions/runs/38085964215).
+Gesamt-CI für `eaedabd2`, einschließlich DUR-03.1, läuft:
+[Lauf38087498562](https://github.com/jstrausd/ferrumc/actions/runs/38087498562).
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.
@@ -169,7 +174,7 @@ Nachweis für diese neue Runtime.
 Nach CLEAN folgen direkt
 [GEN-05.4 Aquifer/Ore/Material](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) und
 [DUR-04.1 Player-/Item-Entityconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md).
-Diese beiden konkreten Briefs sind vorbereitet und noch nicht vergeben.
+GEN-05.4 ist vorbereitet; DUR-04.1 ist nach der Speicherintegration vergeben.
 Zusätzlich ist [SRV-05.2](agent-tasks/SRV-05_2_SINGLE_ITEM_RECIPES_FUEL.md)
 für alle114 Koch-/254 Steinschneiderrezepte und originale Brennstoffe vorbereitet;
 Vergabe folgt nach frei gewordenem Reviewslot. Er aktiviert noch keinen Ofen.

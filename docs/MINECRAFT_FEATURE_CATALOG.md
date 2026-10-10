@@ -463,7 +463,8 @@ Artefakte und verbleibende Grenzen stehen im
 | GEN-05.1 | F | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md), `c4e3dc76`: unabhängiger Rootreview CLEAN, Debug/Release je177 plus3 eigene Probes und strictchecks grün.128 tatsächliche Original-JAR-Records, frischer normal/-O-Reexport bytegleich;35 Definitionen/7 Router. Seed-/Terrainconsumer bleiben offen. |
 | GEN-05.2 | F | [Seed-/Scalar-/Climateconsumer](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md), `290e5343`: unabhängiger Review CLEAN, Debug/Release je188 und drei unabhängige Zusatzprobes grün. Alle17.213 Original-JAR-Records geprüft; frischer normal/-O Reexport bytegleich. Keine aktiven Chunks. |
 | GEN-05.3 | A | NoiseChunk/Interpolation: vollständiger konkreter Entwurf durch Root intern freigegeben; `item_transfer_primitives` implementiert originale Wrapper-/Array-/Driversemantik, Preliminary und Climate. PaperBuild60-Policy nur im neuen Chunkpfad; Material-/Terrainaktivierung folgen. |
-| DUR-03.1 | A | [Player↔Entity-Transferproducer](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md): vollständiger Format6-/CAS-/Receiptentwurf intern freigegeben, `select_world_ticket` implementiert tatsächliche Storageauthority. Drop/Pickup-/Appconsumer und DUR-03-Gesamtumfang bleiben offen. |
+| DUR-03.1 | F | [Player↔Entity-Transferproducer](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md), `eaedabd2`: unabhängiger Rootreview CLEAN, Debug/Release je280 einschließlich zwei eigener Probes, strictchecks und21/21 Freezehashes grün. Joint redb-/Memoryauthority, CAS/Tombstone/Receipts und Cutpoints. Drop/Pickup-/Appconsumer und DUR-03-Gesamtumfang bleiben offen. |
+| DUR-04.1 | A | [Player-/Itemconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md): `select_world_ticket` konkretisiert die besessene46-Slot-/Cursor-/FCPS3-Playerauthority, Reservation und bestätigte Drop-/Pickupcompletion. Appaktivierung folgt DUR-05. |
 | SRV-05.1 | F | [Normale Craftingrezepte](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md), `572083d1`: unabhängiger Rootreview CLEAN; alle968 Rezepte und21.855 Original-JAR-Fälle, Debug/Release je84 sowie3 Rootprobes mit301.510 zusätzlichen Matchmodellen grün. Strictchecks und frischer bytegleicher Reexport. Onlinecrafting/Specials/weitere Serializer bleiben offen. |
 | SIM-03.3 / SRV-02.1 | F | [Besessene ItemEntities](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md), `84967c54`: Rootreview CLEAN, Debug/Release je252 Tests samt3 zusätzlichen Probes und strictchecks grün; sealed Slotstate, lossless FCIE/FCIS, owned Refusals/Removal, checked Restore und originale Counter. Drop/Pickup/Appaktivierung folgen; SIM-03/SRV-02 bleiben offen. |
 
@@ -480,8 +481,8 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Oracleagent `feature_catalog` | GEN-05.3-Restoracle | Original-JAR-Vergleichsfälle in Arbeit | Eigener Scratch-/Oraclebrief; keine Worldruntime. SRV-05.1 CLEAN als `572083d1` integriert. |
-| Storageagent `select_world_ticket` | DUR-03.1 | Runtimeimplementierung freigegeben und begonnen | Storage-Crate und Transferbrief; .2-Migration CLEAN integriert, eigene Format6authority. |
+| Reviewer `feature_catalog` | GEN-05.3 | Oracle abgeschlossen; unabhängiger Runtimevorreview in Arbeit | Eigener Scratch-/Reviewbrief; keine Worldruntime. Oraclefreeze117/117 unabhängig geprüft; finale Abnahme erst nach Autorenfreeze. |
+| Consumeragent `select_world_ticket` | DUR-04.1 | Konkreter Simconsumerentwurf in Arbeit | Sim-Crate und Player-/Itemconsumerbrief; DUR-03.1 CLEAN als `eaedabd2` integriert, noch keine Appaktivierung. |
 | Weltagent `item_transfer_primitives` | GEN-05.3 | Runtimeimplementierung freigegeben und begonnen | World-Crate und GEN-05-Brief; .2-Seedrouter CLEAN als `290e5343` integriert. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
