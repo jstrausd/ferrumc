@@ -27,4 +27,10 @@
 - Biome and dimension-type ids are server-assigned dynamic-registry indices, not
   protocol constants; expose resource-location strings, never numeric ids.
 - `manifest.toml` checksums and byte counts must match the vendored fixtures.
+- Item placement bases retain the reverse-mapping snapshot except for the three
+  explicitly declared standing/wall torch families. Their generated bases are
+  the standing defaults resolved by name from `blocks.json`; the source mapping
+  must still name the matching standing or wall default or the build fails.
+  Source snapshots remain unchanged. Contextual attachment and support checks
+  belong to placement/simulation, not registry lookup.
 - This crate may depend only on `ferrumc-core`; never on sim, net, or storage.

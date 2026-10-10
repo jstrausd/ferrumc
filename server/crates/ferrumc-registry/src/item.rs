@@ -96,10 +96,13 @@ pub fn item_max_stack(id: i32) -> u8 {
     }
 }
 
-/// Returns the block-state id the item places, or `None` if the item is not a
-/// placeable block.
+/// Returns the base block-state id for item placement rules, or `None` if the
+/// item is not a placeable block. The final placed state depends on context.
 ///
-/// The mapping is taken verbatim from the vendored snapshot. Note that
+/// Ordinary entries retain the vendored reverse mapping. Standing/wall torch
+/// items use their standing block's default so placement can select floor or
+/// wall afterwards. This does not decide support validity or attachment itself.
+/// Note that
 /// `minecraft:air` (item id 0) maps to block-state 0 in the data; callers that
 /// treat air as non-placeable must special-case it themselves rather than
 /// relying on this returning `None`.
@@ -178,6 +181,25 @@ mod tests {
         assert_eq!(item_to_block_state(0), Some(0)); // air maps to block-state 0
     }
 
+    /// Real torch items start from their standing block; placement selects the
+    /// wall variant afterwards. The reverse block-to-item snapshot includes
+    /// both variants and cannot by itself choose this base.
+    #[test]
+    fn torch_items_start_from_standing_blocks() {
+        for (name, item_id, base_state) in [
+            ("torch", 310, 2401),
+            ("soul_torch", 353, 6037),
+            ("redstone_torch", 689, 5916),
+        ] {
+            assert_eq!(lookup_item_protocol_id(name), Some(item_id));
+            assert_eq!(
+                item_to_block_state(item_id),
+                Some(base_state),
+                "{name} must enter the standing/wall placement rule as a standing block",
+            );
+        }
+    }
+
     #[test]
     fn unknown_and_malformed_names_are_rejected() {
         assert_eq!(lookup_item_protocol_id(""), None);
@@ -250,8 +272,8 @@ mod tests {
         }
     }
 
-    /// Drift guard: re-parse the vendored mapping and confirm the generated
-    /// item -> block-state table agrees for every entry.
+    /// Ordinary entries must retain the original snapshot. The three explicit
+    /// standing/wall items have a separately checked placement contract.
     #[test]
     fn generated_block_table_matches_vendored_mapping() {
         let raw = std::fs::read_to_string(data("item_to_block_mapping.json"))
@@ -261,7 +283,12 @@ mod tests {
 
         for (k, v) in &mapping {
             let item_id: i32 = k.parse().unwrap();
-            let block_state: u32 = v.parse().unwrap();
+            let block_state: u32 = match item_id {
+                310 => 2401,
+                353 => 6037,
+                689 => 5916,
+                _ => v.parse().unwrap(),
+            };
             assert_eq!(
                 item_to_block_state(item_id),
                 Some(block_state),

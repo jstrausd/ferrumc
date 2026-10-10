@@ -33,6 +33,13 @@ Biome and dimension-type ids are *not* fixed constants — they are server-assig
 indices into the dynamic registries sent during the configuration phase — so this
 crate exposes their stable resource-location strings rather than numeric ids.
 
+The extracted item-to-block snapshot is a reverse mapping and retains the wall
+variant for torch, soul torch and redstone torch. `build.rs` preserves the snapshot
+but emits each of those items' standing default as its placement base, resolving
+both variants by registry name and failing on unrelated mapping drift. Placement
+then selects the contextual wall/floor state; support and full attachment semantics
+remain separate. See the pinned [Paper reference](../../../docs/PAPER_REFERENCE.md).
+
 Within the crate map this crate may depend only on `ferrumc-core` (the runtime
 currently needs nothing from it). It must never depend on the simulation,
 networking, or storage lanes.
