@@ -207,8 +207,8 @@ fn identical_input_sequences_produce_identical_outputs() {
 
     // Spot-check the shape: the third tick (bob already gone) is empty, and the
     // fourth (no inputs) is empty too, but both still advance the tick.
-    assert!(run_a[2].outputs().is_empty());
-    assert!(run_a[3].outputs().is_empty());
+    assert_eq!(run_a[2].outputs().len(), 0);
+    assert_eq!(run_a[3].outputs().len(), 0);
     assert_eq!(run_a[3].tick(), Tick::new(4));
 }
 

@@ -1822,7 +1822,7 @@ mod tests {
             source.take_cross_shard_outbox().len(),
             CROSS_SHARD_OUTBOX_CAPACITY
         );
-        assert!(source.take_cross_shard_outbox().is_empty());
+        assert_eq!(source.take_cross_shard_outbox().len(), 0);
     }
 
     #[test]
@@ -2165,7 +2165,7 @@ mod tests {
         })
         .expect("room");
         // No player present: no correction, no output at all.
-        assert!(s.run_tick().is_empty());
+        assert_eq!(s.run_tick().len(), 0);
         assert_eq!(s.player_count(), 0);
     }
 
@@ -2211,7 +2211,7 @@ mod tests {
         s.enqueue(GameInput::PlayerLeave { player: ghost })
             .expect("room");
 
-        assert!(s.run_tick().is_empty());
+        assert_eq!(s.run_tick().len(), 0);
         assert_eq!(s.player_count(), 0);
     }
 
@@ -2278,7 +2278,7 @@ mod tests {
     #[test]
     fn empty_tick_produces_no_outputs() {
         let mut s = shard();
-        assert!(s.run_tick().is_empty());
+        assert_eq!(s.run_tick().len(), 0);
     }
 
     #[tokio::test]
@@ -2590,7 +2590,7 @@ mod tests {
         })
         .expect("room");
         // A mode change emits no output.
-        assert!(s.run_tick().is_empty());
+        assert_eq!(s.run_tick().len(), 0);
         assert_eq!(s.player_game_mode(p), Some(GameMode::Creative));
         assert_eq!(s.player_game_mode(ghost), None);
         assert_eq!(s.player_count(), 1);
@@ -2659,7 +2659,7 @@ mod tests {
         })
         .expect("room");
         // An absent actor has no session to ack or resync, so nothing is emitted.
-        assert!(s.run_tick().is_empty());
+        assert_eq!(s.run_tick().len(), 0);
     }
 
     #[tokio::test]
@@ -3180,7 +3180,7 @@ mod tests {
             );
         }
         // History is now empty: a second undo is a silent no-op.
-        assert!(region_undo(&mut s, p).is_empty());
+        assert_eq!(region_undo(&mut s, p).len(), 0);
     }
 
     #[tokio::test]
@@ -3196,12 +3196,12 @@ mod tests {
         // is broadcast, and no undo entry is recorded.
         let (a, b) = (BlockPos::new(2, 64, 2), BlockPos::new(4, 65, 4));
         let outputs = region_edit(&mut s, p, a, b, RegionOp::Fill { state: stone });
-        assert!(outputs.is_empty());
+        assert_eq!(outputs.len(), 0);
         assert_eq!(block_at(&s, a), Some(BlockStateId::AIR));
         assert_eq!(block_at(&s, b), Some(BlockStateId::AIR));
         assert!(!s.has_pending_mutations());
         // With nothing recorded, /undo does nothing.
-        assert!(region_undo(&mut s, p).is_empty());
+        assert_eq!(region_undo(&mut s, p).len(), 0);
     }
 
     #[tokio::test]
@@ -3228,7 +3228,7 @@ mod tests {
         // Two undos restore the two newest edits; a third finds nothing.
         assert_eq!(region_undo(&mut s, p).len(), 1);
         assert_eq!(region_undo(&mut s, p).len(), 1);
-        assert!(region_undo(&mut s, p).is_empty());
+        assert_eq!(region_undo(&mut s, p).len(), 0);
 
         // The oldest edit's entry was evicted, so its cell stays changed; the other
         // two were restored to air.
@@ -3454,7 +3454,7 @@ mod tests {
             lines: lines.clone(),
         })
         .expect("room");
-        assert!(s.run_tick().is_empty());
+        assert_eq!(s.run_tick().len(), 0);
 
         // Place a sign so the position now has a sign block-entity.
         let _ = place_block(&mut s, p, target, oak_sign(), Direction::Up, 1.0, 0.0, 1);

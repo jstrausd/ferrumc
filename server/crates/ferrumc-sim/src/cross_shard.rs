@@ -426,9 +426,12 @@ mod tests {
         assert_eq!(first_envelope.destination(), destination);
 
         let mut queue = CrossShardQueue::new(NonZeroUsize::new(2).expect("nonzero test capacity"));
-        assert!(queue
-            .admit_completed_tick(produced_at, vec![first_envelope.clone()])
-            .is_empty());
+        assert_eq!(
+            queue
+                .admit_completed_tick(produced_at, vec![first_envelope.clone()])
+                .len(),
+            0
+        );
         assert_eq!(queue.len(), 1);
         assert!(queue.prepare_boundary(produced_at).is_empty());
 
@@ -436,9 +439,12 @@ mod tests {
         assert_eq!(prepared.envelopes(), std::slice::from_ref(&first_envelope));
         assert_eq!(queue.len(), 1, "prepare must not remove the message");
         let admitted_after_prepare = envelope(produced_at, source, destination, 1, "late");
-        assert!(queue
-            .admit_completed_tick(produced_at, vec![admitted_after_prepare.clone()])
-            .is_empty());
+        assert_eq!(
+            queue
+                .admit_completed_tick(produced_at, vec![admitted_after_prepare.clone()])
+                .len(),
+            0
+        );
         assert!(
             !queue.commit_boundary(&prepared),
             "a stale preparation must not remove a changed boundary"
@@ -515,17 +521,20 @@ mod tests {
         let produced_at = Tick::new(15);
         let mut queue = CrossShardQueue::new(NonZeroUsize::new(4).expect("nonzero capacity"));
 
-        assert!(queue
-            .admit_completed_tick(
-                produced_at,
-                vec![
-                    envelope(produced_at, source_b, destination_b, 0, "fourth"),
-                    envelope(produced_at, source_b, destination_a, 0, "third"),
-                    envelope(produced_at, source_a, destination_a, 1, "second"),
-                    envelope(produced_at, source_a, destination_a, 0, "first"),
-                ],
-            )
-            .is_empty());
+        assert_eq!(
+            queue
+                .admit_completed_tick(
+                    produced_at,
+                    vec![
+                        envelope(produced_at, source_b, destination_b, 0, "fourth"),
+                        envelope(produced_at, source_b, destination_a, 0, "third"),
+                        envelope(produced_at, source_a, destination_a, 1, "second"),
+                        envelope(produced_at, source_a, destination_a, 0, "first"),
+                    ],
+                )
+                .len(),
+            0
+        );
 
         let prepared = queue.prepare_boundary(Tick::new(16));
         let order: Vec<_> = prepared

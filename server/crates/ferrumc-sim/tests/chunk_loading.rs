@@ -495,7 +495,7 @@ async fn dirty_chunks_are_collected_on_mutation_and_persistable() {
     // The handoff is a real save batch the store accepts.
     store.save_chunks(dirty).await.expect("persist dirty batch");
     // Draining cleared dirtiness.
-    assert!(m.take_dirty().is_empty());
+    assert_eq!(m.take_dirty().len(), 0);
 
     // Reloading reflects the mutation.
     let reloaded = store

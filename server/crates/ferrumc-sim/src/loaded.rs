@@ -901,7 +901,7 @@ mod tests {
             .await
             .expect("acquire");
         // Freshly loaded clean chunk: nothing dirty.
-        assert!(m.take_dirty().is_empty());
+        assert_eq!(m.take_dirty().len(), 0);
 
         // Mutate it.
         m.get_mut(pos)
@@ -913,7 +913,7 @@ mod tests {
         assert_eq!(dirty.len(), 1);
         assert_eq!(dirty[0].0, key);
         // Draining clears dirtiness: a second take yields nothing.
-        assert!(m.take_dirty().is_empty());
+        assert_eq!(m.take_dirty().len(), 0);
     }
 
     #[tokio::test]
@@ -947,7 +947,7 @@ mod tests {
         // A freshly generated, never-edited chunk has an empty persist-dirty mask,
         // so it produces NO overlay and costs zero storage even on unload.
         assert!(!m.has_persist_dirty());
-        assert!(m.take_persist_dirty(0).is_empty());
+        assert_eq!(m.take_persist_dirty(0).len(), 0);
         assert!(m.release(pos, ticket).is_unloaded());
         assert!(!m.is_loaded(pos));
     }
@@ -970,7 +970,7 @@ mod tests {
         // Nothing is persist-dirty yet, even though both are freshly generated
         // (and therefore network-dirty).
         assert!(!m.has_persist_dirty());
-        assert!(m.take_persist_dirty(5).is_empty());
+        assert_eq!(m.take_persist_dirty(5).len(), 0);
 
         // Simulate a gameplay edit: mark a section persist-dirty (the sim layer's
         // job) on exactly one chunk.
@@ -994,7 +994,7 @@ mod tests {
         assert_eq!(overlays[0].1.updated_at_tick(), 7);
         assert_eq!(overlays[0].1.schema_version(), OVERLAY_SCHEMA_VERSION);
         // Draining cleared the persist mask: a second take yields nothing.
-        assert!(m.take_persist_dirty(8).is_empty());
+        assert_eq!(m.take_persist_dirty(8).len(), 0);
     }
 
     #[tokio::test]

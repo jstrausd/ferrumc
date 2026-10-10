@@ -2317,7 +2317,7 @@ mod tests {
         assert!(tick_n
             .shard_outputs()
             .all(|(_, outputs)| outputs.is_empty()));
-        assert!(tick_n.cross_shard_rejections().is_empty());
+        assert_eq!(tick_n.cross_shard_rejections().len(), 0);
         assert!(!scheduler
             .shard(destination)
             .expect("destination")
