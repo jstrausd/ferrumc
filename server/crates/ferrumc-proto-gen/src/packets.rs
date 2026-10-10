@@ -18,6 +18,9 @@ use crate::error::GenError;
 /// size so identifiers ride the same hostile-input guard as ordinary strings.
 pub(crate) const IDENTIFIER_MAX: usize = 32767;
 
+/// Largest admitted opaque unprefixed tail; mirrors the existing 2-MiB blob cap.
+pub(crate) const MAX_BOUNDED_REMAINING_BYTES: usize = 2_097_152;
+
 /// A connection state. Ordering follows the protocol's own progression so the
 /// emitted modules sort deterministically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -150,6 +153,9 @@ pub(crate) enum WireType {
     /// the final field of a packet; used for variable trailing payloads (the
     /// Player Info Update entry list) the typed grammar cannot yet express.
     RemainingBytes,
+    /// `bounded_remaining_bytes(N)`: at most N raw body bytes, without a prefix.
+    /// Only a packet's direct final field may own the remaining body.
+    BoundedRemainingBytes(usize),
     /// `optional<T>`: a bool flag followed by `T` only when the flag is set.
     Optional(Box<WireType>),
     /// `prefixed_array<T>`: a `VarInt` count followed by that many `T`.
@@ -182,6 +188,25 @@ impl WireType {
                 GenError::PacketsInvalid(format!("invalid prefixed_bytes size in `{raw}`"))
             })?;
             return Ok(Self::PrefixedBytes(max));
+        }
+        if let Some(arg) = wrapped(raw, "bounded_remaining_bytes(", ")") {
+            let arg = arg.trim();
+            if arg.is_empty() || !arg.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(GenError::PacketsInvalid(format!(
+                    "bounded_remaining_bytes requires an ASCII decimal cap in `{raw}`"
+                )));
+            }
+            let max = arg.parse::<usize>().map_err(|_| {
+                GenError::PacketsInvalid(format!(
+                    "overflowing bounded_remaining_bytes cap in `{raw}`"
+                ))
+            })?;
+            if max > MAX_BOUNDED_REMAINING_BYTES {
+                return Err(GenError::PacketsInvalid(format!(
+                    "bounded_remaining_bytes cap {max} exceeds {MAX_BOUNDED_REMAINING_BYTES}"
+                )));
+            }
+            return Ok(Self::BoundedRemainingBytes(max));
         }
 
         Ok(match raw {
@@ -229,7 +254,7 @@ impl WireType {
             Self::Str(max) => format!("BoundedString<{}>", group_digits(*max)),
             Self::Identifier => format!("BoundedString<{}>", group_digits(IDENTIFIER_MAX)),
             Self::Nbt => "ferrumc_nbt::NbtTag".to_owned(),
-            Self::PrefixedBytes(max) => {
+            Self::PrefixedBytes(max) | Self::BoundedRemainingBytes(max) => {
                 format!("ferrumc_codec::BoundedBytes<{}>", group_digits(*max))
             }
             Self::RemainingBytes => "Vec<u8>".to_owned(),
@@ -259,6 +284,29 @@ impl WireType {
                 | Self::Uuid
                 | Self::Position
         )
+    }
+
+    /// Whether this expression hides or directly owns an unprefixed bounded tail.
+    fn contains_bounded_remaining(&self) -> bool {
+        match self {
+            Self::BoundedRemainingBytes(_) => true,
+            Self::Optional(inner) | Self::PrefixedArray(inner) => {
+                inner.contains_bounded_remaining()
+            }
+            _ => false,
+        }
+    }
+
+    /// Finds legacy raw tails spelled within this field expression. Named
+    /// composite contents keep their pre-existing admission in this ticket.
+    fn contains_visible_legacy_tail(&self) -> bool {
+        match self {
+            Self::RemainingBytes => true,
+            Self::Optional(inner) | Self::PrefixedArray(inner) => {
+                inner.contains_visible_legacy_tail()
+            }
+            _ => false,
+        }
     }
 }
 
@@ -365,7 +413,7 @@ impl PacketSpec {
         let mut structs = Vec::with_capacity(doc.structs.len());
         for s in doc.structs {
             structs.push(StructDef {
-                fields: parse_fields(&s.name, s.fields, &names)?,
+                fields: parse_fields(&s.name, s.fields, &names, false)?,
                 name: s.name,
             });
         }
@@ -385,7 +433,7 @@ impl PacketSpec {
             packets.push(PacketDef {
                 state,
                 direction,
-                fields: parse_fields(&p.name, p.fields, &names)?,
+                fields: parse_fields(&p.name, p.fields, &names, true)?,
                 name: p.name,
                 id: p.id,
             });
@@ -401,14 +449,42 @@ fn parse_fields(
     owner: &str,
     raw: Vec<RawField>,
     structs: &BTreeSet<String>,
+    packet: bool,
 ) -> Result<Vec<Field>, GenError> {
-    raw.into_iter()
+    let fields: Vec<Field> = raw
+        .into_iter()
         .map(|f| {
             let ty = WireType::parse(&f.ty, structs)
                 .map_err(|e| GenError::PacketsInvalid(format!("{owner}.{}: {e}", f.name)))?;
             Ok(Field { name: f.name, ty })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    for (index, field) in fields.iter().enumerate() {
+        if field.ty.contains_bounded_remaining()
+            && (!packet
+                || index + 1 != fields.len()
+                || !matches!(field.ty, WireType::BoundedRemainingBytes(_)))
+        {
+            return Err(GenError::PacketsInvalid(format!(
+                "{owner}.{}: bounded_remaining_bytes must be a direct final packet field; structs and nested types are forbidden",
+                field.name
+            )));
+        }
+    }
+    if matches!(
+        fields.last().map(|field| &field.ty),
+        Some(WireType::BoundedRemainingBytes(_))
+    ) {
+        for field in &fields {
+            if field.ty.contains_visible_legacy_tail() {
+                return Err(GenError::PacketsInvalid(format!(
+                    "{owner}.{}: remaining_bytes cannot precede bounded_remaining_bytes in the same packet; nested field expressions are included",
+                    field.name
+                )));
+            }
+        }
+    }
+    Ok(fields)
 }
 
 /// The raw `packets.toml` document, before validation.
@@ -513,6 +589,235 @@ mod tests {
             "ferrumc_codec::BoundedBytes<2048>"
         );
         assert_eq!(WireType::RemainingBytes.rust_type(), "Vec<u8>");
+    }
+
+    #[test]
+    fn bounded_remaining_admits_ascii_decimal_caps_and_whitespace() {
+        let s = names();
+        for (raw, cap) in [
+            ("bounded_remaining_bytes(0)", 0),
+            ("bounded_remaining_bytes(1)", 1),
+            ("bounded_remaining_bytes(0004)", 4),
+            (" \tbounded_remaining_bytes( 12 \t) \n", 12),
+            (
+                "bounded_remaining_bytes(2097152)",
+                MAX_BOUNDED_REMAINING_BYTES,
+            ),
+        ] {
+            let ty = WireType::parse(raw, &s).expect("decimal cap is admitted");
+            assert_eq!(ty, WireType::BoundedRemainingBytes(cap), "{raw:?}");
+            assert_eq!(
+                ty.rust_type(),
+                format!("ferrumc_codec::BoundedBytes<{}>", group_digits(cap))
+            );
+            assert!(!ty.is_copy());
+        }
+    }
+
+    #[test]
+    fn bounded_remaining_rejects_malformed_and_excessive_caps() {
+        let s = names();
+        for raw in [
+            "bounded_remaining_bytes",
+            "bounded_remaining_bytes()",
+            "bounded_remaining_bytes( )",
+            "bounded_remaining_bytes(1",
+            "bounded_remaining_bytes(1))",
+            "bounded_remaining_bytes(1)garbage",
+            "bounded_remaining_bytes (1)",
+            "bounded_remaining_bytes(-1)",
+            "bounded_remaining_bytes(+1)",
+            "bounded_remaining_bytes(0x10)",
+            "bounded_remaining_bytes(1.0)",
+            "bounded_remaining_bytes(1e3)",
+            "bounded_remaining_bytes(1+1)",
+            "bounded_remaining_bytes(1_000)",
+            "bounded_remaining_bytes(1 0)",
+            "bounded_remaining_bytes(１)",
+            "bounded_remaining_bytes(١)",
+            "bounded_remaining_bytes(2097153)",
+            "bounded_remaining_bytes(9999999999999999999999999999999999999999)",
+        ] {
+            assert!(
+                matches!(WireType::parse(raw, &s), Err(GenError::PacketsInvalid(_))),
+                "must refuse {raw:?}"
+            );
+        }
+        // An exact usize overflow must be classified on both 32- and 64-bit hosts.
+        let overflow = format!("bounded_remaining_bytes({}0)", usize::MAX);
+        assert!(matches!(
+            WireType::parse(&overflow, &s),
+            Err(GenError::PacketsInvalid(_))
+        ));
+    }
+
+    #[test]
+    fn bounded_remaining_requires_direct_final_packet_field() {
+        for cap in [0, 1, MAX_BOUNDED_REMAINING_BYTES] {
+            let raw = format!(
+                r#"
+                [[packet]]
+                state = "play"
+                direction = "clientbound"
+                name = "TailPacket"
+                id = 1
+                fields = [
+                    {{ name = "id", type = "varint" }},
+                    {{ name = "tail", type = "bounded_remaining_bytes({cap})" }},
+                ]
+                "#
+            );
+            let doc = toml::from_str(&raw).expect("valid TOML");
+            let spec = PacketSpec::from_raw(doc).expect("final direct tail is admitted");
+            assert_eq!(
+                spec.packets[0].fields[1].ty,
+                WireType::BoundedRemainingBytes(cap)
+            );
+        }
+
+        let invalid = [
+            (
+                "packet",
+                "bounded_remaining_bytes(4)",
+                ", { name = 'later', type = 'u8' }",
+            ),
+            (
+                "packet",
+                "bounded_remaining_bytes(4)",
+                ", { name = 'other', type = 'bounded_remaining_bytes(4)' }",
+            ),
+            ("struct", "bounded_remaining_bytes(4)", ""),
+            ("packet", "optional<bounded_remaining_bytes(4)>", ""),
+            ("packet", "prefixed_array<bounded_remaining_bytes(4)>", ""),
+            (
+                "packet",
+                "optional<prefixed_array<bounded_remaining_bytes(4)>>",
+                "",
+            ),
+            (
+                "packet",
+                "prefixed_array<optional<bounded_remaining_bytes(4)>>",
+                "",
+            ),
+            (
+                "packet",
+                "optional<optional<bounded_remaining_bytes(4)>>",
+                "",
+            ),
+            (
+                "packet",
+                "prefixed_array<prefixed_array<bounded_remaining_bytes(4)>>",
+                "",
+            ),
+            ("struct", "optional<bounded_remaining_bytes(4)>", ""),
+            (
+                "struct",
+                "prefixed_array<optional<bounded_remaining_bytes(4)>>",
+                "",
+            ),
+        ];
+        for (owner, ty, after) in invalid {
+            let header = if owner == "packet" {
+                "state = 'play'\ndirection = 'clientbound'\nid = 1\n"
+            } else {
+                ""
+            };
+            let raw = format!(
+                "[[{owner}]]\nname = 'TailOwner'\n{header}fields = [{{ name = 'tail', type = '{ty}' }}{after}]\n"
+            );
+            let doc = toml::from_str(&raw).expect("valid TOML");
+            match PacketSpec::from_raw(doc).expect_err("placement must be refused") {
+                GenError::PacketsInvalid(message) => {
+                    assert!(message.contains("TailOwner.tail"), "{message}");
+                    assert!(message.contains("direct final packet field"), "{message}");
+                }
+                other => panic!("unexpected error {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_remaining_placement_does_not_change_existing_bytes_types() {
+        let raw = r#"
+            [[struct]]
+            name = "Existing"
+            fields = [
+                { name = "raw", type = "remaining_bytes" },
+                { name = "blobs", type = "prefixed_array<prefixed_bytes(4)>" },
+            ]
+            [[packet]]
+            state = "play"
+            direction = "clientbound"
+            name = "ExistingPacket"
+            id = 1
+            fields = [
+                { name = "composite", type = "Existing" },
+                { name = "blob", type = "prefixed_bytes(0)" },
+            ]
+        "#;
+        let doc = toml::from_str(raw).expect("valid TOML");
+        PacketSpec::from_raw(doc).expect("existing admission remains unchanged");
+    }
+
+    #[test]
+    fn bounded_remaining_rejects_other_visible_raw_tails_only_in_new_packets() {
+        for ty in [
+            "remaining_bytes",
+            "optional<remaining_bytes>",
+            "prefixed_array<remaining_bytes>",
+            "optional<prefixed_array<remaining_bytes>>",
+            "prefixed_array<optional<remaining_bytes>>",
+        ] {
+            let first = format!("{{ name = 'legacy', type = '{ty}' }}");
+            for (last, admitted) in [
+                (
+                    "{ name = 'tail', type = 'bounded_remaining_bytes(4)' }",
+                    false,
+                ),
+                ("{ name = 'scalar', type = 'u8' }", true),
+            ] {
+                let raw = format!(
+                    "[[packet]]\nstate = 'play'\ndirection = 'clientbound'\nname = 'MixedTail'\nid = 1\nfields = [{first}, {last}]\n"
+                );
+                let result = PacketSpec::from_raw(toml::from_str(&raw).expect("valid TOML"));
+                if admitted {
+                    result.expect("legacy-only admission remains unchanged");
+                } else {
+                    match result.expect_err("visible second raw tail must be refused") {
+                        GenError::PacketsInvalid(message) => {
+                            assert!(message.contains("MixedTail.legacy"), "{message}");
+                            assert!(
+                                message.contains("remaining_bytes cannot precede"),
+                                "{message}"
+                            );
+                        }
+                        other => panic!("unexpected error {other:?}"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_remaining_does_not_audit_legacy_named_composite_contents() {
+        // The new type is forbidden in every struct. Existing legacy struct
+        // fields are not recursively audited by this narrow grammar addition.
+        let raw = r#"
+            [[struct]]
+            name = "LegacyRaw"
+            fields = [{ name = "raw", type = "remaining_bytes" }]
+            [[packet]]
+            state = "play"
+            direction = "clientbound"
+            name = "LegacyCompositeTail"
+            id = 1
+            fields = [
+                { name = "legacy", type = "LegacyRaw" },
+                { name = "tail", type = "bounded_remaining_bytes(4)" },
+            ]
+        "#;
+        PacketSpec::from_raw(toml::from_str(raw).expect("valid TOML"))
+            .expect("legacy named composite admission is outside this ticket's audit");
     }
 
     #[test]

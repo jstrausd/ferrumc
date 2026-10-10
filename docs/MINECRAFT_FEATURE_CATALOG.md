@@ -1,6 +1,6 @@
 # FerrumC: vollständiger Minecraft-Zielkatalog und Agenten-Backlog
 
-Stand: 10.10.2026. Zielversion: **Minecraft Java Edition 1.21.8, Protokoll 772,
+Stand: 11.10.2026. Zielversion: **Minecraft Java Edition 1.21.8, Protokoll 772,
 DataVersion 4440**. Entwicklungsbranch: `main`. Dieser Katalog beschreibt den
 **angeforderten Zielumfang**, nicht einen bereits fertigen Server. FerrumC
 bleibt Rust; unveränderte Bukkit-/Paper-Plugins werden über den Java-21-Sidecar
@@ -462,7 +462,8 @@ Artefakte und verbleibende Grenzen stehen im
 | REG-WORLDGEN001 | F | [Originale Density-/Noisedaten](agent-tasks/REG-WORLDGEN001_BUILTIN_DENSITY_DATA.md),555ee2aa: unabhängiges Rootreview CLEAN, Debug/Release jeweils69 und4 Reviewerproben grün;102 tatsächliche Originalressourcen und195 Amplitudenbits vollständig geprüft. Keine aktive Terrainpipeline. |
 | GEN-05.1 | F | [Densitycompiler](agent-tasks/GEN-05_DENSITY_COMPILER_ROUTER.md), `c4e3dc76`: unabhängiger Rootreview CLEAN, Debug/Release je177 plus3 eigene Probes und strictchecks grün.128 tatsächliche Original-JAR-Records, frischer normal/-O-Reexport bytegleich;35 Definitionen/7 Router. Seed-/Terrainconsumer bleiben offen. |
 | GEN-05.2 | F | [Seed-/Scalar-/Climateconsumer](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md), `290e5343`: unabhängiger Review CLEAN, Debug/Release je188 und drei unabhängige Zusatzprobes grün. Alle17.213 Original-JAR-Records geprüft; frischer normal/-O Reexport bytegleich. Keine aktiven Chunks. |
-| GEN-05.3 | F | [NoiseChunk-/Interpolationsreview](agent-tasks/GEN-05_3_NOISE_CHUNK_REVIEW.md): unabhängige Finalprüfung grün;126 Chunks/7.077.888 tatsächliche Paperbits, Root Debug/Release je232 Tests, strictchecks und118/118 Autorenpins. Originale Wrapper/Provider/Climate, korrigierte Lifecycleadmission und PaperBuild60-Policy nur im neuen Chunkpfad. Material-/Terrainaktivierung folgen. |
+| GEN-05.3 | F | [NoiseChunk-/Interpolationsreview](agent-tasks/GEN-05_3_NOISE_CHUNK_REVIEW.md): unabhängig CLEAN als `e7565c38` integriert;126 Chunks/7.077.888 tatsächliche Paperbits, Root Debug/Release je232 Tests, strictchecks und118/118 Autorenpins. Originale Wrapper/Provider/Climate, korrigierte Lifecycleadmission und PaperBuild60-Policy nur im neuen Chunkpfad. Material-/Terrainaktivierung folgen. |
+| NET-04.0 | F | [Bounded Rawtailreview](agent-tasks/NET-04_0_BOUNDED_REMAINING_BYTES_REVIEW.md): unabhängig CLEAN zur Integration; kein Prefix/Metadata-/Terminatorparser, typed Admission vor Kopie, Produktionsoutput unverändert.27+2 Generatorchecks und6 Rootwireproben Debug/Release,54 WholeProtoDebug grün; ProtoRustdocbaselineausnahme ausdrücklich offen. |
 | DUR-03.1 | F | [Player↔Entity-Transferproducer](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md), `eaedabd2`: unabhängiger Rootreview CLEAN, Debug/Release je280 einschließlich zwei eigener Probes, strictchecks und21/21 Freezehashes grün. Joint redb-/Memoryauthority, CAS/Tombstone/Receipts und Cutpoints. Drop/Pickup-/Appconsumer und DUR-03-Gesamtumfang bleiben offen. |
 | DUR-04.1 | A | [Player-/Itemconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md): vollständigen konkreten46-Slot-/Cursor-/FCPS3-Entwurf geprüft und intern freigegeben, `select_world_ticket` implementiert Playerauthority, Reservation und bestätigte Drop-/Pickupcompletion. Appaktivierung folgt DUR-05. |
 | SRV-05.1 | F | [Normale Craftingrezepte](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md), `572083d1`: unabhängiger Rootreview CLEAN; alle968 Rezepte und21.855 Original-JAR-Fälle, Debug/Release je84 sowie3 Rootprobes mit301.510 zusätzlichen Matchmodellen grün. Strictchecks und frischer bytegleicher Reexport. Onlinecrafting/Specials/weitere Serializer bleiben offen. |
@@ -481,9 +482,9 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Reviewer `feature_catalog` | GEN-05.3 | Oracle abgeschlossen; unabhängiger Runtimevorreview in Arbeit | Eigener Scratch-/Reviewbrief; keine Worldruntime. Oraclefreeze117/117 unabhängig geprüft; finale Abnahme erst nach Autorenfreeze. |
-| Consumeragent `select_world_ticket` | DUR-04.1 | Vollständiger Entwurf intern freigegeben; Implementierung beginnt | Sim-Crate und Player-/Itemconsumerbrief; DUR-03.1 CLEAN als `eaedabd2` integriert, noch keine Appaktivierung. |
-| Weltagent `item_transfer_primitives` | GEN-05.3 | Runtimeimplementierung freigegeben und begonnen | World-Crate und GEN-05-Brief; .2-Seedrouter CLEAN als `290e5343` integriert. |
+| Protokollagent `feature_catalog` | NET-04.0 → NET-04.1 | GEN-05.3-Review CLEAN abgeschlossen; NET-04.0 unabhängig CLEAN zur Integration, separater actual-JAR-Branchoracle für GEN-05.4 in Scratch | Zuerst ausschließlich Proto-gen und eigener .0-Brief; nach separater Integration Proto/Spec. Kein World-/Simwriter. |
+| Consumeragent `select_world_ticket` | DUR-04.1 | Vollständiger Entwurf intern freigegeben; Shardconsumer mit29 Integrationstests lokal grün, zusätzliche Race-/Restart-/Kapazitätsfälle und strictchecks in Arbeit | Sim-Crate und Player-/Itemconsumerbrief; DUR-03.1 CLEAN als `eaedabd2` integriert, noch keine Appaktivierung. |
+| Weltagent `item_transfer_primitives` | GEN-05.4 | .3 unabhängig CLEAN als `e7565c38` integriert; Materialentwurf intern freigegeben,126-Chunk-State-/Flagmatrix lokal grün, Grenz-/Runtimeprüfung offen | World-Crate und GEN-05.4-Brief; vorheriger GEN-05-Brief readonly. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
 aktiven Slots stehen im Implementierungsboard. Reviews nutzen frei gewordene

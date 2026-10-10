@@ -451,6 +451,17 @@ fn decode_expr(ty: &WireType) -> String {
             "{ let remaining = reader.remaining(); reader.read_bytes(remaining)?.to_vec() }"
                 .to_owned()
         }
+        WireType::BoundedRemainingBytes(max) => {
+            let max = group_digits(*max);
+            format!(
+                "{{ let remaining = reader.remaining(); \
+                 if remaining > {max} {{ \
+                 return Err(ferrumc_codec::CodecError::BytesTooLong {{ length: remaining, max: {max} }}.into()); \
+                 }} \
+                 let bytes = reader.read_bytes(remaining)?; \
+                 ferrumc_codec::BoundedBytes::<{max}>::new(bytes.to_vec())? }}"
+            )
+        }
         WireType::Optional(inner) => {
             format!(
                 "if wire::read_bool(reader)? {{ Some({}) }} else {{ None }}",
@@ -515,6 +526,9 @@ fn encode_stmt(ty: &WireType, place: &str, is_ref: bool) -> String {
                 format!("&{place}")
             };
             format!("wire::write_raw(buf, {slice});")
+        }
+        WireType::BoundedRemainingBytes(_) => {
+            format!("wire::write_raw(buf, {place}.as_slice());")
         }
         WireType::Struct(_) => format!("{place}.encode(buf)?;"),
         WireType::Nbt => {
