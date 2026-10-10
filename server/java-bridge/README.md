@@ -77,6 +77,13 @@ and run in Maven's `verify` lifecycle.
 Permission context comes from Rust. Explicit nodes, `*`, hierarchical `x.*`
 grants and operators allow access; there is no implemented permission
 attachment/default/child graph. Requests update the current player's context.
+A `player_state` RPC replaces the permission snapshot of an already joined
+player on the Java owner thread, preserving the same proxy object and emitting
+no join/quit events. Plugin-held proxies therefore see the refreshed grants.
+Unknown online identities, identity changes and malformed snapshots are refused.
+This is a Java-side prerequisite: Rust operator mutations with Java plugins
+still require synchronized refresh/acknowledgement and failure handling before
+activation. The RPC alone does not establish that cross-process contract.
 Command permissions must use a simple dotted ASCII node or a final wildcard;
 Bukkit's semicolon OR expressions and empty nodes are explicitly unsupported.
 The player roster only pairs join/quit identities, with a maximum of 1024;

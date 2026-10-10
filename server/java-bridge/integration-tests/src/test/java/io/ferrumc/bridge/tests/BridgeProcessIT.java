@@ -90,6 +90,45 @@ class BridgeProcessIT {
         }
     }
 
+    @Test void playerStateRefreshUpdatesRetainedProxyWithoutEventsAndRejectsIdentityChanges() throws Exception {
+        fixture();
+        try (Child child = new Child(directory)) {
+            error(child.call(event("player_state", player("Tester", UUID_A, true))), "not active");
+            ok(child.load());
+            JsonObject operator = player("Tester", UUID_A, true);
+            ok(child.call(event("join", operator)));
+            // A different sender inspects the object retained by the join listener.
+            // Sending another command as Tester would itself refresh Tester's state.
+            JsonObject observer = player("Observer", UUID_B, true);
+            assertEquals(List.of("held:" + UUID_A + ":true:true:false"),
+                    texts(child.call(command(observer, "bridgefixture", "previous-status"))));
+            JsonObject revoked = child.call(event("player_state", player("Tester", UUID_A, false, "fixture.retained")));
+            ok(revoked); assertTrue(texts(revoked).isEmpty());
+            assertEquals(List.of("held:" + UUID_A + ":false:false:true"),
+                    texts(child.call(command(observer, "bridgefixture", "previous-status"))));
+            ok(child.call(event("player_state", player("Tester", UUID_A, false, "fixture.use"))));
+            assertEquals(List.of("held:" + UUID_A + ":false:true:false"),
+                    texts(child.call(command(observer, "bridgefixture", "previous-status"))));
+            ok(child.call(event("player_state", operator)));
+            error(child.call(event("player_state", player("Observer", UUID_B, false))), "unknown online player");
+            error(child.call(event("player_state", player("Changed", UUID_A, false))), "identity");
+            JsonObject malformed = player("Tester", UUID_A, false);
+            malformed.addProperty("op", "false");
+            error(child.call(event("player_state", malformed)), "boolean");
+            JsonObject extra = event("player_state", player("Tester", UUID_A, false));
+            extra.addProperty("unexpected", 0);
+            error(child.call(extra), "unknown field");
+            assertEquals(List.of("held:" + UUID_A + ":true:true:false"),
+                    texts(child.call(command(observer, "bridgefixture", "previous-status"))));
+            ok(child.call(event("quit", operator)));
+            error(child.call(event("player_state", operator)), "unknown online player");
+            ok(child.call(request("shutdown"))); child.finished(0); counters(1, 1);
+            YamlConfiguration config = YamlConfiguration.loadConfiguration(directory.resolve("BridgeFixture/config.yml").toFile());
+            assertEquals(1, config.getInt("join-count"));
+            assertEquals(1, config.getInt("quit-count"));
+        }
+    }
+
     @Test void explicitUnsupportedApisAndListenerFailuresKeepNextFrameUsable() throws Exception {
         fixture();
         try (Child child = new Child(directory)) {

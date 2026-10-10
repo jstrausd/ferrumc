@@ -49,6 +49,13 @@ public final class StandardPlugin extends JavaPlugin implements Listener {
                 case "fail" -> throw new IllegalStateException("fixture command failed");
                 case "unicode-error" -> throw new IllegalStateException("🌍".repeat(1000) + "\0");
                 case "previous" -> { Objects.requireNonNull(lastJoined).sendMessage("previous player"); return true; }
+                case "previous-status" -> {
+                    Player retained = Objects.requireNonNull(lastJoined);
+                    sender.sendMessage("held:" + retained.getUniqueId() + ":" + retained.isOp()
+                            + ":" + retained.hasPermission("fixture.use")
+                            + ":" + retained.isPermissionSet("fixture.retained"));
+                    return true;
+                }
                 case "unicode" -> { sender.sendMessage("Grüße 🌍"); return true; }
                 case "unicode-bmp" -> { sender.sendMessage("Grüße Ω"); return true; }
                 case "large" -> { sender.sendMessage("x".repeat(1025)); return true; }

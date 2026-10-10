@@ -109,6 +109,18 @@ final class BridgeEngine implements AutoCloseable {
                     recipient = player.spec.uuid().toString();
                     completions = complete(player.proxy, label, args);
                 }
+                case "player_state" -> {
+                    Requests.fields(request, "id", "op", "player");
+                    requireReady();
+                    Requests.PlayerSpec spec = Requests.player(request);
+                    PlayerState state = online.get(spec.uuid());
+                    if (state == null) throw new IllegalStateException("refresh for an unknown online player");
+                    if (!state.spec.name().equals(spec.name()))
+                        throw new IllegalArgumentException("player state refresh cannot change identity");
+                    // Mutate the existing owner-thread state so plugin-held proxies
+                    // immediately read the new grants without another player event.
+                    state.spec = spec;
+                }
                 case "join", "quit" -> {
                     Requests.fields(request, "id", "op", "player");
                     requireReady();
