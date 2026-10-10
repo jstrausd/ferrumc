@@ -9,8 +9,8 @@ use ferrumc_core::{DimensionId, GameMode, PlayerId, WorldId};
 use ferrumc_items::{encode_persisted_stack, left_click_exchange, ItemStack};
 use ferrumc_math::{BlockPos, Cuboid, Direction, ShardPos, Vec3};
 use ferrumc_placement::{
-    compute_fence_connection_state, compute_placement, is_water_source, NeighborQuery,
-    PlacementContext, PlacementResult, PlacementRule,
+    compute_placement, is_water_source, update_fence_connection_state, NeighborQuery,
+    PlacementContext, PlacementResult,
 };
 use ferrumc_registry::block_state::{block_metadata, state_id_to_block_name};
 use ferrumc_world::{
@@ -739,11 +739,15 @@ impl SimShard {
                     // Break -> air. Applied in FIFO order during the drain so the
                     // output keeps the inbox ordering.
                     let cause = MutationCause::PlayerCreative { player };
+                    let previous = self.authoritative_state(position);
                     let result = self.apply_block_edit(cause, position, BlockStateId::AIR);
                     if let Some(output) =
                         block_change_output(cause, sequence, position, BlockStateId::AIR, result)
                     {
                         outputs.push(output);
+                    }
+                    if matches!(result, MutationResult::Applied { .. }) && !previous.is_air() {
+                        self.update_fence_neighbors(&mut outputs, position);
                     }
                 }
                 GameInput::BlockPlace {
@@ -759,9 +763,9 @@ impl SimShard {
                     // state (rotation/facing/half/fence connectivity, plus any
                     // relocated merge or extra door/bed cell) against an immutable
                     // view of the resident chunks. The borrow ends before the
-                    // mutable writes below. The same refinement backs the off-tick
-                    // `preview_placement` the driver uses to report the final state
-                    // to the after-hook, so the two never diverge.
+                    // mutable writes below. The off-tick `preview_placement`
+                    // uses the same rules but may differ after earlier queued
+                    // inputs apply; it is not a committed after-hook result.
                     let computed = self.refine_placement(
                         state,
                         clicked_face,
@@ -1077,7 +1081,6 @@ impl SimShard {
         let is_merge = computed.is_some_and(|r| r.place_at.is_some());
         // Unsupported/unrecognised -> safe default (the held state).
         let primary_state = computed.map_or(held, |r| BlockStateId::new(r.state_id));
-        let is_fence = computed.is_some_and(|r| r.rule == PlacementRule::FenceLike);
 
         // Replaceability / multi-cell gate: validate every cell that must be newly
         // occupied BEFORE writing anything, so an obstructed door/bed never lands a
@@ -1107,6 +1110,7 @@ impl SimShard {
         // Apply the primary cell first. If it is refused (absent actor, unloaded
         // chunk, out of reach, y-out-of-bounds) nothing else is written, so a
         // rejected door never lands its upper half.
+        let previous_primary = self.authoritative_state(primary_pos);
         let result = self.apply_block_edit(cause, primary_pos, primary_state);
         let MutationResult::Applied { .. } = result else {
             if let Some(output) =
@@ -1129,27 +1133,33 @@ impl SimShard {
                 position: primary_pos,
             });
         }
+        // At most two cells (door/bed) belong to a placement. Complete those
+        // writes before evaluating their neighbors so every query sees the whole
+        // accepted placement, and avoid physics on unchanged or refused writes.
+        let mut changed_cells = Vec::with_capacity(2);
+        if previous_primary != primary_state {
+            changed_cells.push(primary_pos);
+        }
         // Apply the pre-validated extra cells (door upper / bed head). They are part
         // of the same placement: broadcast-only (Command cause -> no extra ack) and
         // persisted like any gameplay edit.
         if let Some(r) = computed {
             for &(epos, estate) in &r.extra_blocks {
                 let estate = BlockStateId::new(estate);
+                let previous_extra = self.authoritative_state(epos);
                 let eresult = self.apply_block_edit(MutationCause::Command, epos, estate);
                 if let Some(output) =
                     block_change_output(MutationCause::Command, sequence, epos, estate, eresult)
                 {
                     outputs.push(output);
                 }
+                if matches!(eresult, MutationResult::Applied { .. }) && previous_extra != estate {
+                    changed_cells.push(epos);
+                }
             }
         }
-        // A placed fence updates its same-fence cardinal neighbours so they connect
-        // back to it (broadcast-only, no extra ack). The reverse lookup yields a
-        // `'static` name, so it does not borrow `self`.
-        if is_fence {
-            if let Some(fence_name) = state_id_to_block_name(primary_state.as_u32()) {
-                self.update_fence_neighbors(outputs, primary_pos, fence_name);
-            }
+        for center in changed_cells {
+            self.update_fence_neighbors(outputs, center);
         }
     }
 
@@ -1602,30 +1612,38 @@ impl SimShard {
             .unwrap_or(BlockStateId::AIR)
     }
 
-    /// After a fence is placed at `center`, recomputes each cardinal neighbour that
-    /// is the *same* fence so it connects back to the new block, and broadcasts any
-    /// that changed.
+    /// Refreshes only the connection facing `center` on each resident cardinal
+    /// fence neighbor after an accepted regular placement or break.
     ///
     /// Neighbour writes go through the same [`apply_block_edit`](Self::apply_block_edit)
     /// funnel under [`MutationCause::Command`]: they persist and broadcast a viewer
     /// `BlockUpdate` (via [`block_change_output`]) but carry no player, so the router
     /// never acks them (only [`MutationCause::PlayerCreative`] is acked). Cross-shard
-    /// neighbours are out of scope this milestone; a neighbour in a non-resident
-    /// chunk is simply skipped (stale connectivity at the shard edge).
-    fn update_fence_neighbors(
-        &mut self,
-        outputs: &mut Vec<GameOutput>,
-        center: BlockPos,
-        fence_name: &str,
-    ) {
+    /// neighbors are out of scope; a neighbor in a non-resident chunk is skipped.
+    /// Other arms and waterlogging are preserved, even when another adjacent
+    /// chunk is unavailable. Work is bounded to four cells, with no recursive
+    /// updates. The existing coarse connection predicate remains unchanged.
+    fn update_fence_neighbors(&mut self, outputs: &mut Vec<GameOutput>, center: BlockPos) {
         for dir in [
             Direction::North,
             Direction::South,
             Direction::East,
             Direction::West,
         ] {
-            let npos = center.offset(dir);
-            // Only update a neighbour that is the very same fence.
+            // Resident edge columns can contain i32::MIN/MAX block positions.
+            // An absent integer neighbor must not wrap to the opposite edge.
+            let (dx, dz) = match dir {
+                Direction::North => (0, -1),
+                Direction::South => (0, 1),
+                Direction::East => (1, 0),
+                Direction::West => (-1, 0),
+                _ => continue,
+            };
+            let (Some(x), Some(z)) = (center.x().checked_add(dx), center.z().checked_add(dz))
+            else {
+                continue;
+            };
+            let npos = BlockPos::new(x, center.y(), z);
             let Some(neighbor_state) = self
                 .chunks
                 .get(npos.to_chunk_pos())
@@ -1633,17 +1651,21 @@ impl SimShard {
             else {
                 continue;
             };
-            if state_id_to_block_name(neighbor_state.as_u32()) != Some(fence_name) {
+            let Some(fence_name) = state_id_to_block_name(neighbor_state.as_u32()) else {
+                continue;
+            };
+            if !fence_name.ends_with("_fence") {
                 continue;
             }
-            // Recompute its connectivity now that the placed fence is visible.
-            let recomputed = {
+            let connected = {
                 let query = ShardNeighborQuery {
                     chunks: &self.chunks,
                 };
-                compute_fence_connection_state(fence_name, npos, &query)
+                query.is_fence_connectable(center, fence_name)
             };
-            let Some(new_state) = recomputed else {
+            let Some(new_state) =
+                update_fence_connection_state(neighbor_state.as_u32(), dir.opposite(), connected)
+            else {
                 continue;
             };
             if new_state == neighbor_state.as_u32() {
@@ -2934,6 +2956,284 @@ mod tests {
             sequence: 0,
             cause: MutationCause::Command,
         }));
+    }
+
+    #[tokio::test]
+    async fn fence_refreshes_after_solid_placement_and_break_and_records_both_edits() {
+        let p = player("fence-solid");
+        let mut s = shard_with_player(p).await;
+        let fence = BlockPos::new(8, 65, 8);
+        let neighbor = fence.offset(Direction::East);
+        let _ = place_block(&mut s, p, fence, OAK_FENCE, Direction::Up, 0.5, 0.0, 1);
+        let _ = s.take_mutations();
+        let _ = s.loaded_chunks_mut().take_persist_dirty(0);
+
+        let outputs = place_block(&mut s, p, neighbor, 1, Direction::Up, 0.5, 0.0, 2);
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6011)));
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.contains(&GameOutput::BlockChanged {
+            position: fence,
+            state: BlockStateId::new(6011),
+            sequence: 0,
+            cause: MutationCause::Command,
+        }));
+        let mutations = s.take_mutations();
+        assert_eq!(mutations.len(), 2);
+        assert_eq!(mutations[1].position(), fence);
+        assert_eq!(mutations[1].old_state(), BlockStateId::new(6027));
+        assert_eq!(mutations[1].new_state(), BlockStateId::new(6011));
+        assert!(s.loaded_chunks().has_persist_dirty());
+
+        s.enqueue(GameInput::BlockBreak {
+            player: p,
+            position: neighbor,
+            sequence: 3,
+        })
+        .expect("room");
+        let outputs = s.run_tick();
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6027)));
+        assert_eq!(outputs.len(), 2);
+        assert!(outputs.contains(&GameOutput::BlockChanged {
+            position: fence,
+            state: BlockStateId::new(6027),
+            sequence: 0,
+            cause: MutationCause::Command,
+        }));
+        assert_eq!(s.take_mutations().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fence_refresh_preserves_water_and_unrelated_connections_for_other_fence_types() {
+        let p = player("wet-fence");
+        let mut s = shard_with_player(p).await;
+        let fence = BlockPos::new(8, 65, 8);
+        // Existing wet oak fence with north=true; only its east neighbor changes.
+        set_world_block(&mut s, fence, 6017);
+        let neighbor = fence.offset(Direction::East);
+        let outputs = place_block(&mut s, p, neighbor, 12524, Direction::Up, 0.5, 0.0, 1);
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6001)));
+        assert_eq!(block_at(&s, neighbor), Some(BlockStateId::new(12523)));
+        assert_eq!(outputs.len(), 2);
+        s.enqueue(GameInput::BlockBreak {
+            player: p,
+            position: neighbor,
+            sequence: 2,
+        })
+        .expect("room");
+        s.run_tick();
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6017)));
+    }
+
+    #[tokio::test]
+    async fn fence_refresh_is_fifo_for_place_and_break_in_one_tick() {
+        let p = player("fence-fifo");
+        let mut s = shard_with_player(p).await;
+        let fence = BlockPos::new(8, 65, 8);
+        set_world_block(&mut s, fence, OAK_FENCE);
+        let neighbor = fence.offset(Direction::East);
+        s.enqueue(GameInput::BlockPlace {
+            player: p,
+            position: neighbor,
+            sequence: 1,
+            state: BlockStateId::new(1),
+            clicked_face: Direction::Up,
+            cursor_position: Vec3::new(0.5, 0.5, 0.5),
+            player_yaw: 0.0,
+        })
+        .expect("room");
+        s.enqueue(GameInput::BlockBreak {
+            player: p,
+            position: neighbor,
+            sequence: 2,
+        })
+        .expect("room");
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(OAK_FENCE)));
+        let outputs = s.run_tick();
+        let updates: Vec<_> = outputs
+            .iter()
+            .filter_map(|output| match output {
+                GameOutput::BlockChanged {
+                    position, state, ..
+                } if *position == fence => Some(*state),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(updates, [BlockStateId::new(6011), BlockStateId::new(6027)]);
+        assert_eq!(block_at(&s, neighbor), Some(BlockStateId::AIR));
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6027)));
+        assert_eq!(s.take_mutations().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn fence_refresh_skips_rejected_exact_and_unchanged_writes() {
+        let p = player("fence-refusal");
+        let mut s = shard_with_player(p).await;
+        let fence = BlockPos::new(8, 65, 8);
+        let neighbor = fence.offset(Direction::East);
+        // A no-op break must not initiate physics even if a stored bit is stale.
+        set_world_block(&mut s, fence, 6011);
+        s.enqueue(GameInput::BlockBreak {
+            player: p,
+            position: neighbor,
+            sequence: 1,
+        })
+        .expect("room");
+        assert_eq!(s.run_tick().len(), 1);
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6011)));
+        assert_eq!(s.take_mutations().len(), 1);
+
+        set_world_block(&mut s, fence, OAK_FENCE);
+        s.enqueue(GameInput::SetBlockExact {
+            player: p,
+            position: neighbor,
+            sequence: 2,
+            state: BlockStateId::new(1),
+        })
+        .expect("room");
+        assert_eq!(s.run_tick().len(), 1);
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(OAK_FENCE)));
+        assert_eq!(s.take_mutations().len(), 1);
+        // An occupied primary cell rejects the regular place without side effects.
+        let outputs = place_block(&mut s, p, neighbor, OAK_FENCE, Direction::Up, 0.5, 0.0, 3);
+        assert!(matches!(
+            outputs.as_slice(),
+            [GameOutput::BlockChangeRejected { .. }]
+        ));
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(OAK_FENCE)));
+        assert!(!s.has_pending_mutations());
+        // A truly changed primary whose connection result is already false adds no secondary edit.
+        s.enqueue(GameInput::BlockBreak {
+            player: p,
+            position: neighbor,
+            sequence: 4,
+        })
+        .expect("room");
+        assert_eq!(s.run_tick().len(), 1);
+        assert_eq!(s.take_mutations().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fence_refresh_keeps_connections_toward_unloaded_chunks() {
+        let p = player("edge-fence");
+        let mut s = shard_with_loaded_chunk(ChunkPos::new(0, 0)).await;
+        s.enqueue(GameInput::PlayerJoin {
+            player: p,
+            position: Vec3::new(0.5, 64.0, 8.0),
+        })
+        .expect("room");
+        s.run_tick();
+        let fence = BlockPos::new(0, 65, 8);
+        // west=true and waterlogged=true must survive an east-only update.
+        set_world_block(&mut s, fence, 6024);
+        place_block(
+            &mut s,
+            p,
+            fence.offset(Direction::East),
+            1,
+            Direction::Up,
+            0.5,
+            0.0,
+            1,
+        );
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6008)));
+        assert!(!s.loaded_chunks().is_loaded(ChunkPos::new(-1, 0)));
+    }
+
+    #[tokio::test]
+    async fn fence_refresh_crosses_resident_chunk_boundary_and_dirties_neighbor_column() {
+        let p = player("resident-edge-fence");
+        let mut s = shard_with_loaded_chunk(ChunkPos::new(0, 0)).await;
+        s.loaded_chunks_mut()
+            .acquire(
+                &InMemoryStore::new(),
+                &FlatWorldGenerator::new(),
+                ChunkPos::new(1, 0),
+                ChunkTicket::of(TicketReason::Player),
+            )
+            .await
+            .expect("second resident column");
+        s.enqueue(GameInput::PlayerJoin {
+            player: p,
+            position: Vec3::new(15.5, 64.0, 8.0),
+        })
+        .expect("room");
+        s.run_tick();
+        let fence = BlockPos::new(15, 65, 8);
+        set_world_block(&mut s, fence, OAK_FENCE);
+        let _ = s.loaded_chunks_mut().take_persist_dirty(0);
+        place_block(
+            &mut s,
+            p,
+            fence.offset(Direction::East),
+            1,
+            Direction::Up,
+            0.5,
+            0.0,
+            1,
+        );
+        assert_eq!(block_at(&s, fence), Some(BlockStateId::new(6011)));
+        assert!(s
+            .loaded_chunks()
+            .get(ChunkPos::new(0, 0))
+            .expect("neighbor column")
+            .persist_dirty_sections()
+            .any());
+        assert!(s
+            .loaded_chunks()
+            .get(ChunkPos::new(1, 0))
+            .expect("primary column")
+            .persist_dirty_sections()
+            .any());
+    }
+
+    #[tokio::test]
+    async fn fence_refresh_skips_unrepresentable_neighbors_at_both_world_edges() {
+        let p = player("integer-edge-fence");
+        for (center, neighbor, connected_state) in [
+            (
+                BlockPos::new(i32::MAX, 65, 8),
+                BlockPos::new(i32::MAX - 1, 65, 8),
+                6011,
+            ),
+            (
+                BlockPos::new(i32::MIN, 65, 8),
+                BlockPos::new(i32::MIN + 1, 65, 8),
+                6026,
+            ),
+            (
+                BlockPos::new(8, 65, i32::MAX),
+                BlockPos::new(8, 65, i32::MAX - 1),
+                6023,
+            ),
+            (
+                BlockPos::new(8, 65, i32::MIN),
+                BlockPos::new(8, 65, i32::MIN + 1),
+                6019,
+            ),
+        ] {
+            let mut s = shard_with_loaded_chunk(center.to_chunk_pos()).await;
+            s.enqueue(GameInput::PlayerJoin {
+                player: p,
+                position: Vec3::new(f64::from(center.x()), 64.0, f64::from(center.z())),
+            })
+            .expect("room");
+            s.run_tick();
+            set_world_block(&mut s, neighbor, OAK_FENCE);
+            let outputs = place_block(&mut s, p, center, 1, Direction::Up, 0.5, 0.0, 1);
+            assert_eq!(
+                block_at(&s, neighbor),
+                Some(BlockStateId::new(connected_state))
+            );
+            assert_eq!(outputs.len(), 2);
+            s.enqueue(GameInput::BlockBreak {
+                player: p,
+                position: center,
+                sequence: 2,
+            })
+            .expect("room");
+            assert_eq!(s.run_tick().len(), 2);
+            assert_eq!(block_at(&s, neighbor), Some(BlockStateId::new(OAK_FENCE)));
+        }
     }
 
     // --- multi-block placement, merges, and waterlogging (Part B apply path) ---

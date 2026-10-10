@@ -21,6 +21,18 @@
   it never blocks and never silently drops.
 - Player state is held in ordered containers so output ordering is deterministic
   for identical input sequences.
+- Accepted regular player placement/break refreshes at most four resident
+  cardinal fence neighbors per changed primary/extra cell. Only the arm facing
+  that cell changes; waterlogging and unrelated arms remain intact. Unchanged
+  results add no secondary journal/output, and rejected or no-op writes initiate
+  no refresh. Secondary edits use the existing journal/persist funnel and carry
+  no additional player acknowledgement. There is no recursive update queue.
+- Exact writes and region/undo operations retain their existing no-physics
+  contract. No neighbor chunk is force-loaded by fence refresh; cross-shard and
+  load-time reconciliation remain separate. The connection predicate still uses
+  coarse bounding-box metadata and does not establish Vanilla FULL-face,
+  material-family or gate-axis parity. Fluid tick scheduling is not implemented
+  by preservation of a waterlogged property.
 - A chunk is resident in a `LoadedChunkMap` **iff** it holds at least one
   ticket. Acquiring the first ticket runs the load-or-generate flow; releasing
   the last ticket unloads the chunk.
