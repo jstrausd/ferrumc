@@ -654,7 +654,7 @@ mod tests {
             .dispatch(&long, &op())
             .expect_err("input exceeds the cap");
         assert!(matches!(err, CommandError::InputTooLong { .. }));
-        assert!(tree.suggest(&long).is_empty());
+        assert_eq!(tree.suggest(&long).len(), 0);
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod tests {
         let tree = sample_tree();
         assert_eq!(tree.suggest("s"), vec!["spawn", "say", "seed"]);
         assert_eq!(tree.suggest("ga"), vec!["gamemode"]);
-        assert!(tree.suggest("xyz").is_empty());
+        assert_eq!(tree.suggest("xyz").len(), 0);
     }
 
     #[test]
@@ -677,12 +677,12 @@ mod tests {
         let tree = sample_tree();
         assert_eq!(tree.suggest("gamemode "), vec!["<mode: 0..3>"]);
         // A node with no children offers nothing further.
-        assert!(tree.suggest("spawn ").is_empty());
+        assert_eq!(tree.suggest("spawn ").len(), 0);
     }
 
     #[test]
     fn suggestions_for_unknown_path_are_empty() {
         let tree = sample_tree();
-        assert!(tree.suggest("nope ").is_empty());
+        assert_eq!(tree.suggest("nope ").len(), 0);
     }
 }

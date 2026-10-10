@@ -682,6 +682,6 @@ mod tests {
         // Only the synthetic root survives, with no children.
         assert_eq!(graph.nodes().len(), 1);
         let root = &graph.nodes()[graph.root_index() as usize];
-        assert!(root.children().is_empty());
+        assert_eq!(root.children().len(), 0);
     }
 }
