@@ -117,6 +117,9 @@ impl fmt::Display for ConnectionId {
 ///
 /// This is the value sent on the wire to reference an entity; it is assigned by
 /// the server and is unique within a world for the entity's lifetime.
+/// It is a runtime reference, not durable identity across unload/restart. Use
+/// [`crate::EntityUuid`] for an explicitly supplied persistent UUID. Neither
+/// type defines an internal generational handle or allocates entity IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EntityId(i32);
