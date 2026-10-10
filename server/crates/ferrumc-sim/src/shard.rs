@@ -9,10 +9,11 @@ use ferrumc_core::{DimensionId, GameMode, PlayerId, WorldId};
 use ferrumc_items::{encode_persisted_stack, left_click_exchange, ItemStack};
 use ferrumc_math::{BlockPos, Cuboid, Direction, ShardPos, Vec3};
 use ferrumc_placement::{
-    compute_placement, is_water_source, update_fence_connection_state, NeighborQuery,
-    PlacementContext, PlacementResult,
+    compute_placement, fence_connects_to, is_water_source, update_fence_connection_state,
+    NeighborQuery, PlacementContext, PlacementResult,
 };
 use ferrumc_registry::block_state::{block_metadata, state_id_to_block_name};
+use ferrumc_registry::connection::{fence_family, is_connection_exception};
 use ferrumc_world::{
     is_chest_state, sign_kind_for_state, try_encode_block_entity, BlockEntity, BlockStateId,
     ChestInventory, Sign, SIGN_LINES,
@@ -1622,7 +1623,9 @@ impl SimShard {
     /// neighbors are out of scope; a neighbor in a non-resident chunk is skipped.
     /// Other arms and waterlogging are preserved, even when another adjacent
     /// chunk is unavailable. Work is bounded to four cells, with no recursive
-    /// updates. The existing coarse connection predicate remains unchanged.
+    /// updates. Family, gate-axis and exception rules use the directional
+    /// predicate; ordinary neighbours retain its documented coarse support
+    /// fallback, not a proven FULL support-shape query.
     fn update_fence_neighbors(&mut self, outputs: &mut Vec<GameOutput>, center: BlockPos) {
         for dir in [
             Direction::North,
@@ -1654,14 +1657,15 @@ impl SimShard {
             let Some(fence_name) = state_id_to_block_name(neighbor_state.as_u32()) else {
                 continue;
             };
-            if !fence_name.ends_with("_fence") {
+            if fence_family(fence_name).is_none() {
                 continue;
             }
             let connected = {
                 let query = ShardNeighborQuery {
                     chunks: &self.chunks,
                 };
-                query.is_fence_connectable(center, fence_name)
+                // The changed block at center faces the fence at center+dir.
+                query.is_fence_connectable_on_face(center, fence_name, dir)
             };
             let Some(new_state) =
                 update_fence_connection_state(neighbor_state.as_u32(), dir.opposite(), connected)
@@ -1685,15 +1689,30 @@ impl SimShard {
 
 /// A [`NeighborQuery`] backed by a shard's resident chunks.
 ///
-/// Resolves a neighbour's block-state id to a name via the registry and reports it
-/// as fence-connectable when it is the same fence or a solid full cube. Air,
-/// unknown, and non-resident neighbours are not connectable.
+/// Uses the pinned family, gate-axis and connection-exception rules on the
+/// neighbour's face towards a known source fence. Ordinary blocks retain the
+/// pre-existing coarse bounding-box fallback, which is not a FULL support-shape
+/// query. Air, unknown and non-resident neighbours are not connectable.
 struct ShardNeighborQuery<'a> {
     chunks: &'a LoadedChunkMap,
 }
 
 impl NeighborQuery for ShardNeighborQuery<'_> {
     fn is_fence_connectable(&self, position: BlockPos, fence_block_name: &str) -> bool {
+        // This private legacy seam has no face. Require agreement on both
+        // horizontal axes, conservatively refusing directional gates; actual
+        // placement and refresh call the directional override below.
+        [Direction::North, Direction::East]
+            .into_iter()
+            .all(|face| self.is_fence_connectable_on_face(position, fence_block_name, face))
+    }
+
+    fn is_fence_connectable_on_face(
+        &self,
+        position: BlockPos,
+        fence_block_name: &str,
+        neighbor_face: Direction,
+    ) -> bool {
         let Some(state) = self
             .chunks
             .get(position.to_chunk_pos())
@@ -1707,8 +1726,26 @@ impl NeighborQuery for ShardNeighborQuery<'_> {
         let Some(name) = state_id_to_block_name(state.as_u32()) else {
             return false;
         };
-        // A fence connects to the same fence or to any solid full cube.
-        name == fence_block_name || block_metadata(name).is_some_and(|m| m.is_solid_cube)
+        // The helper validates the source/state/face before any fallback, and
+        // owns the version-pinned fence families and actual gate classification.
+        let Some(connects_without_support) =
+            fence_connects_to(fence_block_name, state.as_u32(), neighbor_face, false)
+        else {
+            return false;
+        };
+        if fence_family(name).is_some()
+            || name.ends_with("_fence_gate")
+            || is_connection_exception(name) != Some(false)
+        {
+            // Fences/gates have no full horizontal supporting face. The known
+            // gate-name suffix only suppresses the coarse fallback; the helper
+            // determines real gate class membership and perpendicular facing.
+            return connects_without_support;
+        }
+        // Until actual state/face shapes exist, keep ordinary-block behaviour
+        // explicitly coarse. Never pass this metadata off as proven FULL support
+        // to the pure reference rule or let it override special-case rejection.
+        block_metadata(name).is_some_and(|metadata| metadata.is_solid_cube)
     }
 
     fn block_state_at(&self, position: BlockPos) -> Option<u32> {
@@ -1791,6 +1828,8 @@ mod tests {
     use super::*;
     use crate::ownership::ShardId;
     use crate::ticket::{ChunkTicket, TicketReason};
+
+    mod fence_rules_tests;
 
     fn player(name: &str) -> PlayerId {
         PlayerId::offline(name)

@@ -26,7 +26,8 @@ ferrumc-items = { workspace = true }
 # Depends only on core/math/registry, so this introduces no dependency cycle.
 ferrumc-placement = { workspace = true }
 # The block-state catalog: the shard's neighbour query resolves a neighbour's
-# state id back to a block name (and solid-cube flag) for fence connectivity.
+# state id back to a block name and pinned fence/exception facts. Ordinary blocks
+# retain a coarse bounding-box fallback until state/face support shapes exist.
 # `ferrumc-world` already depends on registry, so this edge adds no cycle.
 ferrumc-registry = { workspace = true }
 # The storage boundary. The sim talks to persistence through the `WorldStore`

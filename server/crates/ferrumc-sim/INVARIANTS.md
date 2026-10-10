@@ -29,10 +29,28 @@
   no additional player acknowledgement. There is no recursive update queue.
 - Exact writes and region/undo operations retain their existing no-physics
   contract. No neighbor chunk is force-loaded by fence refresh; cross-shard and
-  load-time reconciliation remain separate. The connection predicate still uses
-  coarse bounding-box metadata and does not establish Vanilla FULL-face,
-  material-family or gate-axis parity. Fluid tick scheduling is not implemented
-  by preservation of a waterlogged property.
+  load-time reconciliation remain separate. Source fences must be in the pinned
+  fence-family facts. Fresh placement queries the neighbour's face towards the
+  fence; refresh at `neighbor = center + direction` passes `direction` as the
+  changed block's face towards that fence, and replaces only the fence's
+  opposite arm.
+- Fresh placement and secondary refresh use the pure pinned family, gate-axis
+  and 33 connection-exception rules with `full_face_support=false` for fences,
+  gates and exceptions. All wooden types, including crimson/warped, share a
+  family; Nether-Brick is separate. Gate connections follow perpendicular
+  facing and do not depend on open/in_wall/powered. Ordinary blocks retain the
+  existing coarse bounding-box fallback as an explicit unresolved seam; it is
+  never supplied as a proven FULL support-shape fact to the pure rule or allowed
+  to override special-case rejection. Unknown sources/states and vertical faces
+  fail closed. The private face-less legacy query requires agreement on both
+  horizontal axes; production fence consumers use the directional override.
+- The reviewed reference is Paper 1.21.8 Build 60, commit
+  `29c8822d90899c89d2689338e81a98f690bcba12`: full `FenceBlock.connectsTo`,
+  `isSameFence`, placement/updateShape, `FenceGateBlock.connectsToDirection`,
+  support shapes and `Block.isExceptionForConnection`, plus relevant patches.
+  Deterministic consumer regression tests do not establish Paper differential
+  acceptance or FULL state/face shape parity. Fluid tick scheduling is not
+  implemented by preservation of a waterlogged property.
 - A chunk is resident in a `LoadedChunkMap` **iff** it holds at least one
   ticket. Acquiring the first ticket runs the load-or-generate flow; releasing
   the last ticket unloads the chunk.
