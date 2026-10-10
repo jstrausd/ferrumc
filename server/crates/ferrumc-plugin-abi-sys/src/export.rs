@@ -934,7 +934,7 @@ mod tests {
             .expect("connection-side event sentinel is a valid envelope");
         assert_eq!(decoded.tick(), 0);
         assert_eq!(decoded.shard(), FcResourceHandle::INVALID);
-        assert!(decoded.payload().is_empty());
+        assert_eq!(decoded.payload().len(), 0);
 
         let mismatched = FcEventV1::new(
             FcEventKind::BLOCK_PLACE_ATTEMPT,

@@ -407,7 +407,7 @@ fn host_handle(identity: &HostIdentity) -> Result<FcHostHandle, CallbackError> {
 fn next_call(identity: &HostIdentity) -> Result<FcCallHandle, CallbackError> {
     let raw = identity
         .next_call
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(1)
         })
         .map_err(|_| CallbackError::CallHandleExhausted)?;
@@ -592,7 +592,7 @@ fn with_resolved_frame<R>(
 }
 
 fn restore_output(frame: &mut CallFrame<'_>) {
-    let capacity = u64::try_from(frame.output_capacity).map_or(u64::MAX, |value| value);
+    let capacity = u64::try_from(frame.output_capacity).unwrap_or(u64::MAX);
     // SAFETY: `CallFrame` stores the address of the live, aligned output record
     // created by `invoke_raw`; pointer identity was checked before this call.
     unsafe {
