@@ -289,9 +289,9 @@ freigegeben, ProposalSHA
 
 ## Laufende Folgearbeit
 
-- `feature_catalog`: GEN-05.2-Codereview CLEAN abgeschlossen;
-  jetzt freigegebene SRV-05.1-Runtime für alle968 normalen Craftingrezepte,
-  Originaltags, komponententragende Resultate und Craftingreste.
+- `feature_catalog`: SRV-05.1 CLEAN als `572083d1` integriert; jetzt
+  GEN-05.3-Restoracle mit getrenntem Scratch-/Oraclebriefbesitz. Keine
+  Worldruntimeänderung und keine Doppelung der Root126-Fullchunkmatrix.
 - `item_transfer_primitives`: GEN-05.3 NoiseChunk/Interpolation intern
   freigegeben, Runtimeimplementierung begonnen. Danach direkt Aquifers,
   Material/Ore und Surface/Biome bis zu echter Chunkgeneration.
@@ -309,3 +309,36 @@ Drop/Pickup, Mining/Loot/Crafting, Physik/Tracking/Kampf/Mobs und sämtliche
 Dimension-/Bossconsumer bleiben anhand des [Katalogs](MINECRAFT_FEATURE_CATALOG.md)
 und der Survival-Gesamtabnahme offen. Dieses Dokument beendet den Arbeitsauftrag
 nicht und verspricht keinen Hintergrunddienst nach beendeter Sitzung.
+
+## Normale Rezeptintegration und Chunkreferenzen
+
+SRV-05.1 ist nach unabhängigem [Rootreview](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md)
+CLEAN als `572083d1` integriert und gepusht. Alle84 Debug-/Release-Tests und
+3 Doctests bestanden unabhängig; drei zusätzliche öffentliche Rootprobes
+bestanden in beiden Profilen, mit301.510 separaten Matchmodellvergleichen.
+Strict Clippy/Fmt/Rustdoc, alle26 Autorenfreezehashes und16 Evidenzhashes grün.
+Frischer tatsächlicher Original-JAR-Reexport unter Python `-O` ist in allen
+vier Artefakten bytegleich mit beiden Autorenexporten; acht unabhängige
+Producer-/Herkunftsnegativprüfungen bestehen. Onlinecrafting bleibt offen.
+Die neue Gesamt-CI wurde für diesen Runtimehead ausgelöst:
+[Lauf38085964215](https://github.com/jstrausd/ferrumc/actions/runs/38085964215),
+noch laufend. Kein älterer Workflowlauf wird dafür als Nachweis verwendet.
+
+Root hat außerdem126 tatsächliche Paper-NoiseChunk-Konstruktor-/Materialdensity-
+Driverläufe ausgeführt:84 Nearcases für7 Settings/2 Seeds/6 Chunks sowie42
+FarEndcases für7 Seeds/6 Chunks.7.077.888 Samples,56.623.104 Bytes; frischer
+normal/-O-Reexport und separat geprüfte exakte Matrix bytegleich. BitsSHA256
+`9dd6827609a0a6b65968b239a588fd60e21121097520501ff5828eb19655a9db`;
+acht Dateien in `.codex-tmp/gen05_3-root-chunk-goldens.freeze.json`, FreezeSHA
+`80e17003c7229cf769bda08a3b90094f27fc9bded97032d1991a294813f6bb20`.
+Das ist eine tatsächliche Paperreferenz, noch kein bestandener Rustvergleich.
+
+Ein erster Amplified-Numericdrift wurde bis zu tatsächlichen RNG-/Noiseleaves
+lokalisiert. Root hat die nextDouble-Bytecodes beider gehashten Originalinners
+und die vollständigen Base-/Appliedmethoden unabhängig geprüft: PaperBuild60
+verwendet in XoroshiroRandomSource und BitRandomSource `l2f/fmul/f2d`,
+Vanilla `l2d/dmul`. Damit ist die frühere Annahme einer ausschließlich
+Endradialabweichung widerlegt. Root hat eine ausdrücklich private PaperBuild60-
+Samplingbasis im neuen .3-Chunkpfad intern freigegeben; .2s öffentliche
+Vanilla-/Random-/Noiseverträge bleiben unverändert. Der Autor implementiert
+die Korrektur und der Oracleagent erweitert die tatsächlichen Vergleiche.
