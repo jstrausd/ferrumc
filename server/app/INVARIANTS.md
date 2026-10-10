@@ -24,10 +24,11 @@
   and late echoes terminate the connection through the normal leave-save path.
 - A Keep Alive's response clock starts after its successful socket flush. A
   shorter configured send interval never replaces an unanswered request.
-- Ready inbound, outbound, and timer work rotates in bounded round-robin order
-  below shutdown and deadline priority, so an outbound burst cannot starve echoes.
+- Ready inbound, outbound, timers, and operator graph changes rotate in bounded
+  round-robin order below shutdown/deadline priority. Continuous revisions cannot
+  starve echoes or chunk/output work.
 - Cancellation-safe chunk/socket awaits honor the active absolute deadline.
-  Stateful packet handlers and container transactions are never forcibly canceled;
+  Stateful inventory packet handlers and container transactions are never forcibly canceled;
   transactions complete before their updated inventory is persisted.
 - A canceled chunk-stream send retains unload bookkeeping until admission; a
   canceled reply releases only actually acquired tickets behind a durable flush.
@@ -52,6 +53,33 @@
 - Normal shutdown drains every connection's save, ticket release and Leave
   acknowledgment while the driver remains alive, then stops simulation and
   awaits the final storage drain. Terminal task failures remain observable.
+- Operator identity uses exact case-sensitive offline names/UUIDs. Configuration
+  `ops` are seeds; strict schema-1 `world_dir/operators.json` overrides take
+  precedence, including explicit revocations. This is a FerrumC record, not
+  Vanilla `ops.json`; malformed records refuse startup without rewriting.
+- Persistent native-only startup registers single-target `/op` and `/deop`.
+  Both level 3 and current operator identity are required, so default level 4
+  never permits self-promotion. Offline targets are supported. Explicit default
+  levels and separately configured bypass grants survive deop.
+- Operator writes are serialized and recheck the issuer after earlier commits.
+  There are at most 1024 seeds, 1024 overrides and 128 KiB per record. Blocking
+  writes run off Tokio workers: exclusive staging, file fsync, atomic rename,
+  directory fsync precede live publication, graph revisions and success feedback.
+  Pre-rename failure retains old state. Uncertain post-rename durability denies
+  all operator identities, stops admission/mutations, requests fatal shutdown,
+  and remains an error after drain. Player/world writes are separate transactions.
+- Operator command callers observe Play deadlines and stop while waiting.
+  Once accepted under the mutex, an owned commit finishes despite cancellation.
+  Stop closes admission before signalling connections, then drains the accepted
+  commit; previously queued mutations cannot commit during that drain.
+- The trusted local API and bounded stdin console (16 lines, 256 bytes per line)
+  provide recovery after the last operator self-revokes. Console EOF disables
+  input; signal/internal stop remain observed while commands await persistence.
+- Java-enabled mutation stays disabled until durable Rust changes and every
+  affected retained Java permission snapshot have an acknowledged fail-closed
+  refresh contract. This native-only step refreshes Commands but sends no client
+  EntityEvent permission-level status and does not recalculate Bukkit permissions
+  or kick players on whitelist changes. Offline login retains username trust.
 - Production overlay capture uses the strict fallible codec, at most four
   records per request. All selected records validate before dirty masks, the
   mutation journal or assigned mutation IDs transfer. A full eight-slot storage
@@ -98,7 +126,7 @@
   text is at most 2048 bytes. A target is either the current request's exact
   canonical UUID or the console. No connection, online roster or broadcast
   capability is exposed to Java. Departed-player quit messages are discarded.
-- Rust supplies the canonical UUID/name and configured operator membership.
+- Rust supplies the canonical UUID/name and live operator membership.
   The configured default command level never implies Java operator status.
   The first permission snapshot includes only allowed command-declared nodes;
   Bukkit defaults, children, wildcards and attachments are not implemented.

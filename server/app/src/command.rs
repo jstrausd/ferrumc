@@ -179,6 +179,21 @@ pub fn build_command_tree() -> CommandTree {
     build_command_tree_with_limits(DEFAULT_REGION_VOLUME_CAP)
 }
 
+/// Activated only when the app has a durable, fully supported mutation path.
+pub(crate) fn register_operator_commands(tree: &mut CommandTree) {
+    for command in ["op", "deop"] {
+        tree.register(
+            literal(command)
+                .requires_level(3)
+                .requires_permission(crate::operators::ADMIN_PERMISSION)
+                .then(argument("target", ArgumentType::Word).executes(|_| {
+                    // State-dependent validation and feedback follow durable save.
+                    CommandResult::success(TextComponent::text(""))
+                })),
+        );
+    }
+}
+
 /// Builds the application's [`CommandTree`], wiring `/spawn`, `/gamemode`, the
 /// presentation and scoreboard commands, and the region build commands
 /// (`/fill`, `/replace`, `/undo`).

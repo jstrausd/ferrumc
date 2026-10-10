@@ -21,6 +21,7 @@ mod driver;
 mod inventory;
 mod java_bridge;
 mod observe;
+mod operators;
 mod player_admission;
 mod player_data;
 mod plugins;

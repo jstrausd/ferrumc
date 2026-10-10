@@ -135,11 +135,7 @@ pub(super) async fn send_join_kit(
     // this player's permission level AND their granted permission nodes, so a
     // non-operator never receives the level-gated `/gamemode` subtree and a player
     // without a permission-gated command's node never receives that command.
-    let allowed = |node: &str| ctx.command_permission_allowed(player, node);
-    let command_body = ctx
-        .policy
-        .command_tree()
-        .encode_commands_body(ctx.policy.permission_level(player), &allowed);
+    let command_body = ctx.command_graph(player);
     enqueue_traced_classified(
         writer,
         debug,

@@ -196,6 +196,7 @@ pub(super) async fn handle_play_body(
                 &command,
                 debug,
                 compression,
+                liveness.next_deadline(),
             )
             .await;
         }
@@ -840,6 +841,7 @@ async fn handle_command(
     command: &str,
     debug: &mut SessionDebug,
     compression: &CompressionState,
+    deadline: Option<ferrumc_net::LivenessDeadline>,
 ) -> anyhow::Result<()> {
     let policy = &ctx.policy;
     if let Some(bridge) = &ctx.java_bridge {
@@ -921,6 +923,32 @@ async fn handle_command(
                 ferrumc_session::system_chat(result.feedback(), false),
             );
         }
+        return Ok(());
+    }
+
+    if matches!(command.split_whitespace().next(), Some("op" | "deop")) {
+        let changed = match crate::operators::parse_command(command) {
+            Ok((target, operator)) => {
+                crate::operators::guard_change(
+                    deadline,
+                    ctx.shutdown.clone(),
+                    policy.operators().change(Some(player), target, operator),
+                )
+                .await?
+            }
+            Err(error) => Err(error),
+        };
+        let feedback = match changed {
+            Ok(message) => TextComponent::text(message),
+            Err(error) => TextComponent::text(error.to_string()).with_color(TextColor::Red),
+        };
+        send_mandatory(
+            writer,
+            debug,
+            compression,
+            &ctx.clock,
+            ferrumc_session::system_chat(&feedback, false),
+        )?;
         return Ok(());
     }
 

@@ -11,6 +11,8 @@ use clap::Parser;
 
 use ferrumc_app::{load_or_init_config, AppConfig, Cli, RunningServer};
 
+mod console;
+
 /// The event that began coordinated server shutdown.
 enum ShutdownTrigger {
     /// An operating-system signal carrying its display name.
@@ -74,9 +76,32 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    let trigger = tokio::select! {
-        signal = wait_for_shutdown_signal() => ShutdownTrigger::OsSignal(signal?),
-        () = server.wait_for_shutdown_request() => ShutdownTrigger::InternalFailure,
+    let mut console = console::input();
+    let mut console_open = true;
+    let shutdown_signal = wait_for_shutdown_signal();
+    tokio::pin!(shutdown_signal);
+    let trigger = loop {
+        tokio::select! {
+            signal = &mut shutdown_signal => break ShutdownTrigger::OsSignal(signal?),
+            () = server.wait_for_shutdown_request() => break ShutdownTrigger::InternalFailure,
+            line = console.recv(), if console_open => match line {
+                Some(Ok(line)) if !line.trim().is_empty() => {
+                    let result = tokio::select! {
+                        biased;
+                        signal = &mut shutdown_signal => break ShutdownTrigger::OsSignal(signal?),
+                        () = server.wait_for_shutdown_request() => break ShutdownTrigger::InternalFailure,
+                        result = server.execute_admin_command(&line) => result,
+                    };
+                    match result {
+                        Ok(feedback) => tracing::info!("{feedback}"),
+                        Err(error) => tracing::warn!(%error, "admin command failed"),
+                    }
+                }
+                Some(Err(error)) => tracing::warn!(%error, "console input rejected"),
+                Some(Ok(_)) => {}
+                None => console_open = false,
+            },
+        }
     };
     match trigger {
         ShutdownTrigger::OsSignal(signal) => {

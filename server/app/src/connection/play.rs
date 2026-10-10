@@ -206,6 +206,9 @@ pub(super) async fn enter_play(
     // mode so the creative-slot gate accepts this player and later enforcement
     // (creative no-decrement, break speed, flight) reads the right mode.
     let mut writer = PlayWriter::with_defaults(ctx.limits);
+    // Subscribe before the initial graph. Any concurrent mutation during the
+    // join kit remains pending and triggers a fresh graph after the handoff.
+    let mut operator_changes = ctx.policy.operators().subscribe();
     let setup: anyhow::Result<()> = async {
         send_sim_command_accepted(
             ctx,
@@ -375,9 +378,35 @@ pub(super) async fn enter_play(
                 &mut chunk_pump,
                 handle.recv(),
                 stream.read(&mut read_buf),
+                operator_changes.changed(),
             ) => wake,
         };
         match wake {
+            PlayWake::Operators(changed) => {
+                if let Err(error) = changed {
+                    break Err(error.into());
+                }
+                let graph =
+                    ferrumc_proto::generated::play::Commands::new(ctx.command_graph(player));
+                if let Err(error) = send_mandatory(
+                    &mut writer,
+                    &mut debug,
+                    &compression,
+                    &ctx.clock,
+                    ClientboundPlayPacket::Commands(graph),
+                ) {
+                    break Err(error);
+                }
+                if let Err(error) = guard_play_work(
+                    liveness.next_deadline(),
+                    flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+                )
+                .await
+                {
+                    break Err(error);
+                }
+                observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
+            }
             PlayWake::KeepAlive => {
                 if liveness.outstanding_keep_alive().is_some() {
                     continue;
@@ -753,23 +782,26 @@ enum PlayWake {
     Outbound(Option<OutboundMessage>),
     KeepAlive,
     Chunks,
+    Operators(Result<(), watch::error::RecvError>),
 }
 
 /// Rotates the first-polled source after every selection. A continuously ready
 /// outbound route therefore cannot starve a ready inbound Keep Alive echo, and
-/// timers remain serviceable under continuous inbound/outbound traffic.
-async fn next_play_wake<O, R>(
+/// timers and operator changes remain serviceable under continuous traffic.
+async fn next_play_wake<O, R, P>(
     next_work: &mut u8,
     keep_alive: &mut Interval,
     chunks: &mut Interval,
     outbound: O,
     read: R,
+    operators: P,
 ) -> PlayWake
 where
     O: std::future::Future<Output = Option<OutboundMessage>>,
     R: std::future::Future<Output = std::io::Result<usize>>,
+    P: std::future::Future<Output = Result<(), watch::error::RecvError>>,
 {
-    tokio::pin!(outbound, read);
+    tokio::pin!(outbound, read, operators);
     let wake = match *next_work {
         0 => tokio::select! {
             biased;
@@ -777,34 +809,47 @@ where
             result = &mut outbound => PlayWake::Outbound(result),
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut operators => PlayWake::Operators(result),
         },
         1 => tokio::select! {
             biased;
             result = &mut outbound => PlayWake::Outbound(result),
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut operators => PlayWake::Operators(result),
             result = &mut read => PlayWake::Read(result),
         },
         2 => tokio::select! {
             biased;
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut operators => PlayWake::Operators(result),
             result = &mut read => PlayWake::Read(result),
             result = &mut outbound => PlayWake::Outbound(result),
         },
-        _ => tokio::select! {
+        3 => tokio::select! {
             biased;
             _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut operators => PlayWake::Operators(result),
             result = &mut read => PlayWake::Read(result),
             result = &mut outbound => PlayWake::Outbound(result),
             _ = keep_alive.tick() => PlayWake::KeepAlive,
+        },
+        _ => tokio::select! {
+            biased;
+            result = &mut operators => PlayWake::Operators(result),
+            result = &mut read => PlayWake::Read(result),
+            result = &mut outbound => PlayWake::Outbound(result),
+            _ = keep_alive.tick() => PlayWake::KeepAlive,
+            _ = chunks.tick() => PlayWake::Chunks,
         },
     };
     *next_work = match wake {
         PlayWake::Read(_) => 1,
         PlayWake::Outbound(_) => 2,
         PlayWake::KeepAlive => 3,
-        PlayWake::Chunks => 0,
+        PlayWake::Chunks => 4,
+        PlayWake::Operators(_) => 0,
     };
     wake
 }
@@ -1130,7 +1175,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn ready_outbound_work_cannot_starve_ready_inbound_echoes_or_timers() {
-        use std::future::ready;
+        use std::future::{pending, ready};
         use std::time::Duration;
 
         let mut liveness =
@@ -1149,12 +1194,14 @@ mod tests {
                 &mut chunks,
                 ready(None),
                 ready(Ok(9)),
+                pending(),
             )
             .await
             {
                 PlayWake::Outbound(_) => choices.push("outbound"),
                 PlayWake::KeepAlive => choices.push("keep-alive"),
                 PlayWake::Chunks => choices.push("chunks"),
+                PlayWake::Operators(_) => panic!("no operator changes"),
                 PlayWake::Read(_) => {
                     liveness
                         .keep_alive_received(7, Instant::now())
@@ -1164,6 +1211,51 @@ mod tests {
             }
         }
         assert_eq!(choices, ["outbound", "keep-alive", "chunks", "read"]);
+        assert_eq!(liveness.outstanding_keep_alive(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn continuous_operator_changes_cannot_starve_ready_echoes_or_other_work() {
+        use std::future::ready;
+        use std::time::Duration;
+
+        let mut liveness =
+            play_liveness(Instant::now(), Duration::from_secs(30)).expect("Play tracker");
+        liveness.keep_alive_sent(7, Instant::now()).expect("sent");
+        let mut keep_alive = interval_at(Instant::now(), Duration::from_secs(1));
+        let mut chunks = interval_at(Instant::now(), Duration::from_secs(1));
+        let (revisions, mut changes) = watch::channel(0_u64);
+        let mut next_work = 4;
+        let mut choices = Vec::new();
+        for _ in 0..5 {
+            revisions.send_modify(|revision| *revision += 1);
+            match next_play_wake(
+                &mut next_work,
+                &mut keep_alive,
+                &mut chunks,
+                ready(None),
+                ready(Ok(9)),
+                changes.changed(),
+            )
+            .await
+            {
+                PlayWake::Operators(Ok(())) => choices.push("operators"),
+                PlayWake::Operators(Err(_)) => panic!("revision sender live"),
+                PlayWake::Read(_) => {
+                    liveness
+                        .keep_alive_received(7, Instant::now())
+                        .expect("echo serviced");
+                    choices.push("read");
+                }
+                PlayWake::Outbound(_) => choices.push("outbound"),
+                PlayWake::KeepAlive => choices.push("keep-alive"),
+                PlayWake::Chunks => choices.push("chunks"),
+            }
+        }
+        assert_eq!(
+            choices,
+            ["operators", "read", "outbound", "keep-alive", "chunks"]
+        );
         assert_eq!(liveness.outstanding_keep_alive(), None);
     }
 

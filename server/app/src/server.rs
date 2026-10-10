@@ -56,6 +56,8 @@ const STORAGE_FLUSH_CHANNEL_CAPACITY: usize = 8;
 /// the server down with [`shutdown`](Self::shutdown).
 #[derive(Debug)]
 pub struct RunningServer {
+    /// Local administration shares the same durable authority as player commands.
+    operators: Arc<crate::operators::Operators>,
     /// The address the listener is bound to.
     local_addr: SocketAddr,
     /// Stops network admission and signals live connections to finish cleanup.
@@ -84,6 +86,15 @@ pub struct RunningServer {
 }
 
 impl RunningServer {
+    /// Executes `op <name>` or `deop <name>` as the trusted local administrator.
+    ///
+    /// This is a local API, never a socket command source. Targets use the exact
+    /// offline name/UUID rule. Durable `world_dir` is required; Java-enabled
+    /// mutation awaits its separate live permission-refresh consumer.
+    pub async fn execute_admin_command(&self, command: &str) -> anyhow::Result<String> {
+        let (target, operator) = crate::operators::parse_command(command)?;
+        self.operators.change(None, target, operator).await
+    }
     /// The address the listener is actually bound to.
     #[must_use]
     pub fn local_addr(&self) -> SocketAddr {
@@ -146,8 +157,10 @@ impl RunningServer {
     /// inspected; a storage-worker failure takes precedence because it identifies
     /// the durability boundary that could not be completed.
     pub async fn shutdown(self) -> anyhow::Result<()> {
+        self.operators.begin_close();
         // A send error means every receiver is already gone — also a clean stop.
         let _ = self.shutdown.send(true);
+        self.operators.close().await;
         // The accept loop owns every connection task in a `JoinSet` and drains it on
         // shutdown, so awaiting it blocks until the last connection has finished its
         // leave-save cleanup AND its task future (holding a `player_store` handle) is
@@ -170,6 +183,7 @@ impl RunningServer {
             None => Ok(()),
         };
         tasks?;
+        self.operators.verify_shutdown()?;
         java
     }
 }
@@ -310,9 +324,11 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     };
     let java_bridge = java_runtime.as_ref().map(JavaBridgeRuntime::bridge);
     let policy = Arc::new(policy);
+    let operators = Arc::clone(policy.operators());
 
     let (commands_tx, commands_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    operators.attach_shutdown(shutdown_tx.clone())?;
     let (driver_shutdown_tx, driver_shutdown_rx) = watch::channel(false);
 
     // Shared observability state: one atomic-backed metric registry fed by the
@@ -398,6 +414,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     ));
 
     Ok(RunningServer {
+        operators,
         local_addr,
         shutdown: shutdown_tx,
         driver_shutdown: driver_shutdown_tx,

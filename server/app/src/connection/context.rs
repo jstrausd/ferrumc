@@ -36,7 +36,7 @@ const STATUS_JSON_MAX_CHARS: usize = 32_767;
 /// handed to each [`handle_connection`](super::handle_connection) call.
 #[derive(Clone)]
 pub(crate) struct ConnContext {
-    /// Server cancellation for stateless Java callbacks waiting outside the Play select.
+    /// Server cancellation for Java completion and owned operator-command waits.
     pub(crate) shutdown: watch::Receiver<bool>,
     /// Per-state hostile-input frame caps.
     pub(crate) limits: ConnectionLimits,
@@ -139,6 +139,13 @@ impl ConnContext {
 
     /// Shared command-node checker, including Java nodes resolved by Rust policy.
     pub(super) fn command_permission_allowed(&self, player: PlayerId, node: &str) -> bool {
+        self.command_permission_at(player, node, self.policy.is_operator(player))
+    }
+
+    fn command_permission_at(&self, player: PlayerId, node: &str, operator: bool) -> bool {
+        if node == crate::operators::ADMIN_PERMISSION {
+            return operator;
+        }
         let java_node = self.java_bridge.as_ref().is_some_and(|bridge| {
             bridge
                 .commands()
@@ -146,10 +153,20 @@ impl ConnContext {
                 .any(|command| command.permission.as_deref() == Some(node))
         });
         if java_node {
-            self.policy.java_permission_allowed(player, node)
+            operator || self.policy.permissions().is_allowed(player, node)
         } else {
             self.policy.permissions().is_allowed(player, node)
         }
+    }
+
+    /// Builds a graph from one operator snapshot, avoiding mixed concurrent views.
+    pub(super) fn command_graph(&self, player: PlayerId) -> Vec<u8> {
+        let operator = self.policy.is_operator(player);
+        self.policy
+            .command_tree()
+            .encode_commands_body(self.policy.permission_level_for(operator), &|node| {
+                self.command_permission_at(player, node, operator)
+            })
     }
     /// The active compression threshold (`>= 0`), or `None` when disabled.
     pub(super) fn enabled_threshold(&self) -> Option<i32> {

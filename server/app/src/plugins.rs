@@ -29,7 +29,7 @@
 //! to be an authoritative simulation tick or logical shard.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use ferrumc_core::{DimensionId, PlayerId};
@@ -53,11 +53,11 @@ use ferrumc_plugin_spawn_protect::{bypass_node, SpawnProtect, SpawnProtectPlugin
 use crate::command::build_command_tree_with_limits;
 use crate::config::AppConfig;
 
-/// Permission *level* granted to a configured operator.
+/// Permission *level* granted to a current operator identity.
 ///
 /// Mirrors vanilla's top operator tier (level 4): it satisfies every operator
 /// gate, including [`GAMEMODE_LEVEL`](crate::command::GAMEMODE_LEVEL). Only the
-/// players named in [`AppConfig::ops`] act at this level; everyone else acts at
+/// players in the live seed/override registry act at this level; everyone else acts at
 /// the configured [`AppConfig::default_permission_level`] (0 by default), so the
 /// gate is meaningful instead of granting every connection operator rights.
 pub(crate) const OPERATOR_PERMISSION_LEVEL: u8 = 4;
@@ -596,7 +596,7 @@ pub(crate) struct PlayPolicy {
     command_tree: ferrumc_command::CommandTree,
     spawn: Vec3,
     /// Players granted operator status; they act at [`OPERATOR_PERMISSION_LEVEL`].
-    ops: BTreeSet<PlayerId>,
+    ops: Arc<crate::operators::Operators>,
     /// Level every non-operator player acts at.
     default_permission_level: u8,
 }
@@ -604,7 +604,7 @@ pub(crate) struct PlayPolicy {
 impl PlayPolicy {
     /// Configured operator identity, independent of the default permission level.
     pub(crate) fn is_operator(&self, player: PlayerId) -> bool {
-        self.ops.contains(&player)
+        self.ops.contains(player)
     }
 
     /// Applies the Rust permission policy to a declared Java permission node.
@@ -695,11 +695,21 @@ impl PlayPolicy {
     /// Returns the permission level `player` acts at: [`OPERATOR_PERMISSION_LEVEL`]
     /// for a configured operator, otherwise the configured default level.
     pub(crate) fn permission_level(&self, player: PlayerId) -> u8 {
-        if self.ops.contains(&player) {
+        self.permission_level_for(self.is_operator(player))
+    }
+
+    /// Level from an already captured identity status, for consistent client graphs.
+    pub(crate) fn permission_level_for(&self, operator: bool) -> u8 {
+        if operator {
             OPERATOR_PERMISSION_LEVEL
         } else {
             self.default_permission_level
         }
+    }
+
+    /// Shared mutation authority and coalesced permission revisions.
+    pub(crate) fn operators(&self) -> &Arc<crate::operators::Operators> {
+        &self.ops
     }
 }
 
@@ -775,16 +785,16 @@ pub(crate) fn build_play_policy(
     }
 
     let permissions = PermissionRegistry::from_bypass_names(config.spawn_protect_bypass())?;
-    let ops = config
-        .ops()
-        .iter()
-        .map(|name| PlayerId::offline(name))
-        .collect();
+    let ops = crate::operators::Operators::from_config(config)?;
+    let mut command_tree = build_command_tree_with_limits(config.max_region_fill_volume());
+    if ops.mutations_supported() {
+        crate::command::register_operator_commands(&mut command_tree);
+    }
 
     let policy = PlayPolicy {
         guard,
         permissions,
-        command_tree: build_command_tree_with_limits(config.max_region_fill_volume()),
+        command_tree,
         spawn,
         ops,
         default_permission_level: config.default_permission_level(),
