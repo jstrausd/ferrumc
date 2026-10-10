@@ -4,18 +4,20 @@
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, watch};
-use tokio::time::{interval_at, timeout, Instant, MissedTickBehavior};
+use tokio::time::{interval_at, sleep_until, Instant, Interval, MissedTickBehavior};
 
 use ferrumc_codec::BoundedString;
 use ferrumc_core::{GameMode, PlayerId};
 use ferrumc_math::Vec3;
 use ferrumc_net::{
-    CompressionState, ConnectionState, Criticality, DecodeError, DisconnectReason,
-    FrameDecodeError, InboundDecoder, InboundPacket, PlayWriter,
+    CompressionState, ConnectionLiveness, ConnectionState, Criticality, DecodeError,
+    DisconnectReason, FrameDecodeError, InboundDecoder, InboundPacket, KeepAliveError,
+    LivenessActivityError, LivenessConfig, LivenessDeadline, LivenessTimeout, PlayWriter,
+    DEFAULT_KEEP_ALIVE_TIMEOUT,
 };
 use ferrumc_observability::{PacketState, SessionDebug};
 use ferrumc_proto::generated::play::{ClientboundKeepAlive, ClientboundPlayPacket, GameEvent};
-use ferrumc_session::{NetEvent, PlayerSessionHandle};
+use ferrumc_session::{NetEvent, OutboundMessage, PlayerSessionHandle};
 
 use crate::driver::SimCommand;
 use crate::inventory::PlayerInventory;
@@ -181,7 +183,6 @@ pub(super) async fn enter_play(
         },
     )
     .await?;
-
     // Replay the keystone payload, restoring the look and — for a returning player —
     // the game mode and held slot, then drain any already-buffered play frames.
     let mut writer = PlayWriter::with_defaults(ctx.limits);
@@ -200,6 +201,9 @@ pub(super) async fn enter_play(
         &inventory,
     )
     .await?;
+    // Start absolute Play deadlines after the join payload has reached the socket.
+    // Chunk/output timer wakeups never extend this inbound progress window.
+    let mut liveness = play_liveness(Instant::now(), ctx.io_timeout)?;
     // Drain the frames already buffered before the loop. Any error here — a
     // serverbound budget kick on a flood pipelined during the login handoff, or a
     // decode/socket failure — is deferred to a break inside the loop rather than
@@ -225,6 +229,7 @@ pub(super) async fn enter_play(
         &mut player_yaw,
         &mut player_pitch,
         &mut debug,
+        &mut liveness,
     )
     .await
     {
@@ -241,6 +246,7 @@ pub(super) async fn enter_play(
             &mut chunk_stream,
             &mut debug,
             &compression,
+            liveness.next_deadline(),
         )
         .await
         {
@@ -248,15 +254,19 @@ pub(super) async fn enter_play(
         }
     }
     if deferred_break.is_none() {
-        match flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout).await {
+        match guard_play_work(
+            liveness.next_deadline(),
+            flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+        )
+        .await
+        {
             Ok(()) => observe_queue_len(&mut debug, ctx, &writer, budget.over_budget()),
             Err(err) => deferred_break = Some(err),
         }
     }
 
-    // Keep Alive: a real client disconnects if it hears nothing for 20 s. Ping on
-    // an interval; the client echoes with a serverbound Keep Alive the play pump
-    // decodes and ignores. The first tick fires one interval in, not immediately.
+    // Keep one unanswered Keep Alive at a time. A shorter configured cadence must
+    // never replace its ID or extend its absolute response deadline.
     let mut keep_alive = interval_at(
         Instant::now() + ctx.keep_alive_interval,
         ctx.keep_alive_interval,
@@ -277,6 +287,7 @@ pub(super) async fn enter_play(
     chunk_pump.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let mut read_buf = [0u8; READ_CHUNK];
+    let mut next_work = 0;
     let result = loop {
         // A deferred failure from the pre-loop drain (e.g. a budget kick on a
         // flood pipelined during the login handoff) breaks here so the teardown
@@ -285,17 +296,40 @@ pub(super) async fn enter_play(
         if let Some(err) = deferred_break.take() {
             break Err(err);
         }
-        tokio::select! {
+        let Some(deadline) = liveness.next_deadline() else {
+            break Err(anyhow::anyhow!(
+                "Play liveness closed without a disconnect reason"
+            ));
+        };
+        let wake = tokio::select! {
             biased;
             _ = shutdown.changed() => break Ok(()),
-            _ = keep_alive.tick() => {
+            () = sleep_until(deadline.at()) => break Err(deadline.timeout().into()),
+            wake = next_play_wake(
+                &mut next_work,
+                &mut keep_alive,
+                &mut chunk_pump,
+                handle.recv(),
+                stream.read(&mut read_buf),
+            ) => wake,
+        };
+        match wake {
+            PlayWake::KeepAlive => {
+                if liveness.outstanding_keep_alive().is_some() {
+                    continue;
+                }
                 keep_alive_id = keep_alive_id.wrapping_add(1);
                 let packet = ClientboundPlayPacket::ClientboundKeepAlive(
                     ClientboundKeepAlive::new(keep_alive_id),
                 );
                 let criticality = Criticality::for_packet(&packet);
-                let outcome =
-                    enqueue_traced_classified(&mut writer, &mut debug, &compression, &ctx.clock, packet);
+                let outcome = enqueue_traced_classified(
+                    &mut writer,
+                    &mut debug,
+                    &compression,
+                    &ctx.clock,
+                    packet,
+                );
                 if is_mandatory_overflow(criticality, outcome) {
                     // A full Critical queue means the client cannot drain even
                     // keep-alives: the Layer-B mirror of the router's mandatory
@@ -304,26 +338,46 @@ pub(super) async fn enter_play(
                         "outbound overflow: a mandatory keep-alive was dropped at the connection writer"
                     ));
                 }
-                if let Err(err) = flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout).await {
-                    break Err(err);
-                }
-                observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
-            }
-            _ = chunk_pump.tick() => {
-                // Advance the view one bounded batch toward full view distance from
-                // the current center, even if the player never moved. Bounded per
-                // pump, so this paces the backlog out without flooding the socket.
-                if let Err(err) =
-                    apply_chunk_stream(ctx, &mut writer, &mut chunk_stream, &mut debug, &compression).await
+                if let Err(err) = guard_play_work(
+                    liveness.next_deadline(),
+                    flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+                )
+                .await
                 {
                     break Err(err);
                 }
-                if let Err(err) = flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout).await {
+                if let Err(err) = liveness.keep_alive_sent(keep_alive_id, Instant::now()) {
+                    break Err(err.into());
+                }
+                observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
+            }
+            PlayWake::Chunks => {
+                // Advance the view one bounded batch toward full view distance from
+                // the current center, even if the player never moved. Bounded per
+                // pump, so this paces the backlog out without flooding the socket.
+                if let Err(err) = apply_chunk_stream(
+                    ctx,
+                    &mut writer,
+                    &mut chunk_stream,
+                    &mut debug,
+                    &compression,
+                    liveness.next_deadline(),
+                )
+                .await
+                {
+                    break Err(err);
+                }
+                if let Err(err) = guard_play_work(
+                    liveness.next_deadline(),
+                    flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+                )
+                .await
+                {
                     break Err(err);
                 }
                 observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
             }
-            outbound = handle.recv() => match outbound {
+            PlayWake::Outbound(outbound) => match outbound {
                 // Clientbound simulation output: queue and flush to the socket.
                 Some(msg) => {
                     // The envelope carries the criticality AND priority the router
@@ -360,8 +414,14 @@ pub(super) async fn enter_play(
                     if let ClientboundPlayPacket::GameEvent(event) = &packet {
                         mirror_game_mode_change(event, &mut inventory);
                     }
-                    let outcome =
-                        enqueue_traced(&mut writer, &mut debug, &compression, &ctx.clock, priority, packet);
+                    let outcome = enqueue_traced(
+                        &mut writer,
+                        &mut debug,
+                        &compression,
+                        &ctx.clock,
+                        priority,
+                        packet,
+                    );
                     if is_mandatory_overflow(criticality, outcome) {
                         break Err(anyhow::anyhow!(
                             "outbound overflow: a mandatory clientbound packet was dropped at the connection writer"
@@ -373,7 +433,12 @@ pub(super) async fn enter_play(
                     // batching several messages before a flush must NOT be introduced
                     // here without re-establishing that ordering, or a dropped resync
                     // could leave the ack behind.
-                    if let Err(err) = flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout).await {
+                    if let Err(err) = guard_play_work(
+                        liveness.next_deadline(),
+                        flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+                    )
+                    .await
+                    {
                         break Err(err);
                     }
                     observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
@@ -381,36 +446,43 @@ pub(super) async fn enter_play(
                 // The router dropped the session.
                 None => break Ok(()),
             },
-            read = timeout(ctx.io_timeout, stream.read(&mut read_buf)) => {
+            PlayWake::Read(read) => {
                 let outcome = match read {
-                    Err(_) => break Err(anyhow::anyhow!("play socket read timed out")),
-                    Ok(Err(err)) => break Err(err.into()),
-                    Ok(Ok(0)) => break Ok(()),
-                    Ok(Ok(n)) => read_and_pump(
-                        &mut decoder,
-                        &compression,
-                        ctx,
-                        player,
-                        name.as_str(),
-                        &mut writer,
-                        &mut stream,
-                        &mut chunk_stream,
-                        &mut chat_limiter,
-                        &mut budget,
-                        &mut inventory,
-                        &mut window_state,
-                        &mut player_yaw,
-                        &mut player_pitch,
-                        &mut debug,
-                        &read_buf[..n],
-                    ).await,
+                    Err(err) => break Err(err.into()),
+                    Ok(0) => break Ok(()),
+                    Ok(n) => {
+                        read_and_pump(
+                            &mut decoder,
+                            &compression,
+                            ctx,
+                            player,
+                            name.as_str(),
+                            &mut writer,
+                            &mut stream,
+                            &mut chunk_stream,
+                            &mut chat_limiter,
+                            &mut budget,
+                            &mut inventory,
+                            &mut window_state,
+                            &mut player_yaw,
+                            &mut player_pitch,
+                            &mut debug,
+                            &read_buf[..n],
+                            &mut liveness,
+                        )
+                        .await
+                    }
                 };
                 if let Err(err) = outcome {
                     break Err(err);
                 }
-            },
+            }
         }
     };
+
+    // Deadlines close the peer before persistence teardown, whose durability
+    // awaits may legitimately take longer than a network response window.
+    drop(stream);
 
     // The play link has ended (clean close, EOF, shutdown, or error). Sample the
     // final outbound queue depth and dump the retained traces (acceptance:
@@ -482,11 +554,11 @@ pub(super) async fn enter_play(
     result
 }
 
-/// Maps a typed decode failure retained in the Play result to its leave reason.
+/// Maps a typed decode or liveness failure to its session leave reason.
 ///
-/// Non-decode exits keep the pre-existing cooperative `ServerShutdown` reason.
-/// `anyhow` preserves the concrete error in its chain, so both app body errors
-/// (`DecodeError`) and framing/compression errors (`FrameDecodeError`) survive.
+/// Unclassified exits keep the pre-existing cooperative `ServerShutdown` reason.
+/// `anyhow` preserves concrete decode and liveness errors in its chain, retaining
+/// their peer-failure classification through connection teardown.
 fn disconnect_reason_for_result(result: &anyhow::Result<()>) -> DisconnectReason {
     let Err(error) = result else {
         return DisconnectReason::ServerShutdown;
@@ -497,7 +569,110 @@ fn disconnect_reason_for_result(result: &anyhow::Result<()>) -> DisconnectReason
     if let Some(error) = error.downcast_ref::<FrameDecodeError>() {
         return DisconnectReason::from_disconnect_class(error.disconnect_class());
     }
+    if let Some(error) = error.downcast_ref::<KeepAliveError>() {
+        return error
+            .disconnect_reason()
+            .unwrap_or(DisconnectReason::ServerShutdown);
+    }
+    if let Some(error) = error.downcast_ref::<LivenessActivityError>() {
+        return error
+            .disconnect_reason()
+            .unwrap_or(DisconnectReason::ServerShutdown);
+    }
+    if let Some(error) = error.downcast_ref::<LivenessTimeout>() {
+        return error.disconnect_reason();
+    }
     DisconnectReason::ServerShutdown
+}
+
+/// Starts Play progress tracking with the configured I/O window and vanilla's
+/// fifteen-second Keep Alive response limit. A shorter I/O window still wins.
+pub(super) fn play_liveness(
+    now: Instant,
+    io_timeout: std::time::Duration,
+) -> anyhow::Result<ConnectionLiveness> {
+    let config = LivenessConfig::new(io_timeout, io_timeout, DEFAULT_KEEP_ALIVE_TIMEOUT);
+    let mut liveness = ConnectionLiveness::new(now, config);
+    liveness.enter_state(ConnectionState::Play, now)?;
+    Ok(liveness)
+}
+
+/// Bounds cancellation-safe chunk or socket work by the currently active
+/// absolute deadline. Capture this after packet handling refreshes progress;
+/// inventory transactions are never interrupted by this guard.
+pub(super) async fn guard_play_work<T>(
+    deadline: Option<LivenessDeadline>,
+    work: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    let deadline = deadline.ok_or_else(|| anyhow::anyhow!("Play liveness is closed"))?;
+    tokio::select! {
+        biased;
+        () = sleep_until(deadline.at()) => Err(deadline.timeout().into()),
+        result = work => result,
+    }
+}
+
+/// A selected work source; shutdown and deadlines have already won priority.
+#[allow(clippy::large_enum_variant)] // bounded stack-local result; avoid per-packet allocation
+enum PlayWake {
+    Read(std::io::Result<usize>),
+    Outbound(Option<OutboundMessage>),
+    KeepAlive,
+    Chunks,
+}
+
+/// Rotates the first-polled source after every selection. A continuously ready
+/// outbound route therefore cannot starve a ready inbound Keep Alive echo, and
+/// timers remain serviceable under continuous inbound/outbound traffic.
+async fn next_play_wake<O, R>(
+    next_work: &mut u8,
+    keep_alive: &mut Interval,
+    chunks: &mut Interval,
+    outbound: O,
+    read: R,
+) -> PlayWake
+where
+    O: std::future::Future<Output = Option<OutboundMessage>>,
+    R: std::future::Future<Output = std::io::Result<usize>>,
+{
+    tokio::pin!(outbound, read);
+    let wake = match *next_work {
+        0 => tokio::select! {
+            biased;
+            result = &mut read => PlayWake::Read(result),
+            result = &mut outbound => PlayWake::Outbound(result),
+            _ = keep_alive.tick() => PlayWake::KeepAlive,
+            _ = chunks.tick() => PlayWake::Chunks,
+        },
+        1 => tokio::select! {
+            biased;
+            result = &mut outbound => PlayWake::Outbound(result),
+            _ = keep_alive.tick() => PlayWake::KeepAlive,
+            _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut read => PlayWake::Read(result),
+        },
+        2 => tokio::select! {
+            biased;
+            _ = keep_alive.tick() => PlayWake::KeepAlive,
+            _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut read => PlayWake::Read(result),
+            result = &mut outbound => PlayWake::Outbound(result),
+        },
+        _ => tokio::select! {
+            biased;
+            _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut read => PlayWake::Read(result),
+            result = &mut outbound => PlayWake::Outbound(result),
+            _ = keep_alive.tick() => PlayWake::KeepAlive,
+        },
+    };
+    *next_work = match wake {
+        PlayWake::Read(_) => 1,
+        PlayWake::Outbound(_) => 2,
+        PlayWake::KeepAlive => 3,
+        PlayWake::Chunks => 0,
+    };
+    wake
 }
 
 /// Sends a join request to the driver and awaits the session handle.
@@ -552,6 +727,7 @@ async fn read_and_pump(
     player_pitch: &mut f32,
     debug: &mut SessionDebug,
     bytes: &[u8],
+    liveness: &mut ConnectionLiveness,
 ) -> anyhow::Result<()> {
     decoder.push(bytes)?;
     pump_serverbound(
@@ -569,9 +745,14 @@ async fn read_and_pump(
         player_yaw,
         player_pitch,
         debug,
+        liveness,
     )
     .await?;
-    flush_writer(writer, stream, compression, ctx.io_timeout).await
+    guard_play_work(
+        liveness.next_deadline(),
+        flush_writer(writer, stream, compression, ctx.io_timeout),
+    )
+    .await
 }
 
 /// Drains every buffered serverbound play frame and handles each: a
@@ -598,6 +779,7 @@ async fn pump_serverbound(
     player_yaw: &mut f32,
     player_pitch: &mut f32,
     debug: &mut SessionDebug,
+    liveness: &mut ConnectionLiveness,
 ) -> anyhow::Result<()> {
     // One real-time reading for the whole drained batch: every frame buffered from
     // this read is charged against the budget at the same instant, so a single
@@ -655,6 +837,7 @@ async fn pump_serverbound(
             &body,
             debug,
             compression,
+            liveness,
         )
         .await?;
     }
@@ -683,6 +866,106 @@ fn mirror_game_mode_change(event: &GameEvent, inventory: &mut PlayerInventory) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn ready_outbound_work_cannot_starve_ready_inbound_echoes_or_timers() {
+        use std::future::ready;
+        use std::time::Duration;
+
+        let mut liveness =
+            play_liveness(Instant::now(), Duration::from_secs(30)).expect("Play tracker");
+        liveness
+            .keep_alive_sent(7, Instant::now())
+            .expect("request sent");
+        let mut keep_alive = interval_at(Instant::now(), Duration::from_secs(1));
+        let mut chunks = interval_at(Instant::now(), Duration::from_secs(1));
+        let mut next_work = 1; // An outbound burst starts ahead of the echo.
+        let mut choices = Vec::new();
+        for _ in 0..4 {
+            match next_play_wake(
+                &mut next_work,
+                &mut keep_alive,
+                &mut chunks,
+                ready(None),
+                ready(Ok(9)),
+            )
+            .await
+            {
+                PlayWake::Outbound(_) => choices.push("outbound"),
+                PlayWake::KeepAlive => choices.push("keep-alive"),
+                PlayWake::Chunks => choices.push("chunks"),
+                PlayWake::Read(_) => {
+                    liveness
+                        .keep_alive_received(7, Instant::now())
+                        .expect("echo serviced");
+                    choices.push("read");
+                }
+            }
+        }
+        assert_eq!(choices, ["outbound", "keep-alive", "chunks", "read"]);
+        assert_eq!(liveness.outstanding_keep_alive(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn active_response_deadline_interrupts_stalled_cancellation_safe_work() {
+        use std::future::poll_fn;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
+        use std::task::Poll;
+        use std::time::Duration;
+        use tokio::time::advance;
+
+        let mut liveness =
+            play_liveness(Instant::now(), Duration::from_secs(30)).expect("Play tracker");
+        liveness
+            .keep_alive_sent(7, Instant::now())
+            .expect("request sent");
+        let started = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&started);
+        let stalled = tokio::spawn(guard_play_work(
+            liveness.next_deadline(),
+            poll_fn(move |_| {
+                observed.store(true, Ordering::Relaxed);
+                Poll::<anyhow::Result<()>>::Pending
+            }),
+        ));
+        tokio::task::yield_now().await;
+        assert!(
+            started.load(Ordering::Relaxed),
+            "fixture actually started work"
+        );
+        advance(Duration::from_secs(14)).await;
+        assert!(!stalled.is_finished());
+        advance(Duration::from_secs(1)).await;
+        let error = stalled
+            .await
+            .expect("guard task returned")
+            .expect_err("stalled work timed out");
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&LivenessTimeout::KeepAlive { id: 7 })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn work_after_valid_activity_uses_the_refreshed_progress_deadline() {
+        use std::future::ready;
+        use std::time::Duration;
+        use tokio::time::advance;
+
+        let mut liveness =
+            play_liveness(Instant::now(), Duration::from_secs(5)).expect("Play tracker");
+        advance(Duration::from_secs(4)).await;
+        liveness
+            .valid_packet_observed(Instant::now())
+            .expect("valid packet refreshes progress");
+        advance(Duration::from_secs(2)).await;
+        guard_play_work(liveness.next_deadline(), ready(Ok(())))
+            .await
+            .expect("the expired pre-packet deadline is not reused");
+    }
 
     #[test]
     fn typed_decode_failures_reach_the_session_leave_reason() {
@@ -728,6 +1011,56 @@ mod tests {
         assert_eq!(
             disconnect_reason_for_result(&Ok(())),
             DisconnectReason::ServerShutdown,
+        );
+    }
+
+    #[test]
+    fn liveness_failures_retain_their_session_leave_reason() {
+        for (error, reason) in [
+            (
+                anyhow::Error::new(KeepAliveError::Mismatched {
+                    expected: 1,
+                    received: 2,
+                }),
+                DisconnectReason::ProtocolViolation,
+            ),
+            (
+                anyhow::Error::new(KeepAliveError::Unexpected { received: 1 }),
+                DisconnectReason::ProtocolViolation,
+            ),
+            (
+                anyhow::Error::new(LivenessTimeout::KeepAlive { id: 1 }),
+                DisconnectReason::KeepAliveTimeout,
+            ),
+            (
+                anyhow::Error::new(LivenessActivityError::TimedOut(
+                    LivenessTimeout::StateProgress {
+                        state: ConnectionState::Play,
+                    },
+                )),
+                DisconnectReason::ProgressTimeout,
+            ),
+        ] {
+            assert_eq!(disconnect_reason_for_result(&Err(error)), reason);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn configured_io_window_is_an_absolute_play_progress_limit() {
+        use std::time::Duration;
+        use tokio::time::advance;
+
+        let mut liveness =
+            play_liveness(Instant::now(), Duration::from_secs(1)).expect("Play tracker");
+        liveness
+            .keep_alive_sent(1, Instant::now())
+            .expect("request sent");
+        advance(Duration::from_secs(1)).await;
+        assert_eq!(
+            liveness.poll_timeout(Instant::now()),
+            Some(LivenessTimeout::StateProgress {
+                state: ConnectionState::Play
+            })
         );
     }
 
