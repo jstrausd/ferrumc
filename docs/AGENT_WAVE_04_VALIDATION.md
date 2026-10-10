@@ -320,9 +320,10 @@ Strict Clippy/Fmt/Rustdoc, alle26 Autorenfreezehashes und16 Evidenzhashes grün.
 Frischer tatsächlicher Original-JAR-Reexport unter Python `-O` ist in allen
 vier Artefakten bytegleich mit beiden Autorenexporten; acht unabhängige
 Producer-/Herkunftsnegativprüfungen bestehen. Onlinecrafting bleibt offen.
-Die neue Gesamt-CI wurde für diesen Runtimehead ausgelöst:
+Die Gesamt-CI für diesen Runtimehead ist vollständig erfolgreich:
 [Lauf38085964215](https://github.com/jstrausd/ferrumc/actions/runs/38085964215),
-noch laufend. Kein älterer Workflowlauf wird dafür als Nachweis verwendet.
+einschließlich aller unabhängigen Client-/Restart-/Java-Probes.
+Kein älterer Workflowlauf wird dafür als Nachweis verwendet.
 
 Root hat außerdem126 tatsächliche Paper-NoiseChunk-Konstruktor-/Materialdensity-
 Driverläufe ausgeführt:84 Nearcases für7 Settings/2 Seeds/6 Chunks sowie42
@@ -331,7 +332,10 @@ normal/-O-Reexport und separat geprüfte exakte Matrix bytegleich. BitsSHA256
 `9dd6827609a0a6b65968b239a588fd60e21121097520501ff5828eb19655a9db`;
 acht Dateien in `.codex-tmp/gen05_3-root-chunk-goldens.freeze.json`, FreezeSHA
 `80e17003c7229cf769bda08a3b90094f27fc9bded97032d1991a294813f6bb20`.
-Das ist eine tatsächliche Paperreferenz, noch kein bestandener Rustvergleich.
+Der Rustconsumer hat anschließend alle7.077.888 Samples bitgenau bestanden
+(`.codex-tmp/gen05_3-root126-rust-compare.log`). Das belegt Numericalparität;
+Wrapper-/Counter-/Lifecycle-/Failureabnahme und unabhängiger Review laufen
+weiter. Weder natürliche Materialchunks noch Livegameplay sind damit abgenommen.
 
 Ein erster Amplified-Numericdrift wurde bis zu tatsächlichen RNG-/Noiseleaves
 lokalisiert. Root hat die nextDouble-Bytecodes beider gehashten Originalinners

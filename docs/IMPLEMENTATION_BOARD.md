@@ -157,6 +157,9 @@ Gesamt-CI für `34acc8e9`, einschließlich STORAGE-ENTITY001.2, ist erfolgreich:
 [Lauf38082651584](https://github.com/jstrausd/ferrumc/actions/runs/38082651584).
 Die neue Gesamt-CI für `290e5343`, einschließlich GEN-05.2, ist erfolgreich:
 [Lauf38083747393](https://github.com/jstrausd/ferrumc/actions/runs/38083747393).
+Gesamt-CI für `572083d1`, einschließlich aller normalen Craftingrezepte, ist
+ebenfalls erfolgreich:
+[Lauf38085964215](https://github.com/jstrausd/ferrumc/actions/runs/38085964215).
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.
@@ -167,6 +170,9 @@ Nach CLEAN folgen direkt
 [GEN-05.4 Aquifer/Ore/Material](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) und
 [DUR-04.1 Player-/Item-Entityconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md).
 Diese beiden konkreten Briefs sind vorbereitet und noch nicht vergeben.
+Zusätzlich ist [SRV-05.2](agent-tasks/SRV-05_2_SINGLE_ITEM_RECIPES_FUEL.md)
+für alle114 Koch-/254 Steinschneiderrezepte und originale Brennstoffe vorbereitet;
+Vergabe folgt nach frei gewordenem Reviewslot. Er aktiviert noch keinen Ofen.
 Root hat zusätzlich49 echte Paper-Materialloops mit3.325.952 States zur
 Ressourcenplanung ausgeführt; normal/-O bytegleich. Das ist keine Rust- oder
 Spielabnahme. DUR-04.1 berücksichtigt die tatsächliche verbleibende Lücke:

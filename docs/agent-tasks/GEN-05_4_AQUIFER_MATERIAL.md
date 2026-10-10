@@ -27,8 +27,13 @@ pro-Blockallokation und keine Ausgabe eines unvollständigen Chunks.
 
 Minecraft1.21.8/772, PaperBuild60 Commit
 `29c8822d90899c89d2689338e81a98f690bcba12`. Neue Chunkpfade behalten GEN-05.3s
-ausdrückliche Paper-Endpolicy. GEN-05.2s öffentliche Vanilla-Scalar-/Climate-
-Verträge und bisherige Fixtures bleiben unverändert.
+ausdrückliche Paper-Endpolicy und private PaperBuild60-Samplingbasis.
+Tatsächliche Paper-`nextDouble`-Methoden in XoroshiroRandomSource und
+BitRandomSource runden über `l2f/fmul/f2d`; Vanilla verwendet `l2d/dmul`.
+Die private .3-RNG-/Noiseseam wird für den Materialsink weiterverwendet,
+einschließlich tatsächlich benötigter Aquifer-/Ore-Zufallsdraws. Keine globale
+Rundung fertiger Noiseergebnisse. GEN-05.2s öffentliche Vanilla-Scalar-/Climate-
+und Random-/Noiseverträge sowie bisherige Fixtures bleiben unverändert.
 
 Root hat die vollständigen angewandten `Aquifer`- und `OreVeinifier`-Quellen,
 die tatsächlichen Materialconstructor-/getInterpolatedStatepfade,
@@ -130,6 +135,25 @@ Dieser Census begründet zukünftige Ressourcenadmission und beansprucht weder
 Rust-/Gameplay-/Serverboot-/Drop-in- noch Performanceabnahme.
 
 ## Tatsächliche Abnahme
+
+Root hat vor Vergabe zusätzlich die vollständige .3-Matrix als tatsächliche
+Paper-Materialreferenz ausgeführt:126 Chunks/7.077.888 Records mit originalen
+Blockstate-IDs und Fluidflags.84 Nearcases (7Settings×2Seeds×6Chunks) plus42
+ferne Endcases (7Seeds×6Chunks). Echte `createFluidPicker`-/
+`getInterpolatedState`-Methoden und vollständiger NoiseChunkdriver; weder
+Aquifer noch Ore-/Materialformeln wurden nachgeschrieben. Originale25
+Class-CodeSources, frischer Helperorigin und alle120 Artefaktpins vor/nach
+geprüft. Normal/-O-Reexport vollständig bytegleich, separate genaue
+Matrixprüfung und lückenlose Recordbereiche.
+
+Artefakte `.codex-tmp/gen05_4-root-material-goldens{,-normal,-optimized}/`.
+State-/Flagdatei35.389.440Bytes, SHA256
+`e27a497fbbed2adb8060e3bc9556f6341a0ecb6ab5eb0ef565e70570113ed384`;
+JSONL32.562Bytes, SHA256
+`7782ac995e1adaa7c58c23478101521d633764babb4b5ec46e7fa4124fcd3455`.
+Acht-Dateien-Freeze `.codex-tmp/gen05_4-root-material-goldens.freeze.json`,
+SHA256 `bb9f9f888d11e93c17ff099ac8e5452c6d76fc9c4c2a42ba4319fdf6541b0f3f`.
+Dies ist eine Paperreferenz, noch kein Rustmaterial- oder Gameplaypass.
 
 Der neue gepinnte Helper ruft echte `NoiseChunk.getInterpolatedState`,
 Aquifer-/Ore-/Globalfluidmethoden aus dem Original-/Paper-JAR auf. Keine
