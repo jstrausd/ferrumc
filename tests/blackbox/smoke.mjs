@@ -481,10 +481,11 @@ async function placeStateful(client, state, o) {
   if (o.yaw !== undefined) { lookYaw(client, state, o.yaw); await sleep(150); }
 
   const seq = nextSeq();
-  placeBlock(client, o.clickLoc, o.dir, seq, o.cursor);
-
   const [ex, ey, ez] = o.expectLoc;
   const key = blockKey(ex, ey, ez);
+  // An ACK can precede World traffic; old cell observations cannot prove this edit.
+  state.blockChanges.delete(key);
+  placeBlock(client, o.clickLoc, o.dir, seq, o.cursor);
   await waitUntil(
     () => state.blockChanges.has(key) && state.acks.has(seq),
     TIMEOUTS.edit, `block_change@${key} + ack ${seq} for ${o.label}`,
@@ -507,6 +508,7 @@ async function breakAndVerify(client, state, o) {
   const [bx, by, bz] = o.loc;
   const key = blockKey(bx, by, bz);
   const seq = nextSeq();
+  state.blockChanges.delete(key);
   digBlock(client, { x: bx, y: by, z: bz }, 0, seq); // status 0 = start (insta in creative)
   await waitUntil(
     () => state.blockChanges.get(key) === 0 && state.acks.has(seq),
@@ -632,6 +634,44 @@ async function buildAndVerifyEdits(client, state) {
     }
   }
 
+  // Existing fences must react to regular placement and break of any neighbor.
+  const fence = [5, 64, 10];
+  const neighbor = [6, 64, 10];
+  const fenceKey = blockKey(...fence);
+  await placeStateful(client, state, {
+    label: 'isolated oak fence', slot: 5, item: 'oak_fence',
+    clickLoc: { x: 5, y: 63, z: 10 }, dir: 1,
+    expectLoc: fence, expectName: 'oak_fence', expectProps: { east: false, waterlogged: false },
+  });
+  async function verifyFenceEast(east, label) {
+    await waitUntil(() => {
+      const observed = state.blockChanges.get(fenceKey);
+      return observed !== undefined && decodeState(observed).props.east === east;
+    }, TIMEOUTS.edit, `oak fence east=${east} after ${label}`);
+    const got = decodeState(state.blockChanges.get(fenceKey));
+    assert(got.name === 'oak_fence' && got.props.waterlogged === false,
+      `fence family/waterlogging changed after ${label}`);
+    pass(`existing oak fence east=${east} after ${label}`);
+  }
+  for (const [index, item] of ['stone', 'spruce_fence', 'stone'].entries()) {
+    state.blockChanges.delete(fenceKey);
+    await placeStateful(client, state, {
+      label: `${item} beside existing fence`, slot: 6, item,
+      clickLoc: { x: 6, y: 63, z: 10 }, dir: 1,
+      expectLoc: neighbor, expectName: item,
+      expectProps: item === 'spruce_fence' ? { west: true } : {},
+    });
+    await verifyFenceEast(true, `${item} placement`);
+    if (index === 2) break;
+    state.blockChanges.delete(fenceKey);
+    await breakAndVerify(client, state, { label: `break neighboring ${item}`, loc: neighbor });
+    await verifyFenceEast(false, `${item} break`);
+  }
+  const fencePattern = [
+    { pos: fence, name: 'oak_fence', props: { east: true, waterlogged: false } },
+    { pos: neighbor, name: 'stone' },
+  ];
+
   pass('Set-slot + stateful place + break all verified against the server response.');
 
   // The spawn-chunk portion of the persistence pattern.
@@ -641,6 +681,7 @@ async function buildAndVerifyEdits(client, state) {
     { pos: [10, 64, 7], name: 'oak_stairs', props: { facing: 'south', half: 'bottom' } },
     { pos: [10, 64, 9], name: 'air' }, // broken slab stays gone
     ...torchPattern,
+    ...fencePattern,
   ];
 }
 
