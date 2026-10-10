@@ -33,6 +33,26 @@
 - Ready inbound, outbound, timers, and operator graph changes rotate in bounded
   round-robin order below shutdown/deadline priority. Continuous revisions cannot
   starve echoes or chunk/output work.
+- Each connection assigns every join, command, plugin or correction position
+  sync a fresh teleport ID, wrapping from `i32::MAX-1` to zero, and retains only
+  the newest pending acknowledgement. A stale ID is ignored; the current ID
+  without a pending teleport is a fatal protocol violation. Pending teleports
+  suppress client coordinates, movement callbacks and movement-driven chunk
+  work; finite validated look can still be admitted. The authoritative server
+  destination is persisted independently of the client's acknowledgement.
+- Before each non-Keep-Alive input, the connection freezes at most the existing
+  256-message outbound FIFO prefix and sends it one message per normal flush
+  turn. Production cannot extend that prefix; its held input runs before a new
+  prefix. At most 256 extra messages and one already frame-limited body are
+  retained (variable byte sizes). Exact Keep Alive bodies at the input head can
+  bypass this positional fence; all strict validation and deadlines still apply.
+  Teardown mirrors retained/queued authoritative syncs in bounded FIFO order
+  before leave-save. A teleport adds no separate resend/response timer: the
+  existing absolute Play liveness and shutdown limits remain in force.
+  The ACK gate protects connection-issued syncs, and the frame fence orders
+  outputs already queued when captured. External teleports queued concurrently
+  after that snapshot require a separate producer/consumer epoch-admission
+  contract; this App snapshot does not establish global atomic tick ordering.
 - Cancellation-safe chunk/socket awaits honor the active absolute deadline.
   Stateful inventory packet handlers and container transactions are never forcibly canceled;
   transactions complete before their updated inventory is persisted.

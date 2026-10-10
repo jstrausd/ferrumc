@@ -20,7 +20,8 @@ use crate::inventory::{PlayerInventory, WINDOW_ID};
 use super::chunk_stream::ChunkStream;
 use super::context::ConnContext;
 use super::outbound::{enqueue_traced_classified, flush_writer, send_mandatory};
-use super::{spawn_sync, GAME_EVENT_CHANGE_GAMEMODE, JOIN_TELEPORT_ID};
+use super::teleport::PendingTeleport;
+use super::{spawn_sync, GAME_EVENT_CHANGE_GAMEMODE};
 
 /// `Game Event` reason `13`: "level chunks load start". Sent right after
 /// `JoinGame` to tell the client the spawn chunks are on their way; without it
@@ -79,6 +80,7 @@ pub(super) async fn send_join_kit(
     is_returning: bool,
     inventory: &PlayerInventory,
     chunk_stream: &mut ChunkStream,
+    pending_teleport: &mut PendingTeleport,
 ) -> anyhow::Result<()> {
     let kit = &ctx.join_kit;
     let clock = &ctx.clock;
@@ -148,12 +150,9 @@ pub(super) async fn send_join_kit(
         debug,
         compression,
         clock,
-        ClientboundPlayPacket::SynchronizePlayerPosition(spawn_sync(
-            JOIN_TELEPORT_ID,
-            position,
-            yaw,
-            pitch,
-        )),
+        ClientboundPlayPacket::SynchronizePlayerPosition(
+            pending_teleport.issue(&spawn_sync(0, position, yaw, pitch)),
+        ),
     );
     // Player Abilities: tell a creative client it may fly and instabuild, so the
     // flight + creative-reach UX matches the creative mode JoinGame advertised.

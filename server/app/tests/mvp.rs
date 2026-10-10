@@ -377,6 +377,13 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
     // relative move back from (10, 64, 9).
     send_command(&mut admin, "spawn").await?;
     observe_move(&mut viewer, admin_eid, (10.0, 64.0, 9.0), spawn).await?;
+    // A real client consumes/ACKs its own teleport before reporting a new move.
+    read_until(&mut admin, |packet| {
+        matches!(packet,
+        ClientboundPlayPacket::SynchronizePlayerPosition(sync)
+            if (sync.x(), sync.y(), sync.z()) == spawn)
+    })
+    .await?;
 
     // Point 8: /gamemode is accepted over the wire (the connection survives), and
     // a follow-up move still broadcasts — proving the command was consumed

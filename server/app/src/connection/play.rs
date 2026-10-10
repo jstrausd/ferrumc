@@ -31,6 +31,7 @@ use crate::window::WindowState;
 use super::chunk_stream::{apply_chunk_stream, mirror_server_teleport, ChunkStream};
 use super::context::ConnContext;
 use super::handlers::handle_play_body;
+use super::ingress::{is_exact_keep_alive, IngressFence};
 use super::join::send_join_kit;
 use super::outbound::{
     enqueue_traced, enqueue_traced_classified, flush_writer, is_mandatory_overflow,
@@ -38,6 +39,7 @@ use super::outbound::{
 };
 use super::rate_limiter::ChatRateLimiter;
 use super::serverbound_budget::ServerboundBudget;
+use super::teleport::{PendingTeleport, TeleportConfirmationError};
 use super::{send_sim_command_accepted, Connection, GAME_EVENT_CHANGE_GAMEMODE, READ_CHUNK};
 
 /// Joins the simulation and replays the join kit, then pumps the play link until
@@ -206,6 +208,8 @@ pub(super) async fn enter_play(
     // mode so the creative-slot gate accepts this player and later enforcement
     // (creative no-decrement, break speed, flight) reads the right mode.
     let mut writer = PlayWriter::with_defaults(ctx.limits);
+    let mut pending_teleport = PendingTeleport::default();
+    let mut ingress = IngressFence::default();
     // Subscribe before the initial graph. Any concurrent mutation during the
     // join kit remains pending and triggers a fresh graph after the handoff.
     let mut operator_changes = ctx.policy.operators().subscribe();
@@ -234,6 +238,7 @@ pub(super) async fn enter_play(
             is_returning,
             &inventory,
             &mut chunk_stream,
+            &mut pending_teleport,
         )
         .await?;
         // Start absolute deadlines only after the kit reached the socket.
@@ -296,6 +301,9 @@ pub(super) async fn enter_play(
             &mut player_pitch,
             &mut debug,
             &mut liveness,
+            &mut pending_teleport,
+            &mut ingress,
+            &mut handle,
         )
         .await
         {
@@ -368,6 +376,7 @@ pub(super) async fn enter_play(
                 "Play liveness closed without a disconnect reason"
             ));
         };
+        let fenced = ingress.is_fenced();
         let wake = tokio::select! {
             biased;
             _ = shutdown.changed() => break Ok(()),
@@ -376,8 +385,20 @@ pub(super) async fn enter_play(
                 &mut next_work,
                 &mut keep_alive,
                 &mut chunk_pump,
-                handle.recv(),
-                stream.read(&mut read_buf),
+                async {
+                    if let Some(message) = ingress.pop_outbound() {
+                        Some(message)
+                    } else {
+                        handle.recv().await
+                    }
+                },
+                async {
+                    if fenced {
+                        std::future::pending().await
+                    } else {
+                        stream.read(&mut read_buf).await
+                    }
+                },
                 operator_changes.changed(),
             ) => wake,
         };
@@ -482,43 +503,19 @@ pub(super) async fn enter_play(
                     // drop a mandatory packet; this mirrors that here so a full
                     // priority queue can never silently drop a mandatory frame
                     // (despawn/spawn/ack/correction/resync) either.
-                    let criticality = msg.criticality();
-                    let priority = msg.priority();
-                    let packet = msg.into_packet();
-                    // A server-driven absolute teleport (a router `Teleport` intent or
-                    // an anti-cheat `PlayerPositionCorrected`) reaches this client
-                    // through its outbound channel. Mirror it into the persistence
-                    // state so a leave-save with no follow-up client move still saves
-                    // where the server actually put the player, not the stale
-                    // pre-teleport position/look the mirror last held.
-                    if let ClientboundPlayPacket::SynchronizePlayerPosition(sync) = &packet {
-                        mirror_server_teleport(
-                            &mut chunk_stream,
-                            &mut player_yaw,
-                            &mut player_pitch,
-                            sync,
-                        );
-                    }
-                    // A server-driven game-mode change reaches this client the same
-                    // way — through its outbound channel, not this task's own writer.
-                    // Mirror it into the connection-local mode so the targeted
-                    // `/gamemode <mode> <player>` form stays in lockstep with the sim,
-                    // exactly as the self-form does inline on its own task.
-                    if let ClientboundPlayPacket::GameEvent(event) = &packet {
-                        mirror_game_mode_change(event, &mut inventory);
-                    }
-                    let outcome = enqueue_traced(
+                    if let Err(error) = queue_outbound(
+                        msg,
+                        ctx,
                         &mut writer,
+                        &mut chunk_stream,
+                        &mut inventory,
+                        &mut player_yaw,
+                        &mut player_pitch,
+                        &mut pending_teleport,
                         &mut debug,
                         &compression,
-                        &ctx.clock,
-                        priority,
-                        packet,
-                    );
-                    if is_mandatory_overflow(criticality, outcome) {
-                        break Err(anyhow::anyhow!(
-                            "outbound overflow: a mandatory clientbound packet was dropped at the connection writer"
-                        ));
+                    ) {
+                        break Err(error);
                     }
                     // One channel message is enqueued and flushed per loop turn.
                     // The router's atomic resync+ack group relies on this: the FIFO
@@ -533,6 +530,45 @@ pub(super) async fn enter_play(
                     .await
                     {
                         break Err(err);
+                    }
+                    observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
+                    // A finite prefix has made progress. Once it is empty, the
+                    // held frame runs even if new outputs remain continuously ready.
+                    if let Err(error) = pump_serverbound(
+                        &mut decoder,
+                        &compression,
+                        ctx,
+                        player,
+                        name.as_str(),
+                        &mut writer,
+                        &mut chunk_stream,
+                        &mut chat_limiter,
+                        &mut budget,
+                        &mut inventory,
+                        &mut window_state,
+                        &mut player_yaw,
+                        &mut player_pitch,
+                        &mut debug,
+                        &mut liveness,
+                        &mut pending_teleport,
+                        &mut ingress,
+                        &mut handle,
+                    )
+                    .await
+                    {
+                        break Err(error);
+                    }
+                    // Releasing the held input can enqueue its own response or
+                    // inline teleport. Flush that work now: rare chunk/Keep
+                    // Alive timers and a silent client cannot be its trigger.
+                    // The FIFO message above has already had its separate flush.
+                    if let Err(error) = guard_play_work(
+                        liveness.next_deadline(),
+                        flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+                    )
+                    .await
+                    {
+                        break Err(error);
                     }
                     observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
                 }
@@ -562,6 +598,9 @@ pub(super) async fn enter_play(
                             &mut debug,
                             &read_buf[..n],
                             &mut liveness,
+                            &mut pending_teleport,
+                            &mut ingress,
+                            &mut handle,
                         )
                         .await
                     }
@@ -576,6 +615,15 @@ pub(super) async fn enter_play(
     // Deadlines close the peer before persistence teardown, whose durability
     // awaits may legitimately take longer than a network response window.
     drop(stream);
+    mirror_queued_for_leave(
+        &mut handle,
+        &mut ingress,
+        &mut chunk_stream,
+        &mut inventory,
+        &mut player_yaw,
+        &mut player_pitch,
+        &mut pending_teleport,
+    );
 
     if let Some(bridge) = ctx.java_bridge.as_ref().filter(|_| java_join_attempted) {
         match bridge
@@ -742,6 +790,9 @@ fn disconnect_reason_for_result(result: &anyhow::Result<()>) -> DisconnectReason
             .disconnect_reason()
             .unwrap_or(DisconnectReason::ServerShutdown);
     }
+    if error.downcast_ref::<TeleportConfirmationError>().is_some() {
+        return DisconnectReason::ProtocolViolation;
+    }
     if let Some(error) = error.downcast_ref::<LivenessTimeout>() {
         return error.disconnect_reason();
     }
@@ -907,6 +958,9 @@ async fn read_and_pump(
     debug: &mut SessionDebug,
     bytes: &[u8],
     liveness: &mut ConnectionLiveness,
+    pending_teleport: &mut PendingTeleport,
+    ingress: &mut IngressFence,
+    handle: &mut PlayerSessionHandle,
 ) -> anyhow::Result<()> {
     decoder.push(bytes)?;
     pump_serverbound(
@@ -925,6 +979,9 @@ async fn read_and_pump(
         player_pitch,
         debug,
         liveness,
+        pending_teleport,
+        ingress,
+        handle,
     )
     .await?;
     guard_play_work(
@@ -943,7 +1000,7 @@ async fn read_and_pump(
 /// stream target. The fixed-cadence chunk timer consumes that latest target;
 /// this drain never performs chunk work itself.
 #[allow(clippy::too_many_arguments)] // one play drain: framing + policy + trace state
-async fn pump_serverbound(
+pub(super) async fn pump_serverbound(
     decoder: &mut InboundDecoder,
     compression: &CompressionState,
     ctx: &ConnContext,
@@ -959,6 +1016,9 @@ async fn pump_serverbound(
     player_pitch: &mut f32,
     debug: &mut SessionDebug,
     liveness: &mut ConnectionLiveness,
+    pending_teleport: &mut PendingTeleport,
+    ingress: &mut IngressFence,
+    handle: &mut PlayerSessionHandle,
 ) -> anyhow::Result<()> {
     // One real-time reading for the whole drained batch: every frame buffered from
     // this read is charged against the budget at the same instant, so a single
@@ -975,25 +1035,36 @@ async fn pump_serverbound(
         if Instant::now() >= deadline.at() {
             return Err(deadline.timeout().into());
         }
-        let next = match decoder.next_packet_compressed(ConnectionState::Play, compression) {
-            Ok(next) => next,
-            Err(err) => {
-                // A frame/compression-level decode error during play: count it and
-                // dump the retained traces before propagating (acceptance:
-                // decode-error).
-                ctx.metrics.record_packet_decode_error(
-                    PacketState::Play,
-                    observe::decode_error_label(&err),
-                );
-                debug.dump("play_decode_error");
-                return Err(err.into());
+        if ingress.is_fenced() {
+            return Ok(());
+        }
+        let body = if let Some(body) = ingress.take_ready_body() {
+            body
+        } else {
+            let next = match decoder.next_packet_compressed(ConnectionState::Play, compression) {
+                Ok(next) => next,
+                Err(err) => {
+                    ctx.metrics.record_packet_decode_error(
+                        PacketState::Play,
+                        observe::decode_error_label(&err),
+                    );
+                    debug.dump("play_decode_error");
+                    return Err(err.into());
+                }
+            };
+            let Some(packet) = next else { break };
+            let InboundPacket::Play(body) = packet else {
+                anyhow::bail!("non-play frame received in the play phase");
+            };
+            if is_exact_keep_alive(&body) {
+                body
+            } else {
+                ingress.hold(body, handle);
+                let Some(body) = ingress.take_ready_body() else {
+                    return Ok(());
+                };
+                body
             }
-        };
-        let Some(packet) = next else {
-            break;
-        };
-        let InboundPacket::Play(body) = packet else {
-            anyhow::bail!("non-play frame received in the play phase");
         };
         // Charge this serverbound frame against the per-connection packet budget
         // BEFORE handling it. Once the burst is drained and the sustained rate is
@@ -1025,9 +1096,99 @@ async fn pump_serverbound(
             debug,
             compression,
             liveness,
+            pending_teleport,
         )
         .await?;
     }
+    Ok(())
+}
+
+/// An accepted teleport stays authoritative when EOF/stop/deadline wins before
+/// its socket turn. Retained and channel messages keep their bounded FIFO order.
+#[allow(clippy::too_many_arguments)] // one cohesive save candidate across connection mirrors
+pub(super) fn mirror_queued_for_leave(
+    handle: &mut PlayerSessionHandle,
+    ingress: &mut IngressFence,
+    chunk_stream: &mut ChunkStream,
+    inventory: &mut PlayerInventory,
+    yaw: &mut f32,
+    pitch: &mut f32,
+    pending_teleport: &mut PendingTeleport,
+) {
+    while let Some(message) = ingress.pop_outbound() {
+        mirror_outbound(
+            message.into_packet(),
+            chunk_stream,
+            inventory,
+            yaw,
+            pitch,
+            pending_teleport,
+        );
+    }
+    for _ in 0..ferrumc_session::DEFAULT_OUTBOUND_CAPACITY {
+        let Some(message) = handle.try_recv() else {
+            break;
+        };
+        mirror_outbound(
+            message.into_packet(),
+            chunk_stream,
+            inventory,
+            yaw,
+            pitch,
+            pending_teleport,
+        );
+    }
+}
+
+/// Stamps teleports at the sole connection-owned ID authority, then mirrors
+/// already accepted changes independently of whether the socket can flush.
+fn mirror_outbound(
+    mut packet: ClientboundPlayPacket,
+    chunk_stream: &mut ChunkStream,
+    inventory: &mut PlayerInventory,
+    yaw: &mut f32,
+    pitch: &mut f32,
+    pending_teleport: &mut PendingTeleport,
+) -> ClientboundPlayPacket {
+    if let ClientboundPlayPacket::SynchronizePlayerPosition(sync) = &mut packet {
+        *sync = pending_teleport.issue(sync);
+        mirror_server_teleport(chunk_stream, yaw, pitch, sync);
+    }
+    if let ClientboundPlayPacket::GameEvent(event) = &packet {
+        mirror_game_mode_change(event, inventory);
+    }
+    packet
+}
+
+/// One FIFO output per socket flush keeps router resync-before-ack ordering.
+#[allow(clippy::too_many_arguments)] // cohesive output admission and connection mirrors
+fn queue_outbound(
+    message: OutboundMessage,
+    ctx: &ConnContext,
+    writer: &mut PlayWriter,
+    chunk_stream: &mut ChunkStream,
+    inventory: &mut PlayerInventory,
+    yaw: &mut f32,
+    pitch: &mut f32,
+    pending_teleport: &mut PendingTeleport,
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+) -> anyhow::Result<()> {
+    let criticality = message.criticality();
+    let priority = message.priority();
+    let packet = mirror_outbound(
+        message.into_packet(),
+        chunk_stream,
+        inventory,
+        yaw,
+        pitch,
+        pending_teleport,
+    );
+    let outcome = enqueue_traced(writer, debug, compression, &ctx.clock, priority, packet);
+    anyhow::ensure!(
+        !is_mandatory_overflow(criticality, outcome),
+        "outbound overflow: a mandatory clientbound packet was dropped at the connection writer"
+    );
     Ok(())
 }
 

@@ -17,7 +17,8 @@ use ferrumc_plugin_host::ResolvedDecision;
 use ferrumc_proto::generated::play::{
     ClientboundPlayPacket, CloseContainer, CommandSuggestionMatch, GameEvent,
     ServerboundPlayPacket, ServerboundSetHeldItem, SetContainerContent, SetContainerSlot,
-    SetCreativeSlot, SetPlayerPosition, TabCompleteResponse, UpdateSign, UseItemOn, WindowClick,
+    SetCreativeSlot, SetPlayerPosition, SetPlayerRotation, TabCompleteResponse, UpdateSign,
+    UseItemOn, WindowClick,
 };
 use ferrumc_proto::ProtoError;
 use ferrumc_session::{
@@ -39,7 +40,8 @@ use super::chunk_stream::{mirror_server_teleport, ChunkStream};
 use super::context::ConnContext;
 use super::outbound::{ack_sequence, enqueue_traced_classified, send_mandatory};
 use super::rate_limiter::ChatRateLimiter;
-use super::{send_sim_command_accepted, spawn_sync, GAME_EVENT_CHANGE_GAMEMODE, JOIN_TELEPORT_ID};
+use super::teleport::PendingTeleport;
+use super::{send_sim_command_accepted, spawn_sync, GAME_EVENT_CHANGE_GAMEMODE};
 
 /// Last serverbound Play packet id in protocol 772.
 ///
@@ -68,7 +70,7 @@ enum PlayBodyDecode {
 /// intentionally covers only what `FerrumC` handles. A malformed modelled packet,
 /// an impossible protocol-772 id, or trailing outer/nested bytes is a classified
 /// fatal decode error. Keep Alive echoes must match the one outstanding request
-/// before its deadline; teleport confirmations remain decoded and ignored.
+/// before its deadline; teleport confirmations release only the newest issued ID.
 /// A `ChatCommand` is dispatched locally; every other
 /// modelled packet is forwarded to the simulation unless policy vetoes it.
 /// Movement is validated atomically and admitted to the bounded shard route
@@ -90,6 +92,7 @@ pub(super) async fn handle_play_body(
     debug: &mut SessionDebug,
     compression: &CompressionState,
     liveness: &mut ConnectionLiveness,
+    pending_teleport: &mut PendingTeleport,
 ) -> anyhow::Result<()> {
     let decoded = match decode_play_body(body) {
         Ok(PlayBodyDecode::Modelled(decoded)) => decoded,
@@ -145,7 +148,34 @@ pub(super) async fn handle_play_body(
         &ctx.clock,
     ));
 
+    if let ServerboundPlayPacket::ConfirmTeleportation(confirmation) = &packet {
+        pending_teleport.confirm(confirmation.teleport_id())?;
+        return Ok(());
+    }
+
     if let Some(movement) = movement {
+        // Paper permits looking around while a teleport is pending, but neither
+        // its positional component nor plugin movement/stream effects run.
+        if pending_teleport.is_pending() {
+            if let (Some(yaw), Some(pitch)) = (movement.yaw, movement.pitch) {
+                send_sim_command_accepted(
+                    ctx,
+                    SimCommand::Event {
+                        event: NetEvent::play(
+                            player,
+                            ServerboundPlayPacket::SetPlayerRotation(SetPlayerRotation::new(
+                                yaw, pitch, 0,
+                            )),
+                        ),
+                        acceptance: None,
+                    },
+                )
+                .await?;
+                *player_yaw = yaw;
+                *player_pitch = pitch;
+            }
+            return Ok(());
+        }
         // The router must own the exact movement before any connection-local
         // state advances. A full/closed shard route returns a classified failure
         // (and may terminate the overloaded session), leaving the stream centre,
@@ -197,6 +227,7 @@ pub(super) async fn handle_play_body(
                 debug,
                 compression,
                 liveness.next_deadline(),
+                pending_teleport,
             )
             .await;
         }
@@ -358,10 +389,8 @@ pub(super) async fn handle_play_body(
             )
             .await;
         }
-        // Keep Alive was validated above. Teleport confirmation remains the
-        // pre-existing decode-only path; teleport-ID authority is a later task.
-        ServerboundPlayPacket::ConfirmTeleportation(_)
-        | ServerboundPlayPacket::ServerboundKeepAlive(_) => return Ok(()),
+        // Connection-only control packets never reach simulation.
+        ServerboundPlayPacket::ServerboundKeepAlive(_) => return Ok(()),
         _ => {}
     }
 
@@ -842,6 +871,7 @@ async fn handle_command(
     debug: &mut SessionDebug,
     compression: &CompressionState,
     deadline: Option<ferrumc_net::LivenessDeadline>,
+    pending_teleport: &mut PendingTeleport,
 ) -> anyhow::Result<()> {
     let policy = &ctx.policy;
     if let Some(bridge) = &ctx.java_bridge {
@@ -972,7 +1002,7 @@ async fn handle_command(
         let spawn = policy.spawn();
         // Snap the player to spawn at their CURRENT look: the previous `0.0/0.0`
         // reset them to facing south and level on every `/spawn`.
-        let sync = spawn_sync(JOIN_TELEPORT_ID, spawn, *player_yaw, *player_pitch);
+        let sync = pending_teleport.issue(&spawn_sync(0, spawn, *player_yaw, *player_pitch));
         let move_event = NetEvent::play(
             player,
             ServerboundPlayPacket::SetPlayerPosition(SetPlayerPosition::new(
@@ -2052,7 +2082,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use bytes::BytesMut;
-    use ferrumc_codec::{write_var_int, BoundedReader};
+    use ferrumc_codec::{write_var_int, BoundedReader, BoundedString};
     use ferrumc_config::AccessConfig;
     use ferrumc_core::{GameMode, PlayerId, PluginId};
     use ferrumc_items::{ComponentPatch, ItemId, ItemStack};
@@ -2066,9 +2096,10 @@ mod tests {
     };
     use ferrumc_plugin_host::PluginHost;
     use ferrumc_proto::generated::play::{
-        ClientboundPlayPacket, CloseContainer, ConfirmTeleportation, ServerboundKeepAlive,
-        ServerboundPlayPacket, SetCenterChunk, SetCreativeSlot, SetPlayerPosition,
-        SetPlayerPositionAndRotation, SetPlayerRotation, UpdateSign, UseItemOn, WindowClick,
+        ClientboundPlayPacket, CloseContainer, ConfirmTeleportation, GameEvent,
+        ServerboundKeepAlive, ServerboundPlayPacket, SetCenterChunk, SetCreativeSlot,
+        SetPlayerPosition, SetPlayerPositionAndRotation, SetPlayerRotation, UpdateSign, UseItemOn,
+        WindowClick,
     };
     use ferrumc_proto::types::BlockPosition;
     use ferrumc_sim::SimShard;
@@ -2083,8 +2114,11 @@ mod tests {
     use crate::config::AppConfig;
     use crate::connection::chunk_stream::{apply_chunk_stream, ChunkStream};
     use crate::connection::context::{build_status_response, ConnContext};
-    use crate::connection::play::play_liveness;
+    use crate::connection::ingress::IngressFence;
+    use crate::connection::play::{play_liveness, pump_serverbound};
     use crate::connection::rate_limiter::ChatRateLimiter;
+    use crate::connection::serverbound_budget::ServerboundBudget;
+    use crate::connection::teleport::PendingTeleport;
     use crate::driver::SimCommand;
     use crate::inventory::{PlayerInventory, HOTBAR_START};
     use crate::plugins::{build_play_policy, BlockEventDispatcher};
@@ -2174,6 +2208,7 @@ mod tests {
                 &mut SessionDebug::new("LivenessProbe"),
                 &CompressionState::disabled(),
                 liveness,
+                &mut PendingTeleport::default(),
             )
             .await;
             assert_eq!(writer.total_queued(), 0);
@@ -2273,6 +2308,251 @@ mod tests {
         );
         assert!(inbox.try_recv().is_err());
     }
+
+    /// Invokes the production frame pump; the fixture's outgoing producer stays
+    /// continuously ready while exact Keep Alive handling is inspected.
+    #[allow(clippy::too_many_arguments)] // actual pump state retained across each finite output turn
+    async fn pump_probe(
+        ctx: &ConnContext,
+        decoder: &mut ferrumc_net::InboundDecoder,
+        liveness: &mut ferrumc_net::ConnectionLiveness,
+        pending: &mut PendingTeleport,
+        ingress: &mut IngressFence,
+        handle: &mut ferrumc_session::PlayerSessionHandle,
+        writer: &mut PlayWriter,
+    ) {
+        pump_serverbound(
+            decoder,
+            &CompressionState::disabled(),
+            ctx,
+            PlayerId::offline("PumpProbe"),
+            "PumpProbe",
+            writer,
+            &mut ChunkStream::new(ctx),
+            &mut ChatRateLimiter::new(ctx.clock.now()),
+            &mut ServerboundBudget::new(
+                std::time::Instant::now(),
+                ctx.budget.sustained_rate,
+                ctx.budget.burst,
+            ),
+            &mut PlayerInventory::with_creative_kit(GameMode::Creative),
+            &mut WindowState::new(),
+            &mut 0.0,
+            &mut 0.0,
+            &mut SessionDebug::new("PumpProbe"),
+            liveness,
+            pending,
+            ingress,
+            handle,
+        )
+        .await
+        .expect("production pump");
+    }
+
+    fn frame_packet(packet: &ServerboundPlayPacket) -> Vec<u8> {
+        let mut body = BytesMut::new();
+        packet.encode(&mut body).expect("packet encodes");
+        let mut frame = Vec::new();
+        write_var_int(
+            &mut frame,
+            i32::try_from(body.len()).expect("bounded packet"),
+        );
+        frame.extend_from_slice(&body);
+        frame
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn exact_keep_alive_head_bypasses_ready_output_with_or_without_pending_teleport() {
+        use ferrumc_session::{SessionRouter, DEFAULT_OUTBOUND_CAPACITY};
+        for teleport_pending in [false, true] {
+            let (commands, mut inbox) = mpsc::channel(8);
+            let ctx = handler_context(commands, PluginHost::in_memory()).await;
+            let player = PlayerId::offline("PumpProbe");
+            let mut router = SessionRouter::new();
+            let _shard = router.register_shard(ShardPos::new(0, 0));
+            let mut handle = router
+                .join_player(player, "PumpProbe", Vec3::new(8.0, 64.0, 8.0))
+                .expect("join");
+            for _ in 0..DEFAULT_OUTBOUND_CAPACITY {
+                router.send_play_packet_to(
+                    player,
+                    ClientboundPlayPacket::GameEvent(GameEvent::new(1, 0.0)),
+                );
+            }
+            let mut pending = PendingTeleport::default();
+            if teleport_pending {
+                pending.issue(&super::super::spawn_sync(
+                    0,
+                    Vec3::new(8.0, 64.0, 8.0),
+                    0.0,
+                    0.0,
+                ));
+            }
+            let mut liveness =
+                play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("tracker");
+            liveness
+                .keep_alive_sent(77, tokio::time::Instant::now())
+                .expect("sent");
+            let mut decoder = ferrumc_net::InboundDecoder::new(ctx.limits);
+            decoder
+                .push(&frame_packet(&ServerboundPlayPacket::ServerboundKeepAlive(
+                    ServerboundKeepAlive::new(77),
+                )))
+                .expect("buffer echo");
+            let mut ingress = IngressFence::default();
+            let mut writer = PlayWriter::with_defaults(ctx.limits);
+            Box::pin(pump_probe(
+                &ctx,
+                &mut decoder,
+                &mut liveness,
+                &mut pending,
+                &mut ingress,
+                &mut handle,
+                &mut writer,
+            ))
+            .await;
+            assert_eq!(liveness.outstanding_keep_alive(), None);
+            assert_eq!(pending.is_pending(), teleport_pending);
+            assert!(!ingress.is_fenced());
+            assert!(
+                handle.try_recv().is_some(),
+                "ready producer output stayed queued"
+            );
+            assert!(inbox.try_recv().is_err());
+            assert_eq!(writer.total_queued(), 0);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn producer_refills_cannot_extend_frame_fence_or_starve_buffered_echo() {
+        use ferrumc_proto::generated::play::TabCompleteRequest;
+        use ferrumc_session::{SessionRouter, DEFAULT_OUTBOUND_CAPACITY};
+        let (commands, mut inbox) = mpsc::channel(8);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let player = PlayerId::offline("PumpProbe");
+        let mut router = SessionRouter::new();
+        let _shard = router.register_shard(ShardPos::new(0, 0));
+        let mut handle = router
+            .join_player(player, "PumpProbe", Vec3::new(8.0, 64.0, 8.0))
+            .expect("join");
+        let output = ClientboundPlayPacket::GameEvent(GameEvent::new(1, 0.0));
+        for _ in 0..DEFAULT_OUTBOUND_CAPACITY {
+            router.send_play_packet_to(player, output.clone());
+        }
+        let mut decoder = ferrumc_net::InboundDecoder::new(ctx.limits);
+        decoder
+            .push(&frame_packet(&ServerboundPlayPacket::TabCompleteRequest(
+                TabCompleteRequest::new(17, BoundedString::new("/sp".to_owned()).expect("query")),
+            )))
+            .expect("first input");
+        decoder
+            .push(&frame_packet(&ServerboundPlayPacket::ServerboundKeepAlive(
+                ServerboundKeepAlive::new(77),
+            )))
+            .expect("buffered echo");
+        let mut liveness =
+            play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("tracker");
+        liveness
+            .keep_alive_sent(77, tokio::time::Instant::now())
+            .expect("sent");
+        let mut pending = PendingTeleport::default();
+        let mut ingress = IngressFence::default();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        Box::pin(pump_probe(
+            &ctx,
+            &mut decoder,
+            &mut liveness,
+            &mut pending,
+            &mut ingress,
+            &mut handle,
+            &mut writer,
+        ))
+        .await;
+        assert!(ingress.is_fenced());
+        for turn in 0..DEFAULT_OUTBOUND_CAPACITY {
+            assert!(ingress.pop_outbound().is_some(), "prefix turn {turn}");
+            // Replace each consumed message with a new one in the live channel.
+            // A drain-until-empty strategy could never reach the buffered echo.
+            router.send_play_packet_to(player, output.clone());
+            Box::pin(pump_probe(
+                &ctx,
+                &mut decoder,
+                &mut liveness,
+                &mut pending,
+                &mut ingress,
+                &mut handle,
+                &mut writer,
+            ))
+            .await;
+            if turn + 1 < DEFAULT_OUTBOUND_CAPACITY {
+                assert!(liveness.outstanding_keep_alive().is_some());
+            }
+        }
+        assert_eq!(liveness.outstanding_keep_alive(), None);
+        assert!(!ingress.is_fenced());
+        assert!(
+            handle.try_recv().is_some(),
+            "producer is still ready after bounded fence"
+        );
+        assert_eq!(
+            writer.total_queued(),
+            1,
+            "held tab request was actually dispatched"
+        );
+        assert!(inbox.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn leave_mirror_applies_retained_then_queued_teleports_before_save_without_ack() {
+        use ferrumc_session::SessionRouter;
+        let (commands, _inbox) = mpsc::channel(8);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let player = PlayerId::offline("LeaveTeleport");
+        let mut router = SessionRouter::new();
+        let _shard = router.register_shard(ShardPos::new(0, 0));
+        let mut handle = router
+            .join_player(player, "LeaveTeleport", Vec3::new(8.0, 64.0, 8.0))
+            .expect("join");
+        let earlier = Vec3::new(16.0, 64.0, 8.0);
+        router.send_play_packet_to(
+            player,
+            ClientboundPlayPacket::SynchronizePlayerPosition(super::super::spawn_sync(
+                1, earlier, 31.0, -17.0,
+            )),
+        );
+        let mut ingress = IngressFence::default();
+        ingress.hold(bytes::Bytes::from_static(&[0, 1]), &mut handle);
+        assert!(ingress.is_fenced());
+        let latest = Vec3::new(20.0, 64.0, 8.0);
+        router.send_play_packet_to(
+            player,
+            ClientboundPlayPacket::SynchronizePlayerPosition(super::super::spawn_sync(
+                1, latest, 45.0, -25.0,
+            )),
+        );
+        let mut stream = ChunkStream::new(&ctx);
+        stream.observe(Vec3::new(8.0, 64.0, 8.0));
+        let mut yaw = 0.0;
+        let mut pitch = 0.0;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut pending = PendingTeleport::default();
+        super::super::play::mirror_queued_for_leave(
+            &mut handle,
+            &mut ingress,
+            &mut stream,
+            &mut inventory,
+            &mut yaw,
+            &mut pitch,
+            &mut pending,
+        );
+        assert_eq!(stream.last_position(), Some(latest));
+        assert_eq!(stream.pending_position_for_test(), Some(latest));
+        assert_eq!((yaw, pitch), (45.0, -25.0));
+        assert!(pending.is_pending());
+        assert!(!ingress.is_fenced());
+        assert!(handle.try_recv().is_none());
+    }
+
     /// Test plugin that makes a `PlayerMove` callback observable without changing
     /// production metrics or relying on captured logs.
     struct MoveProbe {
@@ -2369,6 +2649,7 @@ mod tests {
                 &mut SessionDebug::new("ContainerProbe"),
                 &CompressionState::disabled(),
                 &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)?,
+                &mut PendingTeleport::default(),
             )
             .await
         })
@@ -2829,6 +3110,123 @@ mod tests {
         handler_context(commands, host).await
     }
 
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // one hostile-input fixture and its atomic admission/side-effect assertions
+    async fn pending_movement_keeps_position_stream_and_plugin_baseline_but_admits_only_look() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (commands, mut inbox) = mpsc::channel(8);
+        let ctx = movement_handler_context(commands, Arc::clone(&calls)).await;
+        let player = PlayerId::offline("PendingMovement");
+        let base = Vec3::new(8.0, 64.0, 8.0);
+        let mut stream = ChunkStream::new(&ctx);
+        stream.observe(base);
+        stream.block_crossing(base);
+        let mut yaw = 10.0;
+        let mut pitch = -10.0;
+        let mut pending = PendingTeleport::default();
+        pending.issue(&super::super::spawn_sync(0, base, yaw, pitch));
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let mut limiter = ChatRateLimiter::new(ctx.clock.now());
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut window = WindowState::new();
+        let mut debug = SessionDebug::new("PendingMovement");
+        let mut liveness =
+            play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("tracker");
+        for packet in
+            [
+                ServerboundPlayPacket::SetPlayerPosition(SetPlayerPosition::new(
+                    40.0, 64.0, 8.0, 0,
+                )),
+                ServerboundPlayPacket::SetPlayerPositionAndRotation(
+                    SetPlayerPositionAndRotation::new(40.0, 64.0, 8.0, f32::NAN, -20.0, 0),
+                ),
+            ]
+        {
+            let mut body = BytesMut::new();
+            packet.encode(&mut body).expect("encode pending move");
+            handle_play_body(
+                &ctx,
+                player,
+                "PendingMovement",
+                &mut writer,
+                &mut stream,
+                &mut limiter,
+                &mut inventory,
+                &mut window,
+                &mut yaw,
+                &mut pitch,
+                &body,
+                &mut debug,
+                &CompressionState::disabled(),
+                &mut liveness,
+                &mut pending,
+            )
+            .await
+            .expect("ignore coordinate");
+        }
+        assert!(
+            inbox.try_recv().is_err(),
+            "position-only/unsafe look never reaches sim"
+        );
+        assert_eq!((yaw, pitch), (10.0, -10.0));
+        let mut body = BytesMut::new();
+        SetPlayerPositionAndRotation::new(40.0, 64.0, 8.0, 70.0, -20.0, 0)
+            .encode(&mut body)
+            .expect("combined move");
+        let compression = CompressionState::disabled();
+        let (result, ()) = tokio::join!(
+            handle_play_body(
+                &ctx,
+                player,
+                "PendingMovement",
+                &mut writer,
+                &mut stream,
+                &mut limiter,
+                &mut inventory,
+                &mut window,
+                &mut yaw,
+                &mut pitch,
+                &body,
+                &mut debug,
+                &compression,
+                &mut liveness,
+                &mut pending
+            ),
+            async {
+                let SimCommand::Event {
+                    event,
+                    acceptance: Some(reply),
+                } = inbox.recv().await.expect("look admission")
+                else {
+                    panic!("only an accepted look event")
+                };
+                assert_eq!(
+                    ferrumc_session::net_event_to_input(&event),
+                    Some(ferrumc_sim::GameInput::PlayerMove {
+                        player,
+                        position: None,
+                        yaw: Some(70.0),
+                        pitch: Some(-20.0),
+                    })
+                );
+                reply.send(Ok(())).expect("admission reply");
+            },
+        );
+        result.expect("look-only admitted");
+        assert_eq!((yaw, pitch), (70.0, -20.0));
+        assert_eq!(stream.last_position(), Some(base));
+        assert_eq!(stream.pending_position_for_test(), Some(base));
+        assert_eq!(
+            stream.block_crossing(base),
+            None,
+            "plugin baseline is unchanged"
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(writer.total_queued(), 0);
+        assert!(pending.is_pending());
+        assert!(inbox.try_recv().is_err());
+    }
+
     #[derive(Default)]
     struct PlacementProbeCalls {
         interact: AtomicUsize,
@@ -3140,6 +3538,7 @@ mod tests {
                 &compression,
                 &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)
                     .expect("Play liveness"),
+                &mut PendingTeleport::default(),
             )
             .await
             .expect("reject hostile movement cleanly");
@@ -3173,6 +3572,7 @@ mod tests {
             &mut debug,
             &compression,
             &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("Play liveness"),
+            &mut PendingTeleport::default(),
         )
         .await
         .expect("admit valid movement");
@@ -3204,6 +3604,7 @@ mod tests {
             &mut debug,
             &compression,
             &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("Play liveness"),
+            &mut PendingTeleport::default(),
         )
         .await
         .expect("reject later hostile movement");
@@ -3424,6 +3825,7 @@ mod tests {
                     &compression,
                     &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)
                         .expect("Play liveness"),
+                    &mut PendingTeleport::default(),
                 )
                 .await
                 .expect("reject hostile placement cursor cleanly");
@@ -3464,6 +3866,7 @@ mod tests {
             &mut debug,
             &compression,
             &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("Play liveness"),
+            &mut PendingTeleport::default(),
         )
         .await
         .expect("cursor rejection precedes malformed-face acknowledgement");
@@ -3525,6 +3928,7 @@ mod tests {
                 &compression,
                 &mut play_liveness(tokio::time::Instant::now(), ctx.io_timeout)
                     .expect("Play liveness"),
+                &mut PendingTeleport::default(),
             )
             .await
             .expect("admit valid placement cursor");

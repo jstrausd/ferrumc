@@ -50,11 +50,13 @@ use crate::{driver::SimCommand, observe};
 mod chunk_stream;
 mod context;
 mod handlers;
+mod ingress;
 mod join;
 mod outbound;
 mod play;
 mod rate_limiter;
 mod serverbound_budget;
+mod teleport;
 
 pub(crate) use context::{build_status_response, ConnContext};
 
@@ -103,12 +105,6 @@ const INVALID_USERNAME_REASON: &str =
 
 /// Bytes read off the socket per `read` call before decoding.
 const READ_CHUNK: usize = 4096;
-
-/// Teleport id carried by the join `SynchronizePlayerPosition`.
-///
-/// Must be non-zero: a real client replies with a `ConfirmTeleportation` echoing
-/// it, which the server decodes and ignores.
-const JOIN_TELEPORT_ID: i32 = 1;
 
 /// `Game Event` reason `3`: "change game mode". The event `value` is the game-mode
 /// id as a float; sending it switches the issuing client's mode (the carrier

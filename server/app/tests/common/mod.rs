@@ -14,6 +14,7 @@
 //! background drainer, an idle client's socket fills and the server's join-kit
 //! `write_all` blocks before it ever reaches its serverbound read loop.
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 
 use bytes::BytesMut;
@@ -29,7 +30,7 @@ use ferrumc_proto::generated::configuration::{
 };
 use ferrumc_proto::generated::handshake::Handshake;
 use ferrumc_proto::generated::login::{ClientboundLoginPacket, LoginAcknowledged, LoginStart};
-use ferrumc_proto::generated::play::ClientboundPlayPacket;
+use ferrumc_proto::generated::play::{ClientboundPlayPacket, ConfirmTeleportation};
 
 /// Protocol version for Minecraft 1.21.8.
 const PROTOCOL_VERSION: i32 = 772;
@@ -55,6 +56,12 @@ pub struct TestClient {
     frames: mpsc::Receiver<Vec<u8>>,
     /// Canonical UUID observed in Login Success once login has completed.
     login_uuid: Option<Uuid>,
+    /// Join frames read to confirm the initial teleport, replayed to assertions.
+    buffered: VecDeque<Vec<u8>>,
+    /// Security fixtures opt out of the real client's automatic acknowledgements.
+    auto_confirm: bool,
+    /// The replayed join sync was already acknowledged exactly once.
+    already_confirmed_join: Option<i32>,
 }
 
 impl TestClient {
@@ -68,6 +75,9 @@ impl TestClient {
             writer,
             frames,
             login_uuid: None,
+            buffered: VecDeque::new(),
+            auto_confirm: false,
+            already_confirmed_join: None,
         })
     }
 
@@ -115,6 +125,9 @@ impl TestClient {
 
     /// Awaits the next complete frame body (id + fields) from the drainer.
     pub async fn next_frame(&mut self) -> anyhow::Result<Vec<u8>> {
+        if let Some(body) = self.buffered.pop_front() {
+            return Ok(body);
+        }
         self.frames.recv().await.ok_or_else(|| {
             anyhow::anyhow!("server closed the connection before the expected frame")
         })
@@ -125,18 +138,41 @@ impl TestClient {
         let body = self.next_frame().await?;
         let mut reader = BoundedReader::new(&body);
         let id = reader.read_var_int()?;
-        Ok(ClientboundPlayPacket::decode(id, &mut reader)?)
+        let packet = ClientboundPlayPacket::decode(id, &mut reader)?;
+        self.confirm_if_enabled(&packet).await?;
+        Ok(packet)
     }
 
     /// Reads the next clientbound Play packet, or reports that the socket closed.
     #[allow(dead_code)] // `common` is compiled separately into tests that only expect live frames.
     pub async fn next_play_or_closed(&mut self) -> anyhow::Result<Option<ClientboundPlayPacket>> {
-        let Some(body) = self.frames.recv().await else {
+        let body = if let Some(body) = self.buffered.pop_front() {
+            body
+        } else if let Some(body) = self.frames.recv().await {
+            body
+        } else {
             return Ok(None);
         };
         let mut reader = BoundedReader::new(&body);
         let id = reader.read_var_int()?;
-        Ok(Some(ClientboundPlayPacket::decode(id, &mut reader)?))
+        let packet = ClientboundPlayPacket::decode(id, &mut reader)?;
+        self.confirm_if_enabled(&packet).await?;
+        Ok(Some(packet))
+    }
+
+    /// Acknowledges a sync exactly once when this fixture emulates a normal client.
+    async fn confirm_if_enabled(&mut self, packet: &ClientboundPlayPacket) -> anyhow::Result<()> {
+        if let ClientboundPlayPacket::SynchronizePlayerPosition(sync) = packet {
+            if self.already_confirmed_join == Some(sync.teleport_id()) {
+                self.already_confirmed_join = None;
+            } else if self.auto_confirm {
+                self.send_frame(&encode(|buf| {
+                    ConfirmTeleportation::new(sync.teleport_id()).encode(buf)
+                }))
+                .await?;
+            }
+        }
+        Ok(())
     }
 
     /// Returns the UUID carried by Login Success after [`login_to_play`].
@@ -206,7 +242,41 @@ where
 /// Connects, logs in offline as `name`, and reads up to and including the
 /// `JoinGame` packet — confirming the client reached play and the server
 /// registered its session. Any later play frames stay buffered for the caller.
+#[allow(dead_code)] // Raw acknowledgement suites deliberately use unconfirmed login.
 pub async fn login_to_play(addr: SocketAddr, name: &str) -> anyhow::Result<TestClient> {
+    let mut client = login_to_play_unconfirmed(addr, name).await?;
+    let mut buffered = VecDeque::new();
+    // A normal client consumes/acknowledges the join sync before sending moves.
+    // Preserve those frames for existing join-kit assertions without a second ACK.
+    loop {
+        anyhow::ensure!(
+            buffered.len() < FRAME_CHANNEL_CAPACITY,
+            "join sync missing from bounded frame prefix"
+        );
+        let body = client.next_frame().await?;
+        let mut reader = BoundedReader::new(&body);
+        let id = reader.read_var_int()?;
+        let packet = ClientboundPlayPacket::decode(id, &mut reader)?;
+        buffered.push_back(body);
+        if let ClientboundPlayPacket::SynchronizePlayerPosition(sync) = packet {
+            client
+                .send_frame(&encode(|buf| {
+                    ConfirmTeleportation::new(sync.teleport_id()).encode(buf)
+                }))
+                .await?;
+            client.already_confirmed_join = Some(sync.teleport_id());
+            break;
+        }
+    }
+    client.buffered = buffered;
+    client.auto_confirm = true;
+    Ok(client)
+}
+
+/// Logs in through `JoinGame` without confirming any teleport, for raw protocol
+/// and acknowledgement trust-boundary fixtures.
+#[allow(dead_code)] // Most integration suites emulate ordinary clients instead.
+pub async fn login_to_play_unconfirmed(addr: SocketAddr, name: &str) -> anyhow::Result<TestClient> {
     let mut client = TestClient::connect(addr).await?;
 
     // Handshake -> Login.
