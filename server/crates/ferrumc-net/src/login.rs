@@ -712,7 +712,7 @@ mod tests {
         // Handshake -> Login.
         let step = flow.handle(&handshake_packet(NEXT_STATE_LOGIN));
         assert_eq!(step.control, FlowControl::Continue);
-        assert!(step.directives.is_empty());
+        assert_eq!(step.directives.len(), 0);
         assert_eq!(flow.connection_state(), ConnectionState::Login);
 
         // Login Start -> Login Success (no Set Compression when disabled).
@@ -797,7 +797,7 @@ mod tests {
         // next_state 1 selects status, which this server does not serve.
         let step = flow.handle(&handshake_packet(1));
         assert_eq!(step.control, FlowControl::Close);
-        assert!(step.directives.is_empty());
+        assert_eq!(step.directives.len(), 0);
     }
 
     #[test]
