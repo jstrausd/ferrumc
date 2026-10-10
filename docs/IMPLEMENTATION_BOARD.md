@@ -5,6 +5,12 @@ in FerrumCs Rust-Simulation, einschließlich Survival, natürlicher Welten und
 der angeforderten Java-/Paper-Kompatibilität. Arbeitsbranch: ausschließlich
 `main`. Ausgangspunkt dieser Runde: `c3e14d0f`.
 
+Aktueller veröffentlichter Ausgangspunkt der dritten Welle: `347080f4`.
+Der Betreiber hat die fortgesetzte Umsetzung bis zu durchspielbarem Survival
+einschließlich Entities, End und Enderdrache ausdrücklich beauftragt. Die
+[Survival-Gesamtabnahme](SURVIVAL_END_TO_END_ACCEPTANCE.md) definiert die
+Fortschrittsstrecke; derzeit ist keine ihrer Etappen vollständig abgenommen.
+
 Dieser Umfang ist der Auftrag, keine Fertigmeldung. Der bestehende
 [Survival-Lieferplan](SURVIVAL_DELIVERY_PLAN.md) beschreibt die tatsächlichen
 Lücken und Aufwandsschätzung; der [technische Plan](V2_IMPLEMENTATION_PLAN.md)
@@ -90,6 +96,22 @@ vergeben. Diese Tabelle ist Planung, keine Behauptung laufender Agents.
 Die jeweils nächste konkrete Vergabe erhält einen eigenen Dateibesitz und
 Akzeptanzvertrag. Fehlende aktive Verbraucher werden nicht durch ungeprüfte
 Mehr-Crate-Sammeländerungen ersetzt.
+
+## Dritte Welle: tatsächlich laufende Vergaben
+
+| Ticket | Agent | Exklusiver Dateibesitz | Status und Abnahme |
+| --- | --- | --- | --- |
+| WG-002-MIG / GEN-11.2 | `select_world_ticket` | `server/crates/ferrumc-storage/**`, `docs/agent-tasks/WG-002-MIG.md` | In Arbeit: explizite Offline-Migration mit deklarierter Legacybasis, Prepare/Backup, Daten-/Scopevalidation und atomarem Formatwechsel. Kein automatisches Upgrade. |
+| WG-003 / GEN-01.2 | `item_transfer_primitives` | `server/crates/ferrumc-sim/**`, `docs/agent-tasks/WG-003_SIM_GENERATION.md` | In Arbeit: descriptorgebundene Regeneration/Overlays und Storageprüfung, klar getrennter Legacyconstructor. Appaktivierung folgt nach Review der Migration und dieses Consumers. |
+| GEN-04.1 | `feature_catalog` | `server/crates/ferrumc-world/**`, `docs/agent-tasks/GEN-04_1_RANDOM_NOISE.md` | In Arbeit: gepinnte Minecraft-RNG-/Noisegrundlagen mit unabhängigen Java-Goldens. Kein natürliches Terrain allein durch diese Grundlagen. |
+
+Root besitzt Board, Katalog, Abnahme- und gemeinsame Prüfberichte sowie
+Gitintegration. Die vorhandene Generatoridentität wird vom Noiseagenten nicht
+ohne Abstimmung erweitert. Fremdreviews erhalten frei gewordene Slots.
+Als nächstes folgt WG-004 in der App; parallel können nach Freigabe der
+jeweiligen Crates Entity-Ownership/Transfer und natürliche Terrainconsumer
+bearbeitet werden. Die zweite Welle bleibt ein abgeschlossener Nachweis und
+wird nicht als Status der laufenden dritten Welle umgedeutet.
 
 ## Orchestrierung
 
