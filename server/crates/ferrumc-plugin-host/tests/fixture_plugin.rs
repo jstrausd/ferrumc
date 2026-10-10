@@ -266,7 +266,7 @@ fn register_enable_and_event_dispatch_reaches_plugin() {
 
     let report = dispatch_join(&mut host);
     assert_eq!(report.delivered(), 1);
-    assert!(report.panicked().is_empty());
+    assert_eq!(report.panicked().len(), 0);
     assert_eq!(joins.load(Ordering::SeqCst), 1, "event reached the plugin");
 }
 
@@ -338,7 +338,7 @@ fn panicking_plugin_is_caught_and_disabled_host_survives() {
 
     // Second dispatch: the terminally disabled plugin is skipped; the host is fine.
     let report = dispatch_join(&mut host);
-    assert!(report.panicked().is_empty());
+    assert_eq!(report.panicked().len(), 0);
     assert_eq!(report.delivered(), 1);
     assert_eq!(joins.load(Ordering::SeqCst), 2);
 }

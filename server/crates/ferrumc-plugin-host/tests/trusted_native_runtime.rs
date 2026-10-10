@@ -351,7 +351,7 @@ fn trusted_native_block_votes_share_registration_order_and_fail_closed() {
         "the native glass rewrite runs after the earlier compiled replacement"
     );
     assert_eq!(replaced.report().delivered(), 2);
-    assert!(replaced.report().native_failures().is_empty());
+    assert_eq!(replaced.report().native_failures().len(), 0);
 
     host.enable(&after)
         .expect("enable trailing compiled plugin after the first dispatch");
@@ -369,7 +369,7 @@ fn trusted_native_block_votes_share_registration_order_and_fail_closed() {
         }
     );
     assert_eq!(allowed.report().delivered(), 3);
-    assert!(allowed.report().native_failures().is_empty());
+    assert_eq!(allowed.report().native_failures().len(), 0);
 
     let denied = host.dispatch_block_place_decision_with_native_context(
         &BlockPlaceAttempt::new(player, pos, BEDROCK),
@@ -467,7 +467,7 @@ fn trusted_native_commit_uses_the_existing_bounded_sink() {
 
     assert_messages(&sink.intents, player, &["compiled accepted"]);
     assert_eq!(sink.rejected, 1);
-    assert!(report.native_capability_denials().is_empty());
+    assert_eq!(report.native_capability_denials().len(), 0);
     let failures = report.native_failures();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].plugin_id(), &native_id);
@@ -520,8 +520,8 @@ fn undeclared_native_capability_is_typed_and_rolls_back_staged_intents() {
         failures[0].failure(),
         NativeCallbackFailure::Status(status) if *status == FC_CAPABILITY_DENIED
     ));
-    assert!(denied.panicked().is_empty());
-    assert!(denied.native_panics().is_empty());
+    assert_eq!(denied.panicked().len(), 0);
+    assert_eq!(denied.native_panics().len(), 0);
     assert!(host.is_enabled(&native_id));
     assert_eq!(host.stats(&native_id).map(PluginStats::panics), Some(0));
 
@@ -535,8 +535,8 @@ fn undeclared_native_capability_is_typed_and_rolls_back_staged_intents() {
         &permissions,
     );
     assert_eq!(success.delivered(), 1);
-    assert!(success.native_capability_denials().is_empty());
-    assert!(success.native_failures().is_empty());
+    assert_eq!(success.native_capability_denials().len(), 0);
+    assert_eq!(success.native_failures().len(), 0);
     assert_messages(&success_sink.intents, player, &[DYNAMIC_MESSAGE]);
 
     drop(host);
@@ -622,8 +622,8 @@ fn trusted_native_panic_status_discards_disables_and_records_context() {
         &permissions,
     );
     assert_eq!(later.delivered(), 1);
-    assert!(later.panicked().is_empty());
-    assert!(later.native_panics().is_empty());
+    assert_eq!(later.panicked().len(), 0);
+    assert_eq!(later.native_panics().len(), 0);
     assert_messages(&sink.intents[prior..], player, &["compiled continued"]);
     assert_eq!(host.stats(&native_id).map(PluginStats::panics), Some(1));
 
@@ -651,7 +651,7 @@ fn trusted_native_disable_and_reenable_creates_a_working_fresh_instance() {
     let missing_context =
         host.dispatch_event(&event, &world, &mut missing_context_sink, &permissions);
     assert_eq!(missing_context.delivered(), 0);
-    assert!(missing_context_sink.intents.is_empty());
+    assert_eq!(missing_context_sink.intents.len(), 0);
     assert!(matches!(
         missing_context.native_failures(),
         [failure]
@@ -682,7 +682,7 @@ fn trusted_native_disable_and_reenable_creates_a_working_fresh_instance() {
     let mut disabled_sink = RecordingSink::default();
     let disabled = host.dispatch_event(&event, &world, &mut disabled_sink, &permissions);
     assert_eq!(disabled.delivered(), 0);
-    assert!(disabled_sink.intents.is_empty());
+    assert_eq!(disabled_sink.intents.len(), 0);
 
     host.enable(&native_id)
         .expect("re-enable from retained factory");
@@ -697,7 +697,7 @@ fn trusted_native_disable_and_reenable_creates_a_working_fresh_instance() {
         &permissions,
     );
     assert_eq!(second.delivered(), 1);
-    assert!(second.native_failures().is_empty());
+    assert_eq!(second.native_failures().len(), 0);
     assert_messages(&second_sink.intents, player, &[DYNAMIC_MESSAGE]);
 
     host.disable(&native_id).expect("second disable");

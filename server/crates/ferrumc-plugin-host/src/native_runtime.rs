@@ -1423,7 +1423,7 @@ mod tests {
         )
         .complete(FC_OK);
         assert!(!missing.is_committed());
-        assert!(missing.effects().is_empty());
+        assert_eq!(missing.effects().len(), 0);
         assert_eq!(
             missing.first_error(),
             Some(&NativeServiceError::MissingDecision)
@@ -1453,7 +1453,7 @@ mod tests {
         );
         let duplicate = duplicate.complete(FC_OK);
         assert!(!duplicate.is_committed());
-        assert!(duplicate.effects().is_empty());
+        assert_eq!(duplicate.effects().len(), 0);
         assert_eq!(
             duplicate.first_error(),
             Some(&NativeServiceError::DuplicateDecision)
@@ -1475,7 +1475,7 @@ mod tests {
         );
         let ungranted = ungranted.complete(FC_OK);
         assert!(!ungranted.is_committed());
-        assert!(ungranted.effects().is_empty());
+        assert_eq!(ungranted.effects().len(), 0);
         assert_eq!(
             ungranted.capability_denial(),
             Some(Capability::VetoBlockEdits)
@@ -1513,7 +1513,7 @@ mod tests {
             );
             let completion = services.complete(FC_OK);
             assert!(!completion.is_committed());
-            assert!(completion.effects().is_empty());
+            assert_eq!(completion.effects().len(), 0);
             assert!(matches!(
                 completion.first_error(),
                 Some(NativeServiceError::MalformedPayload { .. })
@@ -1572,7 +1572,7 @@ mod tests {
         );
         let poisoned_after_decision = poisoned_after_decision.complete(FC_OK);
         assert!(!poisoned_after_decision.is_committed());
-        assert!(poisoned_after_decision.effects().is_empty());
+        assert_eq!(poisoned_after_decision.effects().len(), 0);
     }
 
     #[test]
@@ -1662,7 +1662,7 @@ mod tests {
 
         let completion = services.complete(FC_OK);
         assert!(!completion.is_committed());
-        assert!(completion.effects().is_empty());
+        assert_eq!(completion.effects().len(), 0);
         assert!(matches!(
             completion.first_error(),
             Some(NativeServiceError::CommandBufferFull { .. })
@@ -1711,7 +1711,7 @@ mod tests {
 
         let completion = services.complete(FC_PLUGIN_PANIC);
         assert!(!completion.is_committed());
-        assert!(completion.effects().is_empty());
+        assert_eq!(completion.effects().len(), 0);
         assert_eq!(completion.callback_status(), FC_PLUGIN_PANIC);
     }
 
@@ -1739,7 +1739,7 @@ mod tests {
 
         let completion = services.complete(FC_OK);
         assert!(!completion.is_committed());
-        assert!(completion.effects().is_empty());
+        assert_eq!(completion.effects().len(), 0);
         assert_eq!(completion.capability_denial(), Some(Capability::ReadWorld));
     }
 
@@ -1776,7 +1776,7 @@ mod tests {
 
         let completion = services.complete(FC_OK);
         assert!(!completion.is_committed());
-        assert!(completion.effects().is_empty());
+        assert_eq!(completion.effects().len(), 0);
         assert_eq!(completion.capability_denial(), Some(Capability::ReadWorld));
         assert!(matches!(
             completion.first_error(),
@@ -2017,7 +2017,7 @@ mod tests {
                 )),
                 FC_INVALID_ARGUMENT
             );
-            assert!(services.complete(FC_OK).effects().is_empty());
+            assert_eq!(services.complete(FC_OK).effects().len(), 0);
         }
     }
 
@@ -2049,7 +2049,7 @@ mod tests {
                 )),
                 FC_INVALID_ARGUMENT
             );
-            assert!(services.complete(FC_OK).effects().is_empty());
+            assert_eq!(services.complete(FC_OK).effects().len(), 0);
         }
     }
 
@@ -2076,7 +2076,7 @@ mod tests {
                 )),
                 FC_INVALID_ARGUMENT
             );
-            assert!(services.complete(FC_OK).effects().is_empty());
+            assert_eq!(services.complete(FC_OK).effects().len(), 0);
         }
 
         let submit = CapabilityManifest::empty().with(Capability::SubmitIntents);
@@ -2099,7 +2099,7 @@ mod tests {
                 event_context(),
             );
             assert_eq!(services.emit(invalid), FC_INVALID_ARGUMENT);
-            assert!(services.complete(FC_OK).effects().is_empty());
+            assert_eq!(services.complete(FC_OK).effects().len(), 0);
         }
 
         let mut wrong_phase = NativeCallbackServices::for_initialization(submit);
