@@ -342,7 +342,7 @@ async fn non_creative_ignored_flow(addr: SocketAddr) -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn join_kit_and_held_block_placement() {
-    let (server, addr) = start_server("").await;
+    let (server, addr) = start_server("builtin_plugins = true\n").await;
     timeout(GUARD, join_kit_flow(addr))
         .await
         .expect("flow finished within the guard")

@@ -427,7 +427,8 @@ fn invalid_username_table_has_no_identity_or_downstream_side_effects() {
         .push(PlayerId::offline("Bad Name").as_uuid().to_string());
     let config = AppConfig::from_toml_str(
         "bind = \"127.0.0.1:0\"\n\
-         spawn_chunk_radius = 1\n",
+         spawn_chunk_radius = 1\n\
+         builtin_plugins = true\n",
     )
     .expect("invalid-name test config parses")
     .with_world_dir(Some(world.path().to_path_buf()))
@@ -453,6 +454,10 @@ fn invalid_username_table_has_no_identity_or_downstream_side_effects() {
         .await
         .expect("baseline snapshot advances");
         let baseline_plugins = plugin_counts(&baseline.plugin_decisions);
+        assert!(
+            !baseline_plugins.is_empty(),
+            "explicit demo opt-in must preserve the plugin-side-effect admission check"
+        );
 
         let mut accepted = Vec::new();
         let mut violations = Vec::new();

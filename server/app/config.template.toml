@@ -64,7 +64,8 @@
 # --- Spawn protection ---
 
 # Spawn-protection radius in blocks (positive values up to 30000000, Chebyshev)
-# around spawn. 0 or any negative value DISABLES protection.
+# around spawn. Requires builtin_plugins = true to load the sample plugin.
+# 0 or any negative value DISABLES protection.
 # spawn_protect_radius = 0
 
 # Player names allowed to bypass spawn protection. Only meaningful when
@@ -94,10 +95,12 @@
 # build a custom binary that wants the in-memory store.
 # world_dir = "world"
 
-# Whether the built-in spawn-protect, block-rules, and greeter plugins are
-# registered. Set this to false when replacing them with dynamic bundles that
-# use the same stable plugin ids.
-# builtin_plugins = true
+# Optional built-in demo plugins: spawn-protect, block-rules, and greeter.
+# Disabled by default. Enabling them intentionally changes gameplay: block-rules
+# replaces normal glass with tinted glass and denies placing bedrock; greeter
+# adds greetings and a sample chat filter. Keep false for normal block behavior
+# or when loading dynamic bundles with the same plugin ids.
+# builtin_plugins = false
 
 # Directory containing strict trusted-native plugin bundles. Each immediate child
 # with a plugin.toml is treated as a candidate; other child directories are

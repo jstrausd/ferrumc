@@ -411,6 +411,7 @@ async fn mvp_end_to_end() {
     let config = AppConfig::from_toml_str(&format!(
         "bind = \"127.0.0.1:0\"\n\
          spawn_chunk_radius = 1\n\
+         builtin_plugins = true\n\
          spawn_protect_radius = {PROTECT_RADIUS}\n\
          spawn_protect_bypass = [\"Admin\"]\n\
          ops = [\"Admin\"]\n",

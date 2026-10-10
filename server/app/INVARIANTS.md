@@ -11,6 +11,12 @@
 
 ## Crate-Specific
 
+- Built-in demo plugins default to disabled, including when the TOML toggle is
+  omitted. Explicit `builtin_plugins=true` enables their sample behavior
+  (glass-to-tinted-glass replacement, bedrock denial, greeting/chat filter).
+  Native and Java plugin loading use their own configuration. Existing explicit
+  opt-ins are retained; loading a config never silently rewrites it.
+
 - Pre-Play phase progress has an absolute configured I/O window. Only the
   expected semantic phase transition renews it; raw bytes, ignored IDs and
   repeated settings do not. Partial frames have a separate first-byte window

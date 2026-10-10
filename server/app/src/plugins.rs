@@ -841,7 +841,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(", ");
         AppConfig::from_toml_str(&format!(
-            "spawn_protect_radius = {radius}\nspawn_protect_bypass = [{bypass}]\n"
+            "builtin_plugins = true\nspawn_protect_radius = {radius}\nspawn_protect_bypass = [{bypass}]\n"
         ))
         .expect("spawn-protection test config is valid")
     }
@@ -975,23 +975,28 @@ mod tests {
 
     // --- BlockEventDispatcher: the wired intent boundary ----------------------
     #[test]
-    fn disabling_builtins_registers_no_plugins_and_applies_no_block_rule() {
-        let config = AppConfig::from_toml_str("builtin_plugins = false")
-            .expect("built-in plugin toggle is valid");
-        let (policy, dispatcher) = build_play_policy(&config).expect("policy builds");
-        let permissions = PermissionFacade::new(policy.permissions());
-        let (decision, emitted) = dispatcher.before_block_place(
-            &BlockPlaceAttempt::new(
-                PlayerId::offline("Steve"),
-                BlockPos::new(100, 64, 100),
-                ferrumc_plugin_block_rules::GLASS_BLOCK_STATE_ID,
-            ),
-            &permissions,
-        );
+    fn default_and_explicitly_disabled_demos_do_not_rewrite_glass() {
+        for config in [
+            AppConfig::default(),
+            AppConfig::from_toml_str("").expect("omitted toggle is valid"),
+            AppConfig::from_toml_str("builtin_plugins = false")
+                .expect("explicit plugin toggle is valid"),
+        ] {
+            let (policy, dispatcher) = build_play_policy(&config).expect("policy builds");
+            let permissions = PermissionFacade::new(policy.permissions());
+            let (decision, emitted) = dispatcher.before_block_place(
+                &BlockPlaceAttempt::new(
+                    PlayerId::offline("Steve"),
+                    BlockPos::new(100, 64, 100),
+                    ferrumc_plugin_block_rules::GLASS_BLOCK_STATE_ID,
+                ),
+                &permissions,
+            );
 
-        assert!(dispatcher.decision_snapshots().is_empty());
-        assert_eq!(decision, ResolvedDecision::Allow);
-        assert_eq!(emitted, []);
+            assert!(dispatcher.decision_snapshots().is_empty());
+            assert_eq!(decision, ResolvedDecision::Allow);
+            assert_eq!(emitted, []);
+        }
     }
 
     #[test]

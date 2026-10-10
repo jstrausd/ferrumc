@@ -48,8 +48,8 @@ const DEFAULT_SPAWN_CHUNK_RADIUS: u8 = 2;
 /// Default simulation tick rate, in ticks per second.
 const DEFAULT_TICKS_PER_SECOND: u32 = 20;
 
-/// Whether the built-in plugin set is registered by default.
-const DEFAULT_BUILTIN_PLUGINS: bool = true;
+/// Demo plugins alter normal blocks/chat, so unconfigured servers opt out.
+const DEFAULT_BUILTIN_PLUGINS: bool = false;
 
 /// Default spawn-protection radius, in blocks. Zero disables spawn protection
 /// entirely, which is the default so an unconfigured server protects nothing.
@@ -213,7 +213,7 @@ pub struct AppConfig {
     java_executable: String,
     /// Absolute per-RPC budget, including queue time.
     java_bridge_timeout: Duration,
-    /// Whether the application registers its built-in plugin set.
+    /// Whether the application registers its optional built-in demo plugins.
     builtin_plugins: bool,
     /// Spawn-protection radius, in blocks (Chebyshev) around the spawn column.
     /// Zero disables spawn protection.
@@ -375,7 +375,10 @@ impl AppConfig {
         self.java_bridge_timeout
     }
 
-    /// Returns whether the built-in plugin set is enabled.
+    /// Returns whether the built-in demo plugins are explicitly enabled.
+    ///
+    /// Defaults to false. Enabling the samples includes the block-rules demo,
+    /// which intentionally replaces normal glass with tinted glass.
     #[must_use]
     pub const fn builtin_plugins(&self) -> bool {
         self.builtin_plugins
@@ -1116,11 +1119,16 @@ mod tests {
     }
 
     #[test]
-    fn builtin_plugins_default_on_and_can_be_disabled() {
-        assert!(AppConfig::default().builtin_plugins());
-        let parsed =
-            AppConfig::from_toml_str("builtin_plugins = false").expect("valid plugin toggle");
-        assert!(!parsed.builtin_plugins());
+    fn builtin_demo_plugins_default_off_and_require_explicit_opt_in() {
+        assert!(!AppConfig::default().builtin_plugins());
+        assert!(!AppConfig::from_toml_str("")
+            .expect("omitted toggle uses default")
+            .builtin_plugins());
+        for (value, expected) in [("false", false), ("true", true)] {
+            let parsed = AppConfig::from_toml_str(&format!("builtin_plugins = {value}"))
+                .expect("valid plugin toggle");
+            assert_eq!(parsed.builtin_plugins(), expected);
+        }
     }
 
     #[test]
