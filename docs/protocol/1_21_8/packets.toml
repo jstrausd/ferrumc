@@ -735,6 +735,51 @@ fields = [
     { name = "head_yaw", type = "i8" },
 ]
 
+# Original ClientboundSetEntityDataPacket / minecraft-data entity_metadata.
+# Metadata is an opaque UNPREFIXED tail, including the original EOF marker if
+# supplied. This layer validates only a local 263168-byte admission policy
+# (256 KiB component budget + 1 KiB reserved overhead), not entries, serializers,
+# Slot/components, the EOF marker, or trailing bytes. A consumer must build and
+# validate its complete metadata within this cap; this is not a Vanilla limit.
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "SetEntityData"
+id = 0x5C
+fields = [
+    { name = "entity_id", type = "varint" },
+    { name = "metadata_raw", type = "bounded_remaining_bytes(263168)" },
+]
+
+# Original ClientboundSetEntityMotionPacket / minecraft-data entity_velocity.
+# Inputs are already quantized signed i16 wire values. Physics/Vec3 clamping
+# and quantization belong to a separately verified consumer.
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "SetEntityMotion"
+id = 0x5E
+fields = [
+    { name = "entity_id", type = "varint" },
+    { name = "velocity_x", type = "i16" },
+    { name = "velocity_y", type = "i16" },
+    { name = "velocity_z", type = "i16" },
+]
+
+# Original ClientboundTakeItemEntityPacket / minecraft-data collect. All three
+# fields preserve signed VarInt values. The consumer supplies the original
+# pickup count, which may differ from the amount actually moved into inventory.
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "TakeItemEntity"
+id = 0x75
+fields = [
+    { name = "item_entity_id", type = "varint" },
+    { name = "collector_entity_id", type = "varint" },
+    { name = "pickup_count", type = "varint" },
+]
+
 # minecraft-data: play.toClient.entity_equipment ("Set Equipment"). Shows other
 # players what a remote player is holding/wearing. protocol.json models the body
 # as `entityId: varint` then `equipments: topBitSetTerminatedArray<{ slot: i8,

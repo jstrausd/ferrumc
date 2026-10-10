@@ -1,0 +1,308 @@
+{
+  "deviations": [
+    "263168-byte tail is FerrumC admission only; component cap is not a global trusted Slot encoding guarantee",
+    "opaque tail deliberately does not implement original EOF/serializer/Slot/NBT/trailing admission",
+    "scalar malformed VarInt retains FerrumC five-byte refusal/cursor behavior; original Java read may consume sixth byte before refusing",
+    "no motion f64 quantization or item physics introduced",
+    "Take fields keep signed original values; no accounting or count reinterpretation"
+  ],
+  "feature_search": "narrow search of network/itemcomponent source patches and all feature patches found no separate three-packet/SynchedEntityData/ItemObfuscation feature hunk; VarInt optimization is a source patch and is pinned; frame compression/encryption and unrelated Moonrise registry holders outside scope",
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "rows": [
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/protocol/game/ClientboundSetEntityDataPacket.java",
+      "review": "complete class/interface",
+      "sha256": "3ac616a2749353deb1693a0fe9cce5d93a702b8863ff9197309698c17cb5e013",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/protocol/game/ClientboundSetEntityMotionPacket.java",
+      "review": "complete class/interface",
+      "sha256": "26f405f1ace73e0000e77d3970c7072cec931deb105b47c62427757d712fdf02",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/protocol/game/ClientboundTakeItemEntityPacket.java",
+      "review": "complete class/interface",
+      "sha256": "6f31e060c0392af86f7282ccf358ae06d98c74729f22cc6f655cabdca880b22a",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/syncher/EntityDataSerializers.java",
+      "review": "complete class/interface",
+      "sha256": "ba560dc2648bf2c9be3c64239b99879440746467aa700aa9926660e556ff9ff4",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/syncher/SynchedEntityData.java",
+      "review": "complete class/interface",
+      "sha256": "f69c000b8c2783bd3d11d91ad7d396fc6196080ae8c8ee992b3e52356e849021",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/syncher/EntityDataSerializer.java",
+      "review": "complete class/interface",
+      "sha256": "48d8af6e0658b3ef8755d7d3bd8a97a7c580bd477ef27a72bf20fede262e8317",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/syncher/EntityDataAccessor.java",
+      "review": "complete class/interface",
+      "sha256": "14a5e885db2978454e17893757ccb68eed0c8f7b20218549f974ae59a8388aa8",
+      "symbols": "complete"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/item/ItemStack.java",
+      "review": "selected complete relevant methods, not full class",
+      "sha256": "89283b1e4dd1e62d41ec8630e36eb7f3fbafe6ed9c576c714bccb5cbefd0bb56",
+      "symbols": "codec declarations; complete createOptionalStreamCodec and validatedStreamCodec"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/core/component/DataComponentPatch.java",
+      "review": "selected complete relevant methods, not full class",
+      "sha256": "885e9d880b7882e62529f27dd4e58f84e9c7cce11cf564fa844f59ffb28a9c8b",
+      "symbols": "complete createStreamCodec encode/decode methods"
+    },
+    {
+      "layer": "vanilla-base",
+      "path": "paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/entity/item/ItemEntity.java",
+      "review": "selected complete relevant methods, not full class",
+      "sha256": "64e95726b7f323d634caec4c2e1944c5e385f38d6579052c4fbb0213f86a69d4",
+      "symbols": "DATA_ITEM registration; complete defineSynchedData/getItem/setItem/onSyncedDataUpdated; constructor declarations"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/protocol/game/ClientboundSetEntityDataPacket.java",
+      "review": "complete class/interface",
+      "sha256": "afdcba93d98f7e5758fa47df2aa6ea4a7aa2984b6535233c208a0b61a397c8f9",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/protocol/game/ClientboundSetEntityMotionPacket.java",
+      "review": "complete class/interface",
+      "sha256": "26f405f1ace73e0000e77d3970c7072cec931deb105b47c62427757d712fdf02",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/protocol/game/ClientboundTakeItemEntityPacket.java",
+      "review": "complete class/interface",
+      "sha256": "6f31e060c0392af86f7282ccf358ae06d98c74729f22cc6f655cabdca880b22a",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/syncher/EntityDataSerializers.java",
+      "review": "complete class/interface",
+      "sha256": "dc8390f8215f3bc07535785edea74833ca8c4f20e8a74c3057d1483527d26782",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/syncher/SynchedEntityData.java",
+      "review": "complete class/interface",
+      "sha256": "568314b21d86b4a92f70f5479c875baba193f67e16d4f8595ae3e08857ce9dc2",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/syncher/EntityDataSerializer.java",
+      "review": "complete class/interface",
+      "sha256": "48d8af6e0658b3ef8755d7d3bd8a97a7c580bd477ef27a72bf20fede262e8317",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/syncher/EntityDataAccessor.java",
+      "review": "complete class/interface",
+      "sha256": "14a5e885db2978454e17893757ccb68eed0c8f7b20218549f974ae59a8388aa8",
+      "symbols": "complete"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/world/item/ItemStack.java",
+      "review": "selected complete relevant methods, not full class",
+      "sha256": "6332042d6d3c10a6cde47eb29803fd9b15cb3721f586c541e5ab9bc0cc8fbff6",
+      "symbols": "codec declarations; complete createOptionalStreamCodec and validatedStreamCodec"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/core/component/DataComponentPatch.java",
+      "review": "selected complete relevant methods, not full class",
+      "sha256": "8823eadf2bdd68fbdbe70f35ca4b4931ac46812e27a7edfd48a53e5111fef0b6",
+      "symbols": "complete createStreamCodec encode/decode methods"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/world/entity/item/ItemEntity.java",
+      "review": "selected complete relevant methods, not full class",
+      "sha256": "0e01331a2b7c21ddc9753b3a3b44350cdce0af46b62694d91f57dd037ef13bad",
+      "symbols": "DATA_ITEM registration; complete defineSynchedData/getItem/setItem/onSyncedDataUpdated; constructor declarations"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/protocol/game/GameProtocols.java",
+      "review": "complete class",
+      "sha256": "24f8f7df801f956c806ef39d9582e40cb5f715615a0026fdb51376423e1f0d99",
+      "symbols": "CLIENTBOUND_TEMPLATE registration/binding"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/RegistryFriendlyByteBuf.java",
+      "review": "complete class",
+      "sha256": "a5023438c2ae3b58e64a687dda5289ed94535c680f8fe79f35003b1acab21a87",
+      "symbols": "registryAccess/decorator"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/codec/IdDispatchCodec.java",
+      "review": "complete class",
+      "sha256": "901d6d74cbcb8a7002a6a234f8a2f8bb8b33db3b6c055110f55cd2ddbc44ba52",
+      "symbols": "Builder/add/build, encode/decode"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/protocol/ProtocolInfoBuilder.java",
+      "review": "complete class",
+      "sha256": "20cd1a14f4761797b38dd4dcf45d7fa11df7f2b0cbef6abb975949a00027dc9d",
+      "symbols": "addPacket/build/template/bind"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/protocol/Packet.java",
+      "review": "complete interface",
+      "sha256": "e52ae5901eeb45aaa64ab9c73ec0d97f87b60c8e307ebccb978f9b275124fb64",
+      "symbols": "codec"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/VarInt.java",
+      "review": "complete class",
+      "sha256": "2e120e6d335009360c29c1ad34e19272717f56b09d07be9b9ab7ed64427941e1",
+      "symbols": "read/write/getByteSize"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/FriendlyByteBuf.java",
+      "review": "selected complete relevant methods",
+      "sha256": "626fc6b6dd9bc55bb9aa4a06a1f87a94f53ed1baae5c5c46c390f28000930874",
+      "symbols": "complete readVarInt/writeVarInt/readNbt/writeNbt"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/codec/StreamCodec.java",
+      "review": "selected complete relevant methods",
+      "sha256": "306c247ad7f5fcbafa1fa64a67f954407e24dae0ea8224e498a82627250cbb72",
+      "symbols": "complete ofMember/mapStream methods"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/network/codec/ByteBufCodecs.java",
+      "review": "selected relevant methods/declarations",
+      "sha256": "0b0d0d314b23bf9e8d9f62933dadd450c96264c291595e635a91af175f06b694",
+      "symbols": "complete SHORT/VAR_INT codecs and registry/holderRegistry; selected NBT codec declarations"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/core/component/DataComponents.java",
+      "review": "selected relevant declarations",
+      "sha256": "efc1420c7cedcf98c78efbacfdd0a208dd97f63017e2fbfb72810c9e6970a1d3",
+      "symbols": "CUSTOM_DATA/MAX_STACK_SIZE/CUSTOM_NAME/REPAIR_COST registrations"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/server/MinecraftServer.java",
+      "review": "selected complete relevant methods",
+      "sha256": "6877cdee0fdd828fce9559e26ae246186f22c621c60cac9a5386e6c5767e9454",
+      "symbols": "constructor/getServer/registryAccess"
+    },
+    {
+      "layer": "paper-source",
+      "path": "paper-server/src/main/java/io/papermc/paper/util/sanitizer/ItemObfuscationSession.java",
+      "review": "complete class",
+      "sha256": "67db5c3f1798caf540e69d904e8cb0e1ed1413fc7592ee0e8398981f81bccd2e",
+      "symbols": "complete"
+    },
+    {
+      "layer": "paper-source",
+      "path": "paper-server/src/main/java/io/papermc/paper/util/sanitizer/ItemObfuscationBinding.java",
+      "review": "complete class",
+      "sha256": "0e8d0ea47c29b0c3215cae823c0e9e69398ec089f0f43ab25f510eca8fd44a34",
+      "symbols": "complete"
+    },
+    {
+      "layer": "paper-source",
+      "path": "paper-server/src/main/java/io/papermc/paper/util/sanitizer/ItemComponentSanitizer.java",
+      "review": "complete class",
+      "sha256": "0a4e2bf3091730dd30237fa764d98a3264fb21a45644ec124ddefea8a90d7d91",
+      "symbols": "complete"
+    },
+    {
+      "layer": "paper-source",
+      "path": "paper-server/src/main/java/io/papermc/paper/util/sanitizer/OversizedItemComponentSanitizer.java",
+      "review": "complete class",
+      "sha256": "e2f88d5898ae702c10561c2df56c0d0fec3e57c05542a63de5149553163b9f24",
+      "symbols": "complete"
+    },
+    {
+      "layer": "paper-source",
+      "path": "paper-server/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java",
+      "review": "selected complete relevant methods and declarations",
+      "sha256": "23c238c8a609321aa8d2448ef13a491902b9376e6a023e9d39dfaf6eb7165cb5",
+      "symbols": "Anticheat.Obfuscation.Items defaults/bindDataSanitizer; get/set"
+    },
+    {
+      "layer": "source-patch",
+      "path": "paper-server/patches/sources/net/minecraft/network/protocol/game/ClientboundSetEntityDataPacket.java.patch",
+      "review": "complete patch",
+      "sha256": "e1b03ce477587b0a46504498f10b30af19de49f4bf7437488f6521f9b1043636",
+      "symbols": "metadata/item stream encoding"
+    },
+    {
+      "layer": "source-patch",
+      "path": "paper-server/patches/sources/net/minecraft/network/syncher/EntityDataSerializers.java.patch",
+      "review": "complete patch",
+      "sha256": "ac15829e4c88b7d9701c1aad6bddd412411e89882c24419a87c8eaca3c7acc31",
+      "symbols": "metadata/item stream encoding"
+    },
+    {
+      "layer": "source-patch",
+      "path": "paper-server/patches/sources/net/minecraft/core/component/DataComponentPatch.java.patch",
+      "review": "complete patch",
+      "sha256": "30a7e5a2d84fa06706fccbdec312415fe4e332e644cd4d3e27688b24c336f6b4",
+      "symbols": "metadata/item stream encoding"
+    },
+    {
+      "layer": "source-patch",
+      "path": "paper-server/patches/sources/net/minecraft/world/item/ItemStack.java.patch",
+      "review": "complete codec/obfuscation patch hunk; remaining class patches outside wire scope",
+      "sha256": "aa57ad4c4ea98117effa1340a5aefff314b4fe781289dfe0e26b4cdb48bb5a3e",
+      "symbols": "metadata/item stream encoding"
+    },
+    {
+      "layer": "source-patch",
+      "path": "paper-server/patches/sources/net/minecraft/network/VarInt.java.patch",
+      "review": "complete patch",
+      "sha256": "3434c520d8d36521c9889b3f7f3d8f442dc1eea8de8f98c36f4b37d14a2aaebf",
+      "symbols": "VarInt.write/getByteSize"
+    },
+    {
+      "layer": "applied-paper",
+      "path": "paper-server/src/minecraft/java/net/minecraft/util/Mth.java",
+      "review": "selected complete relevant method",
+      "sha256": "b16d2c4c6b1979c2999480952e4e4d624a67755204d96de909006dd99ff51a5c",
+      "symbols": "complete double clamp method"
+    }
+  ],
+  "scope": "wire/metadata registration/selected itemcodec context only; no ItemEntity physics/pickup/event parity"
+}

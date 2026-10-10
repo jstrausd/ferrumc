@@ -16,3 +16,13 @@
 - Play Disconnect is clientbound packet 0x1C for protocol 772. Its reason is a
   bounded anonymous-root NBT text component, using the same wire type as System
   Chat. Login Disconnect's JSON-string encoding must not be reused in play.
+- Item-entity Play packets are SetEntityData 0x5C, SetEntityMotion 0x5E, and
+  TakeItemEntity 0x75 for protocol 772. Motion accepts already quantized i16
+  wire values; Take preserves all three signed VarInts without count policy.
+- SetEntityData's metadata_raw is an unprefixed opaque BoundedBytes<263168>
+  tail. The local cap is checked before tail read/copy/allocation; refusal
+  leaves the reader at the tail entry, after any consumed entity ID. The cap
+  is not a Vanilla metadata limit or a global trusted ItemStack guarantee.
+  No EOF/serializer/Slot/component/NBT/trailing-byte validation or insertion
+  occurs here. Semantic builders must validate their complete output within
+  the cap in separately reviewed consumer tickets.

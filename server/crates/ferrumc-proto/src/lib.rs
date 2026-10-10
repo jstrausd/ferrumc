@@ -4,7 +4,7 @@
 //! Generated packet enums and codecs for protocol 772 (Minecraft 1.21.8).
 //!
 //! The wire types are emitted by `ferrumc-proto-gen` into [`generated`] and
-//! verified by `cargo xtask generate --check`. The hand-written [`wire`] module
+//! verified by `cargo xtask generate --check`. The hand-written `wire` module
 //! supplies the codec primitives the generated code calls, and [`ProtoError`]
 //! classifies every decode/encode failure.
 

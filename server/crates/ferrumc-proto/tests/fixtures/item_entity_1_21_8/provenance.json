@@ -1,0 +1,31 @@
+{
+  "artifact_count": 121,
+  "data_version": 4440,
+  "input_pins": {
+    "ItemEntityWirePlugin.java": "d4cdb7671cd375b25ee084ef6533e4f2b6303c907753f75f29496f84186dde97",
+    "artifact-pins.json": "d549be01c6787398c139a77b24665b68cbabfcd8ba284e5d537eb73ae9694255",
+    "export_paper.py": "6103342ca56759cf01d41267fa3c3d49bbaa44a1afd753ce9735c11f9594034c",
+    "export_prismarine.mjs": "1e85358717ee68a9e04f4321e24f148c03ca1c9a5675bc2cfd68d4437aa5e4c4",
+    "source-pins.json": "78a3efb8a88778a6c12d2dbb280630e3930de3a1b52b8b37300b43e790e2748d"
+  },
+  "java": "21.0.12.1+1",
+  "node": "v26.10.0",
+  "normalization": "only documentary original/helper path prefixes; no packet or semantic normalization",
+  "packages": {
+    "minecraft-data": "3.111.0",
+    "minecraft-protocol": "1.66.2"
+  },
+  "packet_counts": {
+    "metadata": 14,
+    "motion": 8,
+    "take": 8
+  },
+  "packet_table_sha256": "66b71e900d5e81fd42874ace58cb60a9ea309fec23158797d95d06e53ad753de",
+  "paper_build": 60,
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "protocol": 772,
+  "raw_evidence": "root-owned review freeze under .codex-tmp/net04_1/; packet evidence only",
+  "scope": "exact packet wire fixtures; opaque metadata admission and scalar packet contract; no gameplay/plugin/performance acceptance",
+  "source_count": 42,
+  "status": "passed"
+}

@@ -1,0 +1,93 @@
+{
+  "helper_class_sha256": "177fd6cbf503798323d7689bdbeae29cc0b7460aabadee9555085a241e41c38a",
+  "helper_origin": "fresh-output/server/plugins/wire-reference.jar",
+  "item_entity_metadata_index": 8,
+  "item_obfuscation_enabled": false,
+  "item_obfuscation_level": "OVERSIZED",
+  "item_stack_serializer_id": 7,
+  "motion_constructor_inputs_hexfloat": [
+    [
+      "0x0.0p0",
+      "-0x0.0p0",
+      "0x0.0p0"
+    ],
+    [
+      "0x1.05ef2d49e5266p-13",
+      "-0x1.05ef2d49e5266p-13",
+      "0x1.0624dd2f1a9fcp-13"
+    ],
+    [
+      "0x1.f333333333333p1",
+      "-0x1.f333333333333p1",
+      "0x1.4p2"
+    ],
+    [
+      "0x1.f333333333332p1",
+      "-0x1.f333333333332p1",
+      "-0x1.4p2"
+    ],
+    [
+      "0x1.f333333333334p1",
+      "-0x1.f333333333334p1",
+      "0x1.3c0ca4283de1bp0"
+    ]
+  ],
+  "original_class_origins": {
+    "io.papermc.paper.util.sanitizer.ItemComponentSanitizer": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "io.papermc.paper.util.sanitizer.ItemObfuscationSession": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "io.papermc.paper.util.sanitizer.OversizedItemComponentSanitizer": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.core.component.DataComponentPatch": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.network.protocol.game.GameProtocols": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.network.syncher.EntityDataSerializers": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.network.syncher.SynchedEntityData": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.world.entity.item.ItemEntity": "runtime/versions/1.21.8/paper-1.21.8.jar",
+    "net.minecraft.world.item.ItemStack": "runtime/versions/1.21.8/paper-1.21.8.jar"
+  },
+  "original_metadata_negative_controls": [
+    {
+      "body_hex": "00",
+      "case": "empty_tail",
+      "error_class": "java.lang.IndexOutOfBoundsException",
+      "reader_position": 1,
+      "remaining": 0,
+      "status": "rejected"
+    },
+    {
+      "body_hex": "00000001",
+      "case": "missing_eof",
+      "error_class": "java.lang.IndexOutOfBoundsException",
+      "reader_position": 4,
+      "remaining": 0,
+      "status": "rejected"
+    },
+    {
+      "body_hex": "000063ff",
+      "case": "unknown_serializer",
+      "error_class": "io.netty.handler.codec.DecoderException",
+      "reader_position": 3,
+      "remaining": 1,
+      "status": "rejected"
+    },
+    {
+      "body_hex": "00080701",
+      "case": "truncated_item",
+      "error_class": "java.lang.IndexOutOfBoundsException",
+      "reader_position": 4,
+      "remaining": 0,
+      "status": "rejected"
+    },
+    {
+      "body_hex": "00ffee",
+      "case": "trailing_after_eof",
+      "reader_position": 2,
+      "remaining": 1,
+      "status": "decoded",
+      "values": 0
+    }
+  ],
+  "paper_version": "1.21.8-60-29c8822 (MC: 1.21.8)",
+  "rows": 30
+}
