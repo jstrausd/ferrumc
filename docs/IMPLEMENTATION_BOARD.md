@@ -131,22 +131,27 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN und integriert `290e5343`: Debug/Release je188, drei zusätzliche unabhängige Debug-/Releaseprobes, strictchecks und29/29 Freezehashes grün. Frischer normal/-O Originalreexport bytegleich;17.213 tatsächliche JAR-Records. [Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md). Chunk-/Terrainconsumer bleiben offen. |
 | GEN-05.3 | `item_transfer_primitives`, Runtime-Review `feature_catalog` und Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN integriert `e7565c38`:126 Chunks/7.077.888 tatsächliche Paperdichten, Wrapper/Provider/Constructor/Climate; Root Debug/Release je232 Tests und strictchecks,118/118 Autorenpins geprüft. Zwei Lifecyclefindings korrigiert und unabhängig gegengetestet. [Review](agent-tasks/GEN-05_3_NOISE_CHUNK_REVIEW.md); Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
 | GEN-05.4 | `item_transfer_primitives`, unabhängiger Review Root | `server/crates/ferrumc-world/**`, eigener .4-Brief | Unabhängig CLEAN und als `2a4a6cd4` integriert, vollständige CI erfolgreich: frische Archivprüfung Debug/Release je251, strictchecks ohne Ausnahmen;160 Autorenpins unverändert.126 vollständige Paper-Materialarrays/7.077.888 States+Flags,499+42 finite Methodenfälle inkl Cache-/Request-/RNGchronologie und15 zusätzliche Nonfinitepolicyfälle. [Review](agent-tasks/GEN-05_4_AQUIFER_MATERIAL_REVIEW.md). Naturweltaktivierung und Surface folgen. |
+| REG-BIOME-01 | `item_transfer_primitives`, unabhängiger Review Root | `server/crates/ferrumc-registry/**`, eigener Brief | Unabhängig CLEAN lokal als `c3d75914` integriert:120 Autorenpins/48 Overlaydateien und160 alte Worldpins unverändert; Root Debug/Release je70+14 Doctests und strictchecks.67 komplette Originaldefinitionen/7598 geordnete Parameter, alle67 JARressourcen und vier Negativeguards unter Python-O; vier alte Generatedtabellen bytegleich, neue Tabelle in vier Modi gleich. [Review](agent-tasks/REG-BIOME-01_ORIGINAL_BIOME_DATA_REVIEW.md). Worldselector/Clientpalette folgen. Veröffentlichung gemeinsam mit fehlendem Netconsumer. |
+| NET-04.1 | `feature_catalog`, unabhängiger Review Root | Proto/Spec und eigener Brief | Unabhängig CLEAN lokal als `aaa8fdc3` integriert:28 Source-/51 Evidence-/95 Publishedbaselinepins geprüft, Root Debug/Release je54 und strictchecks/Generatorcheck ohne Ausnahmen.30 echte Original-/Prismarine-Paketfixtures,121 Artifact-/42 Sourcepins, finale normal/-O-Helferklasse/JAR/semantische Beobachtungen unabhängig geprüft. [Review](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE_REVIEW.md). Veröffentlichung gemeinsam mit .1b, keine Itemgameplayaktivierung. |
+| NET-04.1b | `feature_catalog`, unabhängiger Review Root | ausschließlich Net und eigener Brief | Unabhängig CLEAN als `e88dced0` integriert: frischer Rootarchivlauf Debug/Release je196, strictchecks ohne Ausnahmen;36 Source-/15 Evidence-/79 unveränderte .1-Dateien und acht Paperpins geprüft. Elf reale Writer-/Frame-/FIFO-/Refusaltests, zwei negative Overrides und Framefrontretention; Writerfunktion bytegleich. [Review](agent-tasks/NET-04_1b_ITEM_PACKET_DELIVERY_REVIEW.md). Keine Itemgameplayaktivierung; Gesamt-CI für gemeinsamen Head folgt. |
 | NET-04.0 | `feature_catalog`, unabhängiger Review Root | `server/crates/ferrumc-proto-gen/**`, eigener Brief | Unabhängig CLEAN integriert `e563b971`:27 Unit/2 WholeGeneratorchecks, frische Archivcopy,6 eigene Rawwireproben Debug/Release,54 WholeProtoDebug; strictchecks und9/55 Freeze-Dateien unabhängig geprüft. Produktionsspec/Generatedfiles bytegleich; ProtoRustdoc mit dokumentierter einzelner Baselinelintausnahme. [Review](agent-tasks/NET-04_0_BOUNDED_REMAINING_BYTES_REVIEW.md). |
 | NET-04.0b | `feature_catalog`, unabhängiger Review Root | `server/crates/ferrumc-proto-gen/**`, eigener Brief | Unabhängig CLEAN als `cc3503e5` integriert: ausschließlich begründete methodenspezifische Dispatchdecode-Zeilenlintausnahme;29 Generatortests und strictchecks. Root9/43/35 Source-/Evidence-/Readonlypins geprüft; frischer echter xtask mit unveränderter Spec und separater Drei-Packet-Probe, jeweils48 Prototests und strictclippy grün. [Review](agent-tasks/NET-04_0b_GENERATED_DISPATCH_REVIEW.md). |
 | NET-04.0c | Root | ausschließlich tatsächlich erzeugte Proto-Generatedfiles und Integrationsdocs | CLEAN adoptiert durch echten Produktionsxtask; sechs Dateien bytegleich zum unabhängigen Rootoutput, genau neun neue Methodattribute in fünf States. `--check` grün, Spec unverändert. .0b/.0c sind gemeinsam auf main `f6eb7111` veröffentlicht; CI38092928296 wurde durch den neueren Lauf ersetzt; vollständige CI für `2a4a6cd4` einschließlich dieser Adoption ist erfolgreich. Tatsächliche Entitypakete folgen .1. |
 | DUR-03.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Unabhängig CLEAN und integriert `eaedabd2`: Debug/Release jeweils280 Tests einschließlich zwei zusätzlicher Rootprobes, strictchecks und21/21 Freezehashes grün. Tatsächliche joint redb-Transaction, Memoryauthority, CAS/Tombstone/Receipts, Cutpoints/Uncertainty und Grenzen. [Review](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md); Onlineconsumer folgt. |
 | DUR-04.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-sim/**`, eigener [Consumerbrief](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) | Unabhängig CLEAN als `4f7d5037` integriert und CI-grün: frischer Archivlauf, WholeSim Debug/Release je290 einschließlich drei eigener Rootproben auf Memory/redb; strictchecks ohne Ausnahmen,43 Runtime-/22 Referenz-/3 Appfixture-/44 Ownedpins und fünf Autorenlogs geprüft. Versiegelte echte Store-/Receipt-/Currentpostimageevidence, SnapshotOnly-Clone und volle Playerreservation. [Review](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER_REVIEW.md). Timer-/Dirtyconsumer und Appdriver folgen. |
-| DUR-04.2a / SRV-02.2 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener Counterbrief | Vollständiger konkreter Entwurf `77c7e70a…` einschließlich künftigem Boundarypreflight geprüft und intern freigegeben. Alle residenten Items pro logicalTick, confirmed-before/live-after, Dirty-/Save-/Due-/Deferauthority; Saveauswahl64Slots getrennt vom Countertick. Noch kein geprüfter Runtimefreeze, keine Physics-/Javaevent-/Livegameplayabnahme. |
+| DUR-04.2a / SRV-02.2 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener Counterbrief | Implementiert und eingefroren, Autoren-Debug320 grün; unabhängiger Rootreview offen. Root fand temporäres FCIS-Encoding im readonly Scalarplan/InventoryPlan; vor CLEAN folgt der eigene Items-Größen-/Representationproducer und seine Simadoption. Alle residenten Items pro logicalTick,64-Slot-Saveauswahl getrennt. Keine Physics-/Javaevent-/Livegameplayabnahme. |
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
 Aktuell arbeiten neben Root drei Agents parallel. `item_transfer_primitives`
 hat GEN-05.4 eingefroren; Root hat die vollständige Worldimplementierung
-unabhängig CLEAN geprüft und als `2a4a6cd4` veröffentlicht. Der Agent implementiert jetzt den intern freigegebenen REG-BIOME-01-Vertrag im
-Registrycrate: vollständige65 Biomekeys/-Definitionen und7593/5 geordnete
-Originalparameter, lokale Resource-IDs ausdrücklich getrennt von dynamischen
-Original-/Clientregistryindizes. Worldfreeze und frühere Referenzen bleiben
-unverändert. Anschließend folgt der historyhaltige Selector/Quartarrayconsumer.
+unabhängig CLEAN geprüft und als `2a4a6cd4` veröffentlicht. REG-BIOME-01 ist
+inzwischen ebenfalls unabhängig CLEAN lokal integriert. Der Agent implementiert
+jetzt den intern freigegebenen [GEN-05.5](agent-tasks/GEN-05_5_BIOME_SELECTION.md)-
+Vertrag: echte retained History, Original-RTree und vollständige Quartarrays
+auf dem geprüften Registryproducer. Endtransform-/Domain- und all-source-
+Lifecycleergänzung wurden konkret geprüft; noch keine unabhängige .5-Abnahme
+oder aktive Naturwelt.
 
 `select_world_ticket` implementiert den freigegebenen DUR-04.2a-Vertrag mit
 Itemcounter/Dirty/Saves, künftigem readonly Boundarypreflight und getrenntem
@@ -154,11 +159,16 @@ confirmed-before/live-after. Saveoperationen verwenden einen bounded,
 move-owned Driver-ID-Pool mit maximal32 IDs; keine erfundene injektive
 Namespace-/Sequenzabbildung. Alle residenten Items erhalten ihren echten
 Counterstep; die64-Slot-Grenze betrifft ausschließlich die Saveauswahl.
-Noch kein geprüfter .2a-Runtimefreeze und keine Itemphysik-/Appaktivierung.
+Der48-Dateien-Simfreeze wird unabhängig geprüft; temporäre FCIS-
+Serialisierung im Scalarpreflight ist als erforderliche Korrektur gefunden.
+Der Protokollagent übernimmt nach seinem Netabschluss den engen Items-
+Producer, danach adoptiert der Simautor dessen allokationsfreie APIs.
+Noch kein CLEAN für .2a und keine Itemphysik-/Appaktivierung.
 
-`feature_catalog` implementiert den konkret freigegebenen
-[NET-04.1-Wirevertrag](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md): Metadata0x5c,
-Motion0x5e und TakeItem0x75. Die Rawmetadata ist eine opaque, lokal begrenzte
+`feature_catalog` hat den [NET-04.1-Wirevertrag](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md)
+für Metadata0x5c, Motion0x5e und TakeItem0x75 eingefroren; Rootreview CLEAN.
+Der NET-04.1b-Netconsumer ist inzwischen unabhängig CLEAN als `e88dced0`
+integriert. Die Rawmetadata ist eine opaque, lokal begrenzte
 Hülle und beansprucht keine Serializer-/Terminatoradmission. Der autorisierte
 isolierte Paperreferenzboot exportiert echte Originalcodec-Fixtures im echten
 Sanitizerkontext. Vor Veröffentlichung folgt unmittelbar der getrennte
@@ -262,6 +272,13 @@ konkretisiert die tatsächliche Umschaltung auf Format6 und FCPS3. Vor dieser
 Umschaltung benötigen gewöhnliche Block-/Commandaktionen eigene Ownedconsumer;
 Placement mit Itemverbrauch verlangt gemeinsame Player-/Chunkdurability.
 Der Appdriver ist vorbereitet, noch nicht vergeben oder aktiviert.
+[NET-04.2a](agent-tasks/NET-04_2a_ITEM_METADATA_BUILDER.md) ist als eigener
+Items-only-Metadatabuilder vorbereitet; konkreter trusted Slotwirepreflight vor
+Allocation und vollständiger Eintrag innerhalb der opaque Protohülle.
+[NET-04.2b](agent-tasks/NET-04_2b_ITEM_VIEWER_TRACKING.md) konkretisiert das
+Sessionviewertracking, bevor DUR-05 Liveentities aktiviert. Fehlende echte
+Simpublicationfacts benötigen zuerst einen eigenen Producer; die Session
+erzeugt keine dauerhafte Mutationsauthority.
 
 ## Orchestrierung
 

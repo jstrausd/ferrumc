@@ -2,7 +2,7 @@
 
 Ergebnis: **CLEAN**, Autor `feature_catalog`, Reviewer Root. Geprüft gegen
 veröffentlichtes main `2a4a6cd4418b3da03bccd280b5590a360cd4e0a4` mit exakt
-überlagerten Spec-/Protobuf-Dateien, getrennt von Registry-/Sim-WIP.
+überlagerten Spec-/Proto-Dateien, getrennt von Registry-/Sim-WIP.
 Keine Gameplayaktivierung oder Whole-Workspace-Abnahme dieses Producers.
 
 ## Geprüfter Stand
