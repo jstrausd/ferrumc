@@ -404,7 +404,7 @@ async fn limits(store: &dyn Store) {
             .unwrap()
             .record()
             .data(),
-        &[]
+        &[] as &[u8]
     );
     let mut proposals: Vec<_> = (0..15)
         .map(|id| {
