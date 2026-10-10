@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "minecraft": {
+    "version": "1.21.8",
+    "protocol_version": 772,
+    "data_version": 4440
+  },
+  "scope": "Immutable original builtin biome resource data; no selector, network registry or gameplay admission",
+  "parameters": {
+    "file": "biome-parameters-1.21.8.json",
+    "bytes": 1072932,
+    "sha256": "4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971",
+    "axes": [
+      "temperature",
+      "humidity",
+      "continentalness",
+      "erosion",
+      "depth",
+      "weirdness"
+    ],
+    "quantization_scale": 10000,
+    "presets": {
+      "minecraft:nether": {
+        "entries": 5,
+        "unique_biomes": 5
+      },
+      "minecraft:overworld": {
+        "entries": 7593,
+        "unique_biomes": 54
+      }
+    }
+  },
+  "original_census": {
+    "normal_and_optimized_bytes_equal": true,
+    "freeze_sha256": "95deae4a95856a4a80cb3ec71c1c251e1852b6ecc0a1506d6aa811433e28729b",
+    "helper_sha256": "7c128dbb203565c9cfd1728bb753870c3037219cae283f759cf1f18df15122c9",
+    "runner_sha256": "821327f9770821a0431a52385434cfcecf996457fab08a1727562affb54381f9",
+    "manifest_sha256": "5a37d47e69f8f0cf1866a22dcdd6827c187b8f0fb932703324fe50e6a944854f",
+    "paper_inner_sha256": "c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507",
+    "original_class_origins_checked": 19,
+    "fresh_helper_origin_checked": true
+  }
+}

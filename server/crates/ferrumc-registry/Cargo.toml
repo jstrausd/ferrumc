@@ -7,8 +7,8 @@ repository.workspace = true
 
 [dependencies]
 # Runtime is intentionally dependency-free: all registry data is hardcoded as
-# deterministic constants (block/biome/dimension) or build-time-generated static
-# arrays (items, blocks, entity types) with zero boot cost (no JSON parsing at startup).
+# deterministic constants (block/dimension) or build-time-generated static arrays
+# (items, blocks, entity types, worldgen, biomes), without startup JSON parsing.
 
 [build-dependencies]
 # Build-time only: the registry tables are generated from the vendored snapshots

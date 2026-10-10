@@ -10,8 +10,7 @@ use serde::Deserialize;
 use serde_json::{value::RawValue, Map, Value};
 use sha2::{Digest, Sha256};
 
-#[path = "worldgen_json.rs"]
-mod bounded_json;
+use crate::worldgen_json as bounded_json;
 #[path = "worldgen_schema.rs"]
 mod schema;
 

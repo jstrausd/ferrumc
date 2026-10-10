@@ -11,8 +11,8 @@
 
 ## Crate-Specific
 
-- The runtime is dependency-free and does no I/O or parsing. Block/biome/dimension
-  data is hardcoded as `const`; item/block/entity-type/worldgen data is generated at
+- The runtime is dependency-free and does no I/O or parsing. Block/dimension
+  constants are hardcoded as `const`; item/block/entity-type/worldgen/biome data is generated at
   **build time** by `build.rs` from the vendored snapshots into static arrays emitted
   to `OUT_DIR`. Either way the runtime never parses JSON and pays zero boot cost
   (no `OnceCell`/`lazy_static`). JSON/TOML parsing exists only in `build.rs` and
@@ -24,8 +24,10 @@
   of the corresponding block in the vendored `blocks.json` at the pinned commit.
   The drift-guard tests enforce this; do not change a constant without re-pinning
   and re-vendoring the fixtures + manifest checksums together.
-- Biome and dimension-type ids are server-assigned dynamic-registry indices, not
-  protocol constants; expose resource-location strings, never numeric ids.
+- Biome and dimension-type wire ids are server-assigned dynamic-registry indices,
+  not protocol constants. Biome resource identities may use opaque private local
+  slots for checked resource lookup; never expose those slots as wire/persisted
+  IDs or claim that canonical-name order is original bootstrap/network order.
 - `manifest.toml` checksums and byte counts must match the vendored fixtures.
 - Item placement bases retain the reverse-mapping snapshot except for the three
   explicitly declared standing/wall torch families. Their generated bases are
@@ -90,3 +92,31 @@
 - Definitions supply data only. World must independently check cumulative graph,
   work, seed and sampler bounds before compiling/evaluating. No runtime JSON
   parser, sampler, fallback seed, density compiler or chunk generation is added.
+- All 65 biome and two multinoise preset definitions preserve exact RawValue
+  slices from the unchanged original worldgen export. Fixed original export,
+  manifest and version pins plus the 65+2 original resource receipts establish
+  authority. Whole/definition syntax limits stay identical to the Worldgen
+  producer. Full Biome.DIRECT data is retained, without new runtime biome codec
+  execution or reduced NETWORK codec payload claims.
+- Expanded preset data derives from the unchanged independently frozen genuine
+  original-method census: 7593 Overworld and five Nether rows. The production
+  JSON and provenance have independent fixed byte/SHA pins. Original normal/-O
+  origin receipts, helper, historical runner and Root freeze remain unchanged.
+  No copied biome formulas or alphabetic Prismarine numeric ID authority is used.
+- Census parsing is build-only, typed and field-bounded: 2 MiB/262144 nodes/
+  depth8/string64 bytes; root has exactly two presets, preset arrays exactly
+  7593/5 rows, rows exactly four fields, axes exactly six two-integer spans.
+  Charges precede child materialization; an extra array element fails before
+  decoding its payload. Duplicate decoded object keys, unknown fields/references,
+  noncontiguous indexes, floating values and integer overflow are refused.
+- Quantized spans obey -20000 <= minimum <= maximum <= 20000 and offset
+  0..=10000, matching the original codec domain. All original long values,
+  parameter order and repeated entries remain intact; row ordinal is not an ID.
+  The immutable 7598-entry static table occupies at most 850976 native bytes;
+  lookups, definitions, borrowed slices and iterators allocate nothing.
+- The dependency-free runtime provides opaque family-separated biome/preset
+  resource IDs, never unchecked/default/serialization constructors. Selection,
+  RTree history, dynamic configuration order, wire NBT, chunk palette mappings,
+  active generation and gameplay require separate consumers. Existing flat
+  plains string/configuration consumers and Worldgen biome dependencies are
+  unchanged; this producer supplies no runtime registration or fallback biome.

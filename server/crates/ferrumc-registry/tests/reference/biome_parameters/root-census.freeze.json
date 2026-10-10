@@ -1,0 +1,46 @@
+{
+  "file_count": 10,
+  "files": {
+    ".codex-tmp/gen05_5-root-biome-census-normal/census.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-normal/classes/ferrumc/rootbiomes/BiomeParameterCensus.class": {
+      "bytes": 7337,
+      "sha256": "97f151e15b11069eb4b037458a505cf7ca757f43058140853ea5365a63034b8f"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-normal/manifest.json": {
+      "bytes": 31027,
+      "sha256": "5a37d47e69f8f0cf1866a22dcdd6827c187b8f0fb932703324fe50e6a944854f"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-normal/parameters.json": {
+      "bytes": 1072932,
+      "sha256": "4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-optimized/census.log": {
+      "bytes": 104,
+      "sha256": "9a8473e442379d942b9e790005cb559c80ebe6d441d89b22342e484493bdf841"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-optimized/classes/ferrumc/rootbiomes/BiomeParameterCensus.class": {
+      "bytes": 7337,
+      "sha256": "97f151e15b11069eb4b037458a505cf7ca757f43058140853ea5365a63034b8f"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-optimized/manifest.json": {
+      "bytes": 31027,
+      "sha256": "5a37d47e69f8f0cf1866a22dcdd6827c187b8f0fb932703324fe50e6a944854f"
+    },
+    ".codex-tmp/gen05_5-root-biome-census-optimized/parameters.json": {
+      "bytes": 1072932,
+      "sha256": "4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971"
+    },
+    ".codex-tmp/gen05_5-root-biome-census/BiomeParameterCensus.java": {
+      "bytes": 4175,
+      "sha256": "7c128dbb203565c9cfd1728bb753870c3037219cae283f759cf1f18df15122c9"
+    },
+    ".codex-tmp/gen05_5-root-biome-census/run_census.py": {
+      "bytes": 4358,
+      "sha256": "821327f9770821a0431a52385434cfcecf996457fab08a1727562affb54381f9"
+    }
+  },
+  "scope": "Actual Paper builtin biome parameters; no Rust biome selection or gameplay"
+}

@@ -4,9 +4,9 @@ Pinned Minecraft 1.21.8 registry data for the server, exposed as deterministic,
 hardcoded runtime constants.
 
 The runtime is dependency-free and does no I/O or JSON parsing at startup: every
-value is either a `const` baked at compile time (block/biome/dimension) or a
+value is either a `const` baked at compile time (block/dimension) or a
 `static` array generated at build time from a vendored snapshot (items, blocks
-and entity types/worldgen). The vendored upstream snapshots (`fixtures/protocol/1_21_8/` and this crate's
+and entity types/worldgen/biomes). The vendored upstream snapshots (`fixtures/protocol/1_21_8/` and this crate's
 `data/`, plus `docs/fixtures/minecraft-1.21.8-original/`) are
 parsed only by `build.rs` and by `#[cfg(test)]` drift guards that re-parse the
 real data and assert the generated tables still match,
@@ -21,7 +21,11 @@ so a re-pin to a newer data version cannot silently desync them.
   do not evaluate support shapes or runtime datapack overrides.
 - `default_block_state_id(name)` — resource-location → default state id lookup.
 - `dimension` — overworld geometry constants (`OVERWORLD`, `MIN_Y`, `HEIGHT`).
-- `biome` — biome resource-location constants (`PLAINS`).
+- `biome` — all 65 original biome resources and two original multinoise presets
+  through opaque checked local identities, with full preserved JSON definitions
+  and stats. The 7593 Overworld/five Nether quantized parameter entries retain
+  original order and repetitions as static borrowed slices; lookups and iteration
+  allocate nothing. `PLAINS` remains compatible with the existing flat world.
 - `item` — item lookups: `lookup_item_protocol_id`, `lookup_item_name`,
   `item_max_stack`, `item_to_block_state` (generated from `data/items.json` +
   `data/item_to_block_mapping.json`).
@@ -46,7 +50,10 @@ checksums, and `fixtures/protocol/1_21_8/NOTICE` for attribution.
 
 Biome and dimension-type ids are *not* fixed constants — they are server-assigned
 indices into the dynamic registries sent during the configuration phase — so this
-crate exposes their stable resource-location strings rather than numeric ids.
+crate exposes stable resource-location strings and checked opaque biome resource
+identities. Private local slots are neither wire IDs nor original bootstrap
+ordinals. Later configuration and chunk consumers must explicitly agree on their
+registry order and palette ID mapping.
 
 Entity types use the existing, unchanged [CAT-02.1 original fixture](../../../docs/fixtures/minecraft-1.21.8-original/entity-types.json).
 The build generator rejects malformed schema, duplicate names/ids, gaps,
@@ -102,6 +109,46 @@ cache `.codex-tmp/original-1.21.8`, or pass `--original-dir`. It reads local inp
 only. Datagen/JAR raw bytes agree; export/JAR whitespace and decimal token
 spelling can differ while exact values agree. Data/resource parity is separate
 from density evaluation, natural worldgen and seed/terrain acceptance.
+
+The biome producer uses that same unchanged original export for the full 65
+biome definitions and two minimal preset definitions. Its generated JSON slices
+retain all climate, effects, carvers/features and spawn fields. This is full
+resource data, not the smaller `Biome.NETWORK_CODEC` representation. Definition
+syntax bounds are identical to those above; the new producer does not implement
+runtime biome codec evaluation or resolve generation/spawn reference behavior.
+
+Expanded multinoise parameters come from the independently frozen actual
+`MultiNoiseBiomeSourceParameterList.knownPresets()` census, not from the minimal
+JSON preset resources or copied Overworld formulas. The unchanged
+[`data/biome-parameters-1.21.8.json`](data/biome-parameters-1.21.8.json) has independent
+byte/SHA pins plus retained normal/-O origin receipts. The dedicated build-only
+parser caps bytes at 2 MiB, nodes at 262144, depth at eight and strings at 64 bytes;
+it permits exactly two presets, 7593/five rows, four row fields, six spans and two
+integer endpoints. Wrong indexes, unknown keys, duplicate decoded fields,
+out-of-domain/reversed spans, extra elements and floats refuse before emission.
+Every original quantized integer and parameter position remains intact. The 7598
+static native rows occupy at most 850976 bytes, without a startup allocation.
+This static data cost is not a Paper performance comparison.
+
+The [biome reference evidence](tests/reference/biome_parameters/README.md) and
+[producer ticket](../../../docs/agent-tasks/REG-BIOME-01_ORIGINAL_BIOME_DATA.md)
+separate actual data admission from source-only NETWORK/NBT findings. Verify the
+adopted census and its meaningful pin/schema negative guards, including Python -O:
+
+```sh
+python3 crates/ferrumc-registry/tests/reference/verify_biome_parameters.py
+python3 -O crates/ferrumc-registry/tests/reference/verify_biome_parameters.py
+python3 crates/ferrumc-registry/tests/reference/test_verify_biome_parameters.py
+python3 -O crates/ferrumc-registry/tests/reference/test_verify_biome_parameters.py
+python3 crates/ferrumc-registry/tests/reference/verify_builtin_biomes.py
+```
+
+The last verifier checks all 65+2 actual original JAR resources, generated raw
+byte equality, exact Decimal contents and manifest receipt indexes, using the
+same local original cache or `--original-dir` as Worldgen. No Java census rerun
+is needed for unchanged adopted data. Biome selection/RTree history, surfaces,
+dynamic client registry order, palette mappings and active natural generation
+remain separate consumer work. Existing App/World plains-only behavior is unchanged.
 
 The extracted item-to-block snapshot is a reverse mapping and retains the wall
 variant for torch, soul torch and redstone torch. `build.rs` preserves the snapshot

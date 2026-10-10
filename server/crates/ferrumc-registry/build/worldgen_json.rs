@@ -20,7 +20,7 @@ pub(crate) struct Stats {
     pub depth: usize,
 }
 
-pub(super) fn parse(bytes: &[u8], limits: Limits) -> Result<(Value, Stats), serde_json::Error> {
+pub(crate) fn parse(bytes: &[u8], limits: Limits) -> Result<(Value, Stats), serde_json::Error> {
     if bytes.len() > limits.bytes {
         return Err(serde_json::Error::custom("JSON byte limit exceeded"));
     }

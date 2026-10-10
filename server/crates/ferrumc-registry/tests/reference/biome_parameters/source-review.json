@@ -1,0 +1,150 @@
+{
+  "scope": "Source review of original biome bootstrap/DIRECT and NETWORK codecs/ordered climate codecs/NBT boundaries; static data acceptance separately recorded, no executed dynamic registry or network payload admission",
+  "files": [
+    {
+      "path": ".codex-tmp/gen05_5-root-biome-census-normal/manifest.json",
+      "bytes": 31027,
+      "sha256": "5a37d47e69f8f0cf1866a22dcdd6827c187b8f0fb932703324fe50e6a944854f"
+    },
+    {
+      "path": ".codex-tmp/gen05_5-root-biome-census-normal/parameters.json",
+      "bytes": 1072932,
+      "sha256": "4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971"
+    },
+    {
+      "path": ".codex-tmp/gen05_5-root-biome-census.freeze.json",
+      "bytes": 2001,
+      "sha256": "95deae4a95856a4a80cb3ec71c1c251e1852b6ecc0a1506d6aa811433e28729b"
+    },
+    {
+      "path": ".codex-tmp/gen05_5-root-biome-census/BiomeParameterCensus.java",
+      "bytes": 4175,
+      "sha256": "7c128dbb203565c9cfd1728bb753870c3037219cae283f759cf1f18df15122c9"
+    },
+    {
+      "path": ".codex-tmp/gen05_5-root-biome-census/run_census.py",
+      "bytes": 4358,
+      "sha256": "821327f9770821a0431a52385434cfcecf996457fab08a1727562affb54381f9"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/core/RegistrySynchronization.java",
+      "bytes": 4805,
+      "sha256": "b5c3afd1b7b66c5fe0da03a469e452acc84af5248e1c45468450da6589ac55e9"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/data/info/BiomeParametersDumpReport.java",
+      "bytes": 3309,
+      "sha256": "b9d93cf608a59e659c96bf9be2725130f84e812838959564f3521c193e3182ba"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/data/registries/VanillaRegistries.java",
+      "bytes": 7150,
+      "sha256": "69965842728b8a5ff4a829cabf16ffde977513fef6cef5fdb30854a84189344c"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/data/worldgen/biome/BiomeData.java",
+      "bytes": 7807,
+      "sha256": "5d90d3c7b799306eefe76da58bde71bbd5e6de6410a9cefaef2d5cc457f7db03"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/nbt/NbtIo.java",
+      "bytes": 8164,
+      "sha256": "139d88ecf07e4841b2a10e0dc1d05d07ca30eaf7d0086c56e7daf8ea9951c4ca"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/network/FriendlyByteBuf.java",
+      "bytes": 47265,
+      "sha256": "f919c47b1690e8303458b97b44f578b663e369e59dd4ea8dfcdc28457d6fb618"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/resources/RegistryDataLoader.java",
+      "bytes": 23467,
+      "sha256": "01222886ae4e68aa1d77cfeedb2adaaf4466f4bff9819b7b9f1dbf43bc0abf26"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/biome/Biome.java",
+      "bytes": 17148,
+      "sha256": "c56b5bc4dea70246512a8799f29bf8444d0fded363ea6fba3372b5da6c53063d"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/biome/Climate.java",
+      "bytes": 22898,
+      "sha256": "1afa61089fbc72018cff7d09fc548892b9f636a7b30f38e14f316107d92e9d20"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/biome/MultiNoiseBiomeSourceParameterList.java",
+      "bytes": 5722,
+      "sha256": "de368617667d9bca49120bb1b2363104d644c1a1f9c7bc0011050dced6ca2920"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/patches/sources/net/minecraft/nbt/NbtIo.java.patch",
+      "bytes": 600,
+      "sha256": "8f029eee66d97fe79897b60d1ddea0392069e9b272632f0520fe7394717dc5da"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/patches/sources/net/minecraft/network/FriendlyByteBuf.java.patch",
+      "bytes": 2288,
+      "sha256": "dcc309e380f310aebbcc568f64d52bcfdbfff9ecce9e28023e1a5546a2a9ac8e"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/patches/sources/net/minecraft/resources/RegistryDataLoader.java.patch",
+      "bytes": 6380,
+      "sha256": "b45cadb9c7666ba957f50789cb75cf22b5939312ef771065622df740aceb85f9"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/patches/sources/net/minecraft/world/level/biome/Biome.java.patch",
+      "bytes": 524,
+      "sha256": "41e768c2d9170fc9611c7ce10da13a9b5343729fa53f0f487a025d236acc1c1b"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/core/RegistrySynchronization.java",
+      "bytes": 4805,
+      "sha256": "b5c3afd1b7b66c5fe0da03a469e452acc84af5248e1c45468450da6589ac55e9"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/data/info/BiomeParametersDumpReport.java",
+      "bytes": 3309,
+      "sha256": "b9d93cf608a59e659c96bf9be2725130f84e812838959564f3521c193e3182ba"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/data/registries/VanillaRegistries.java",
+      "bytes": 7150,
+      "sha256": "69965842728b8a5ff4a829cabf16ffde977513fef6cef5fdb30854a84189344c"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/data/worldgen/biome/BiomeData.java",
+      "bytes": 7807,
+      "sha256": "5d90d3c7b799306eefe76da58bde71bbd5e6de6410a9cefaef2d5cc457f7db03"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/nbt/NbtIo.java",
+      "bytes": 8408,
+      "sha256": "24fa558daf75cd4519afda6a2cf49ad553e0ed2e2e5661f428faabb4537a20b7"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/network/FriendlyByteBuf.java",
+      "bytes": 48032,
+      "sha256": "626fc6b6dd9bc55bb9aa4a06a1f87a94f53ed1baae5c5c46c390f28000930874"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/resources/RegistryDataLoader.java",
+      "bytes": 25589,
+      "sha256": "2e6c6b7e994035d300ac3d499e1c26aa5580fbd8252a5ab8073e3e3a1d7e80af"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/biome/Biome.java",
+      "bytes": 16762,
+      "sha256": "8e067d79b17d0ae639fad9dcfa5bab38c4e91d0b0f8e21bfe104907c81287a30"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/biome/Climate.java",
+      "bytes": 22898,
+      "sha256": "1afa61089fbc72018cff7d09fc548892b9f636a7b30f38e14f316107d92e9d20"
+    },
+    {
+      "path": ".codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/biome/MultiNoiseBiomeSourceParameterList.java",
+      "bytes": 5722,
+      "sha256": "de368617667d9bca49120bb1b2363104d644c1a1f9c7bc0011050dced6ca2920"
+    }
+  ]
+}

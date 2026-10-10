@@ -13,6 +13,8 @@ use sha2::{Digest, Sha256};
 
 #[path = "../build/worldgen_codegen.rs"]
 mod worldgen_codegen;
+#[path = "../build/worldgen_json.rs"]
+mod worldgen_json;
 
 fn directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -24,10 +24,14 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+#[path = "build/biome_codegen.rs"]
+mod biome_codegen;
 #[path = "build/entity_type_codegen.rs"]
 mod entity_type_codegen;
 #[path = "build/worldgen_codegen.rs"]
 mod worldgen_codegen;
+#[path = "build/worldgen_json.rs"]
+mod worldgen_json;
 
 /// One item entry in `items.json`: a numeric protocol id plus its data
 /// components (we only read `max_stack_size`).
@@ -150,6 +154,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build/entity_type_codegen.rs");
     println!("cargo:rerun-if-changed={}", entity_types_path.display());
     for path in [
+        "build/biome_codegen.rs",
         "build/worldgen_codegen.rs",
         "build/worldgen_json.rs",
         "build/worldgen_schema.rs",
@@ -161,6 +166,12 @@ fn main() {
             "cargo:rerun-if-changed={}",
             original_dir.join(name).display()
         );
+    }
+    for name in [
+        "biome-parameters-1.21.8.json",
+        "biome-parameters-1.21.8.provenance.json",
+    ] {
+        println!("cargo:rerun-if-changed=data/{name}");
     }
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
@@ -209,6 +220,15 @@ fn main() {
     let worldgen_dest = out_dir.join("worldgen_generated.rs");
     fs::write(&worldgen_dest, worldgen_source)
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", worldgen_dest.display()));
+
+    let biome_data_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("data");
+    let biomes = biome_codegen::load(&original_dir, &biome_data_dir)
+        .unwrap_or_else(|error| panic!("biome registry admission failed: {error}"));
+    let biome_source = biome_codegen::emit(&biomes)
+        .unwrap_or_else(|error| panic!("biome registry generation failed: {error}"));
+    let biome_dest = out_dir.join("biomes_generated.rs");
+    fs::write(&biome_dest, biome_source)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", biome_dest.display()));
 }
 
 /// One block entry in `blocks.json`: the bare resource name, its protocol id,
