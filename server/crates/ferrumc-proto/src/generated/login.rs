@@ -290,6 +290,10 @@ pub enum ServerboundLoginPacket {
 
 impl ServerboundLoginPacket {
     /// Decodes a serverbound login packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             LoginStart::PACKET_ID => Ok(Self::LoginStart(LoginStart::decode(reader)?)),
@@ -334,6 +338,10 @@ pub enum ClientboundLoginPacket {
 
 impl ClientboundLoginPacket {
     /// Decodes a clientbound login packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             LoginDisconnect::PACKET_ID => {

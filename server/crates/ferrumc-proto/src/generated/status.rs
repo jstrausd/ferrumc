@@ -144,6 +144,10 @@ pub enum ServerboundStatusPacket {
 
 impl ServerboundStatusPacket {
     /// Decodes a serverbound status packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             StatusRequest::PACKET_ID => Ok(Self::StatusRequest(StatusRequest::decode(reader)?)),
@@ -184,6 +188,10 @@ pub enum ClientboundStatusPacket {
 
 impl ClientboundStatusPacket {
     /// Decodes a clientbound status packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             StatusResponse::PACKET_ID => Ok(Self::StatusResponse(StatusResponse::decode(reader)?)),

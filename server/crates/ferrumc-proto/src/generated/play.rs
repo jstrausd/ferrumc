@@ -4341,6 +4341,10 @@ pub enum ServerboundPlayPacket {
 
 impl ServerboundPlayPacket {
     /// Decodes a serverbound play packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             ConfirmTeleportation::PACKET_ID => Ok(Self::ConfirmTeleportation(
@@ -4518,6 +4522,10 @@ pub enum ClientboundPlayPacket {
 
 impl ClientboundPlayPacket {
     /// Decodes a clientbound play packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             SpawnEntity::PACKET_ID => Ok(Self::SpawnEntity(SpawnEntity::decode(reader)?)),

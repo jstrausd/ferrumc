@@ -93,6 +93,10 @@ pub enum ServerboundHandshakePacket {
 
 impl ServerboundHandshakePacket {
     /// Decodes a serverbound handshake packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             Handshake::PACKET_ID => Ok(Self::Handshake(Handshake::decode(reader)?)),

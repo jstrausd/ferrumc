@@ -463,6 +463,10 @@ pub enum ServerboundConfigurationPacket {
 
 impl ServerboundConfigurationPacket {
     /// Decodes a serverbound configuration packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             ClientInformation::PACKET_ID => {
@@ -514,6 +518,10 @@ pub enum ClientboundConfigurationPacket {
 
 impl ClientboundConfigurationPacket {
     /// Decodes a clientbound configuration packet body selected by its wire `id`.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Generated dispatch tables keep one arm per packet in stable schema order."
+    )]
     pub fn decode(id: i32, reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
         match id {
             FinishConfiguration::PACKET_ID => Ok(Self::FinishConfiguration(
