@@ -8,7 +8,7 @@
 //! the *network* NBT a client expects is a separate concern owned by the session
 //! layer (see [`crate::block_entity`]).
 //!
-//! # Layout (all integers big-endian)
+//! # Legacy layout (all integers big-endian)
 //!
 //! ```text
 //! payload := tag(u8) body
@@ -27,17 +27,29 @@
 //! classified [`BlockEntityCodecError`] rather than a panic, so the caller can
 //! skip one bad block entity and still load the chunk.
 //!
-//! ## Deferred: data components
+//! # Versioned layout
 //!
-//! A present chest slot persists only its item id and count — the same trusted
-//! `(id, count)` pair the player-inventory persistence keeps — and **drops** any
-//! data components (custom name, damage, custom NBT, ...). Component persistence
-//! is a follow-up; until then a named or damaged item in a chest reloads as the
-//! plain item with its count conserved.
+//! [`try_encode_block_entity`] emits an independent versioned envelope:
+//! `0x7f ++ schema(u16=1) ++ entity_tag(u8) ++ body`. Signs retain the legacy
+//! body; chests contain exactly [`CHEST_SLOTS`] repetitions of
+//! `item_record_len(u32) ++ item_record`, using the lossless authoritative item
+//! codec. The whole entity remains bounded by 16 KiB, not the per-item allowance
+//! multiplied by the number of slots. All entity bytes are built privately and
+//! appended only after success; malformed or oversized entities cannot partly
+//! change the caller's buffer.
+//!
+//! [`decode_block_entity`] accepts both formats explicitly. Legacy chest items
+//! migrate to componentless model stacks because their old records never stored
+//! components. [`encode_block_entity`] remains the explicitly lossy legacy
+//! writer until the separate storage consumer adopts the fallible API. Adding
+//! this codec therefore does not itself switch existing overlay capture.
 
 use std::num::NonZeroU8;
 
-use ferrumc_items::{ComponentPatch, ItemId, ItemStack};
+use ferrumc_items::{
+    decode_persisted_stack, encode_persisted_stack, ComponentPatch, ItemId, ItemPersistenceError,
+    ItemStack,
+};
 
 use crate::block_entity::{
     BlockEntity, ChestInventory, Sign, SignFace, SignKind, CHEST_SLOTS, SIGN_LINES,
@@ -48,9 +60,10 @@ use crate::block_entity::{
 ///
 /// The storage layer bounds every persisted block-entity blob by this constant so
 /// one record cannot consume unbounded memory. It comfortably exceeds the largest
-/// well-formed payload — a sign is two faces of a short color plus four
-/// [`MAX_SIGN_LINE_BYTES`]-capped lines (~8 KiB), and a chest is
-/// [`CHEST_SLOTS`] fixed-size slots (~0.2 KiB).
+/// sign — two faces of a short color plus four [`MAX_SIGN_LINE_BYTES`]-capped
+/// lines (~8 KiB). The versioned chest codec enforces this same aggregate cap
+/// across its 27 complete item records, rather than multiplying the item's
+/// per-stack allowance. These are encoded-byte limits, not decoded-heap caps.
 pub const MAX_BLOCK_ENTITY_PAYLOAD_LEN: usize = 16 * 1024;
 
 /// Maximum accepted length, in bytes, of one sign text line on decode.
@@ -66,6 +79,10 @@ pub const MAX_SIGN_COLOR_BYTES: usize = 64;
 const TAG_SIGN: u8 = 0;
 /// Payload tag for a [`BlockEntity::Chest`].
 const TAG_CHEST: u8 = 1;
+/// Versioned payload discriminator, distinct from every legacy entity tag.
+const TAG_VERSIONED: u8 = 0x7f;
+/// Current world-owned block-entity grammar; independent of overlay metadata.
+const PAYLOAD_SCHEMA: u16 = 1;
 
 /// Sign-kind tag for [`SignKind::Sign`].
 const SIGN_KIND_SIGN: u8 = 0;
@@ -77,7 +94,7 @@ const STACK_EMPTY: u8 = 0;
 /// Slot tag: a present stack follows as `item_id(i32) ++ count(u8)`.
 const STACK_PRESENT: u8 = 1;
 
-/// A failure decoding a persisted [`BlockEntity`] payload.
+/// A failure encoding or decoding a persisted [`BlockEntity`] payload.
 ///
 /// Each variant *classifies* the corruption so the caller can log it and skip the
 /// one offending block entity rather than failing the whole chunk load. The enum
@@ -92,6 +109,44 @@ pub enum BlockEntityCodecError {
     /// The leading payload tag named no known block-entity type.
     #[error("unknown block-entity tag {0}")]
     UnknownTag(u8),
+
+    /// A versioned envelope selected an unimplemented payload grammar.
+    #[error("unsupported block-entity payload schema {0}")]
+    UnsupportedSchema(u16),
+
+    /// An encoded whole entity exceeded its aggregate byte allowance.
+    #[error("block-entity payload has {len} bytes, exceeding {max}")]
+    PayloadTooLarge {
+        /// Whole-record size or required encoding size.
+        len: usize,
+        /// Maximum encoded payload size.
+        max: usize,
+    },
+
+    /// An item length declaration exceeded the aggregate entity byte allowance.
+    #[error("chest slot {slot} declares {len} bytes, exceeding {max}")]
+    StackTooLarge {
+        /// Fixed chest slot index.
+        slot: usize,
+        /// Declared item record length.
+        len: usize,
+        /// Aggregate entity allowance.
+        max: usize,
+    },
+
+    /// A versioned chest item was invalid or exceeded its item codec limits.
+    #[error("invalid persisted chest slot {slot}: {source}")]
+    Item {
+        /// Fixed chest slot index.
+        slot: usize,
+        /// Classified item storage failure.
+        #[source]
+        source: ItemPersistenceError,
+    },
+
+    /// A boolean field was encoded using neither 0 nor 1.
+    #[error("invalid block-entity boolean {0}")]
+    InvalidBoolean(u8),
 
     /// The sign-kind tag named no known [`SignKind`].
     #[error("unknown sign-kind tag {0}")]
@@ -122,18 +177,29 @@ pub enum BlockEntityCodecError {
     #[error("present chest slot has a zero count")]
     ZeroCount,
 
+    /// A legacy item count exceeded the pinned registry ceiling.
+    #[error("legacy chest item {item_id} count {count} exceeds maximum {max}")]
+    CountTooLarge {
+        /// Legacy registry item id.
+        item_id: i32,
+        /// Declared count.
+        count: u8,
+        /// Registry maximum for this item.
+        max: u8,
+    },
+
     /// Bytes remained after a complete payload was decoded.
     #[error("trailing bytes after block-entity payload")]
     TrailingBytes,
 }
 
-/// Appends the serialized form of `entity` to `out`.
+/// Appends the legacy, componentless serialized form of `entity` to `out`.
 ///
-/// The encoding is exhaustive over the (crate-private-to-extend) [`BlockEntity`]
-/// variants: adding a new variant is a compile error here until it is given a
-/// payload, so a block-entity type can never be silently dropped from
-/// persistence. Output for any real block entity is bounded well under
-/// [`MAX_BLOCK_ENTITY_PAYLOAD_LEN`].
+/// This compatibility seam deliberately retains the original grammar and
+/// drops chest data components. It cannot report malformed or oversized input.
+/// New persistence consumers must use [`try_encode_block_entity`] to preserve
+/// components and receive atomic, classified failures. Existing storage capture
+/// must migrate separately instead of silently ignoring a new `Result`.
 pub fn encode_block_entity(entity: &BlockEntity, out: &mut Vec<u8>) {
     match entity {
         BlockEntity::Sign(sign) => {
@@ -153,7 +219,64 @@ pub fn encode_block_entity(entity: &BlockEntity, out: &mut Vec<u8>) {
     }
 }
 
-/// Decodes a complete [`BlockEntity`] payload, rejecting trailing bytes.
+/// Appends a versioned, lossless entity only after its full encoding succeeds.
+///
+/// The complete payload is bounded by [`MAX_BLOCK_ENTITY_PAYLOAD_LEN`], including
+/// all 27 chest slots. Only one bounded temporary item buffer exists at a time.
+/// Every supported authoritative component representation is retained through
+/// [`ferrumc_items::encode_persisted_stack`]. On error `out` is unchanged.
+///
+/// # Errors
+///
+/// Rejects invalid authoritative stacks, malformed patches/NBT, oversized item
+/// payloads, an exceeded aggregate entity cap, or oversized sign fields.
+pub fn try_encode_block_entity(
+    entity: &BlockEntity,
+    out: &mut Vec<u8>,
+) -> Result<(), BlockEntityCodecError> {
+    let mut payload = vec![TAG_VERSIONED];
+    payload.extend_from_slice(&PAYLOAD_SCHEMA.to_be_bytes());
+    match entity {
+        BlockEntity::Sign(sign) => {
+            payload.push(TAG_SIGN);
+            payload.push(sign_kind_tag(sign.kind()));
+            payload.push(u8::from(sign.is_waxed()));
+            try_encode_face(sign.front(), &mut payload)?;
+            try_encode_face(sign.back(), &mut payload)?;
+        }
+        BlockEntity::Chest(chest) => {
+            payload.push(TAG_CHEST);
+            for (slot, stack) in chest.slots().iter().enumerate() {
+                // Item encoding preflights its own bounded model before its
+                // allocation. Keep only this one item buffer, never 27 buffers.
+                let item = encode_persisted_stack(stack)
+                    .map_err(|source| BlockEntityCodecError::Item { slot, source })?;
+                check_payload_size(payload.len().saturating_add(4).saturating_add(item.len()))?;
+                payload.extend_from_slice(&(item.len() as u32).to_be_bytes());
+                payload.extend_from_slice(&item);
+            }
+        }
+    }
+    check_payload_size(payload.len())?;
+    out.extend_from_slice(&payload);
+    Ok(())
+}
+
+fn check_payload_size(len: usize) -> Result<(), BlockEntityCodecError> {
+    if len > MAX_BLOCK_ENTITY_PAYLOAD_LEN {
+        return Err(BlockEntityCodecError::PayloadTooLarge {
+            len,
+            max: MAX_BLOCK_ENTITY_PAYLOAD_LEN,
+        });
+    }
+    Ok(())
+}
+
+/// Decodes a complete legacy or versioned [`BlockEntity`] payload.
+///
+/// Old chest records migrate explicitly to componentless stacks. New records
+/// retain all supported item components. The whole input is bounded before any
+/// parsing or allocation; individual child records borrow the parent slice.
 ///
 /// # Errors
 ///
@@ -162,11 +285,23 @@ pub fn encode_block_entity(entity: &BlockEntity, out: &mut Vec<u8>) {
 /// trailing bytes). Decoding never panics, so the caller can skip one corrupt
 /// block entity and still reconstruct the rest of the chunk.
 pub fn decode_block_entity(bytes: &[u8]) -> Result<BlockEntity, BlockEntityCodecError> {
+    check_payload_size(bytes.len())?;
     let mut reader = PayloadReader::new(bytes);
-    let entity = match reader.read_u8()? {
+    let leading = reader.read_u8()?;
+    let versioned = leading == TAG_VERSIONED;
+    let tag = if versioned {
+        let schema = reader.read_u16()?;
+        if schema != PAYLOAD_SCHEMA {
+            return Err(BlockEntityCodecError::UnsupportedSchema(schema));
+        }
+        reader.read_u8()?
+    } else {
+        leading
+    };
+    let entity = match tag {
         TAG_SIGN => {
             let kind = sign_kind_from_tag(reader.read_u8()?)?;
-            let is_waxed = reader.read_u8()? != 0;
+            let is_waxed = reader.read_bool()?;
             let front = decode_face(&mut reader)?;
             let back = decode_face(&mut reader)?;
             BlockEntity::Sign(Sign::from_parts(kind, is_waxed, front, back))
@@ -174,7 +309,11 @@ pub fn decode_block_entity(bytes: &[u8]) -> Result<BlockEntity, BlockEntityCodec
         TAG_CHEST => {
             let mut chest = ChestInventory::new();
             for index in 0..CHEST_SLOTS {
-                let stack = decode_stack(&mut reader)?;
+                let stack = if versioned {
+                    decode_versioned_stack(&mut reader, index)?
+                } else {
+                    decode_stack(&mut reader)?
+                };
                 // `index < CHEST_SLOTS`, so the slot is always in range; the guard
                 // keeps the decoder panic-free regardless.
                 if let Some(slot) = chest.slot_mut(index) {
@@ -189,6 +328,24 @@ pub fn decode_block_entity(bytes: &[u8]) -> Result<BlockEntity, BlockEntityCodec
         return Err(BlockEntityCodecError::TrailingBytes);
     }
     Ok(entity)
+}
+
+fn decode_versioned_stack(
+    reader: &mut PayloadReader<'_>,
+    slot: usize,
+) -> Result<ItemStack, BlockEntityCodecError> {
+    let len = reader.read_u32()? as usize;
+    if len > MAX_BLOCK_ENTITY_PAYLOAD_LEN {
+        return Err(BlockEntityCodecError::StackTooLarge {
+            slot,
+            len,
+            max: MAX_BLOCK_ENTITY_PAYLOAD_LEN,
+        });
+    }
+    // `take` checks the complete declared record before the item decoder can
+    // allocate. The parent input was already limited to 16 KiB in its entirety.
+    decode_persisted_stack(reader.take(len)?)
+        .map_err(|source| BlockEntityCodecError::Item { slot, source })
 }
 
 /// Maps a [`SignKind`] to its wire tag.
@@ -217,10 +374,30 @@ fn encode_face(face: &SignFace, out: &mut Vec<u8>) {
     }
 }
 
+fn try_encode_face(face: &SignFace, out: &mut Vec<u8>) -> Result<(), BlockEntityCodecError> {
+    try_encode_str(face.color(), MAX_SIGN_COLOR_BYTES, out)?;
+    out.push(u8::from(face.has_glowing_text()));
+    for line in face.lines() {
+        try_encode_str(line, MAX_SIGN_LINE_BYTES, out)?;
+    }
+    Ok(())
+}
+
+fn try_encode_str(text: &str, max: usize, out: &mut Vec<u8>) -> Result<(), BlockEntityCodecError> {
+    let len = text.len();
+    if len > max {
+        return Err(BlockEntityCodecError::StringTooLong { len, max });
+    }
+    check_payload_size(out.len().saturating_add(2).saturating_add(len))?;
+    out.extend_from_slice(&(len as u16).to_be_bytes());
+    out.extend_from_slice(text.as_bytes());
+    Ok(())
+}
+
 /// Decodes one sign face (the inverse of [`encode_face`]).
 fn decode_face(reader: &mut PayloadReader) -> Result<SignFace, BlockEntityCodecError> {
     let color = decode_str(reader, MAX_SIGN_COLOR_BYTES)?;
-    let has_glowing_text = reader.read_u8()? != 0;
+    let has_glowing_text = reader.read_bool()?;
     let mut lines: [String; SIGN_LINES] = std::array::from_fn(|_| String::new());
     for line in &mut lines {
         *line = decode_str(reader, MAX_SIGN_LINE_BYTES)?;
@@ -276,6 +453,13 @@ fn decode_stack(reader: &mut PayloadReader) -> Result<ItemStack, BlockEntityCode
             let item = ItemId::new(raw).ok_or(BlockEntityCodecError::UnknownItem(raw))?;
             let count =
                 NonZeroU8::new(reader.read_u8()?).ok_or(BlockEntityCodecError::ZeroCount)?;
+            if count.get() > item.max_stack() {
+                return Err(BlockEntityCodecError::CountTooLarge {
+                    item_id: raw,
+                    count: count.get(),
+                    max: item.max_stack(),
+                });
+            }
             Ok(ItemStack::new(item, count, ComponentPatch::empty()))
         }
         other => Err(BlockEntityCodecError::BadStackTag(other)),
@@ -290,6 +474,9 @@ struct PayloadReader<'a> {
     data: &'a [u8],
     pos: usize,
 }
+
+#[cfg(test)]
+mod persistence_tests;
 
 impl<'a> PayloadReader<'a> {
     /// Wraps `data` at offset zero.
@@ -317,6 +504,14 @@ impl<'a> PayloadReader<'a> {
         Ok(self.take(1)?[0])
     }
 
+    fn read_bool(&mut self) -> Result<bool, BlockEntityCodecError> {
+        match self.read_u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            other => Err(BlockEntityCodecError::InvalidBoolean(other)),
+        }
+    }
+
     /// Reads a big-endian `u16`.
     fn read_u16(&mut self) -> Result<u16, BlockEntityCodecError> {
         let bytes: [u8; 2] = self
@@ -333,6 +528,14 @@ impl<'a> PayloadReader<'a> {
             .try_into()
             .map_err(|_| BlockEntityCodecError::Truncated)?;
         Ok(i32::from_be_bytes(bytes))
+    }
+
+    fn read_u32(&mut self) -> Result<u32, BlockEntityCodecError> {
+        let bytes: [u8; 4] = self
+            .take(4)?
+            .try_into()
+            .map_err(|_| BlockEntityCodecError::Truncated)?;
+        Ok(u32::from_be_bytes(bytes))
     }
 
     /// Returns the number of unread bytes remaining.

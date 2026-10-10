@@ -46,8 +46,8 @@ pub use block_entity::{
     CHEST_SLOTS, SIGN_LINES,
 };
 pub use block_entity_codec::{
-    decode_block_entity, encode_block_entity, BlockEntityCodecError, MAX_BLOCK_ENTITY_PAYLOAD_LEN,
-    MAX_SIGN_COLOR_BYTES, MAX_SIGN_LINE_BYTES,
+    decode_block_entity, encode_block_entity, try_encode_block_entity, BlockEntityCodecError,
+    MAX_BLOCK_ENTITY_PAYLOAD_LEN, MAX_SIGN_COLOR_BYTES, MAX_SIGN_LINE_BYTES,
 };
 pub use block_state::BlockStateId;
 pub use chunk::{Chunk, ChunkLight, MAX_BLOCK_ENTITIES, SECTION_COUNT};

@@ -770,6 +770,7 @@ version = "0.2.0-dev"
 dependencies = [
  "ferrumc-items",
  "ferrumc-math",
+ "ferrumc-nbt",
  "ferrumc-registry",
  "thiserror",
 ]

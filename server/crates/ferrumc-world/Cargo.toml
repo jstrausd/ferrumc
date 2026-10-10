@@ -18,6 +18,9 @@ ferrumc-items = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# Exercise lossless named/custom NBT chest components without adding NBT work
+# or protocol encoding to the pure world production lane.
+ferrumc-nbt = { workspace = true }
 
 [lints]
 workspace = true

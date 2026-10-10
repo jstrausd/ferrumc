@@ -41,6 +41,36 @@
   every chunk. Layer layout: `y = -64` bedrock, `-63..=59` stone, `60..=62`
   dirt, `63` grass, `64..=319` air.
 
+## Block-entity persistence
+
+- `try_encode_block_entity` is the checked, versioned storage writer. Its
+  envelope is discriminator `0x7f`, big-endian `u16` schema 1, entity tag, then
+  the entity body. Schema is independent of parent overlay metadata.
+- Chest bodies contain exactly 27 `u32`-length-framed item records from
+  `ferrumc-items`' lossless persistence codec. The slot count comes from the
+  model, never an untrusted count. Supported component representations, patch
+  order, removed ids, and NBT details are preserved without normalization.
+- The whole encoded entity is at most 16 KiB, including every slot and all
+  length prefixes. This is an aggregate encoded-byte cap, not the per-item cap
+  multiplied by the number of slots, and not a decoded-heap allowance.
+- Decode checks the whole parent slice before allocations; slot lengths are
+  checked before borrowing complete child records. A malformed child rejects
+  the entire entity, with its fixed slot index and classified item error.
+- Checked encoding keeps one bounded temporary item buffer at a time and builds
+  an entity privately. Any count, component, NBT, sign-field, or aggregate-limit
+  error leaves the caller's output buffer completely unchanged.
+- Decode explicitly migrates old unversioned sign/chest payloads. Legacy chest
+  slots retain their item and count with an empty patch because no components
+  were present on disk. Unknown schemas/types, invalid booleans, invalid legacy
+  counts, truncation, and trailing bytes fail rather than being normalized.
+- `encode_block_entity` remains an explicitly lossy legacy compatibility seam
+  until the separate storage consumer adopts the checked writer. The new
+  world codec alone does not switch overlay capture or make its existing
+  skip-on-error application atomic; those are storage-owned integration work.
+- Sign lines and colors have matching encode/decode caps. Checked encoding
+  rejects oversized UTF-8 fields without splitting characters or truncating
+  content.
+
 ## Network encoding (`network` module)
 
 - `PalettedContainer::encode_network` writes the 1.21.5+ wire layout:
