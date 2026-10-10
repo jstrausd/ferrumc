@@ -11,4 +11,21 @@
 
 ## Crate-Specific
 
-<!-- Add crate-specific invariants here as the code develops -->
+- `WorldConfig` is declarative only: no storage/world/simulation dependency,
+  filesystem I/O, random seed selection or persisted identity resolution.
+- Omitted `seed` and `preset` remain `None`, independently of one another and
+  of Anvil import. `Some(0)` is an explicit numeric seed, not omission. Only the
+  application may resolve absent values against stored metadata or explicitly
+  choose documented fresh-world defaults.
+- The numeric seed is private `Option<i64>` and preserves all signed 64-bit
+  values. TOML integer typing applies, including valid base-prefixed integers;
+  text, random tokens, floats, other types and out-of-range values are rejected.
+- The private preset choice accepts only the implemented `ferrumc_flat` enum
+  variant. Unknown/unimplemented presets and unknown/duplicate keys reject the
+  configuration; no stringly typed or catch-all fallback is accepted.
+- `with_generation` accepts bounded typed optional declarations, preserves the
+  import directory and never resolves omission. New generation fields are
+  private; the historical public import field remains solely for compatibility.
+- Anvil import is an independent initial content source. Generation declarations
+  describe the fallback for unimported chunks; import never reconstructs a
+  Vanilla seed/preset or disables supplied generation choices at this layer.
