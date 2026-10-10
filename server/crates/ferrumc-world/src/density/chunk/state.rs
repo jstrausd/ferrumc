@@ -95,6 +95,12 @@ pub(super) struct Wrapper {
 pub(super) struct ChunkState {
     #[cfg(test)]
     pub requests: Option<super::tests::requests::Requests>,
+    #[cfg(test)]
+    pub material_floats: Option<super::material::tests::Floats>,
+    #[cfg(test)]
+    pub material_context_override: Option<bool>,
+    #[cfg(test)]
+    pub material_picker: Option<super::material::tests::Picker>,
     pub normal_noises: Box<[crate::noise::NormalNoise]>,
     #[cfg(test)]
     pub sampler_bytes: usize,
@@ -201,6 +207,12 @@ impl ChunkState {
             scratch: Vec::new(),
             #[cfg(test)]
             requests: None,
+            #[cfg(test)]
+            material_floats: None,
+            #[cfg(test)]
+            material_context_override: None,
+            #[cfg(test)]
+            material_picker: None,
             driver_phase: DriverPhase::Dormant,
             driver_x: 0,
             interpolating: false,

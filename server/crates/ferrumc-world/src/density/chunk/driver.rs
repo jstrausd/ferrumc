@@ -8,11 +8,36 @@
 use ferrumc_math::BlockPos;
 
 use super::fill::{write, Provider};
+use super::material::MaterialRun;
 use super::state::{lerp, Cache, DriverPhase, Lifecycle};
 use super::{
-    bytes, charge, fail, output_index, ChunkDensitySamples, NoiseChunkError, NoiseChunkErrorKind,
-    NoiseChunkLimit, NoiseChunkSession,
+    bytes, charge, fail, output_index, ChunkDensitySamples, ChunkMaterialSamples, NoiseChunkError,
+    NoiseChunkErrorKind, NoiseChunkLimit, NoiseChunkSession,
 };
+
+enum OutputSink {
+    Density(Vec<f64>),
+    Material(Box<MaterialRun>),
+}
+impl OutputSink {
+    fn write(
+        &mut self,
+        session: &mut NoiseChunkSession,
+        index: usize,
+        pos: BlockPos,
+    ) -> Result<(), NoiseChunkError> {
+        match self {
+            Self::Density(values) => {
+                let value = session.sample_material()?;
+                let slot = values
+                    .get_mut(index)
+                    .ok_or_else(|| fail(NoiseChunkErrorKind::InvalidGraph))?;
+                write(slot, value, pos, &mut session.work)
+            }
+            Self::Material(run) => run.write(session, index),
+        }
+    }
+}
 
 impl NoiseChunkSession {
     fn require_driver(
@@ -60,6 +85,32 @@ impl NoiseChunkSession {
     }
     pub(super) fn drive(&mut self) -> Result<ChunkDensitySamples, NoiseChunkError> {
         self.state.require(Lifecycle::Running, "drive")?;
+        let count = self.output_count()?;
+        bytes(NoiseChunkLimit::Output, 0, count, 8, 1024 * 1024)?;
+        let mut sink = OutputSink::Density(vec![0.0; count]);
+        self.drive_sink(&mut sink, count)?;
+        let OutputSink::Density(values) = sink else {
+            return Err(fail(NoiseChunkErrorKind::InvalidGraph));
+        };
+        Ok(ChunkDensitySamples {
+            seed: self.seed(),
+            resource: self.resource(),
+            chunk: self.chunk,
+            geometry: self.geometry(),
+            values: values.into_boxed_slice(),
+        })
+    }
+    pub(super) fn drive_materials(&mut self) -> Result<ChunkMaterialSamples, NoiseChunkError> {
+        self.state.require(Lifecycle::Running, "drive_materials")?;
+        let count = self.output_count()?;
+        let mut sink = OutputSink::Material(Box::new(MaterialRun::new(self, count)?));
+        self.drive_sink(&mut sink, count)?;
+        let OutputSink::Material(run) = sink else {
+            return Err(fail(NoiseChunkErrorKind::InvalidGraph));
+        };
+        Ok((*run).finish(self))
+    }
+    fn output_count(&self) -> Result<usize, NoiseChunkError> {
         let count = bytes(
             NoiseChunkLimit::Output,
             0,
@@ -67,12 +118,13 @@ impl NoiseChunkSession {
             256,
             131_072,
         )?;
-        bytes(NoiseChunkLimit::Output, 0, count, 8, 1024 * 1024)?;
+        Ok(count)
+    }
+    fn drive_sink(&mut self, sink: &mut OutputSink, count: usize) -> Result<(), NoiseChunkError> {
         // Its size is independently derived from the admitted output count:
         // at most 2048 u64s (16KiB), without additional per-block allocation.
         let bitmap_len = count.div_ceil(64);
         bytes(NoiseChunkLimit::Output, 0, bitmap_len, 8, 16 * 1024)?;
-        let mut values = vec![0.0; count];
         let mut written = vec![0_u64; bitmap_len];
         let mut writes = 0;
         self.initialize_driver()?;
@@ -107,8 +159,7 @@ impl NoiseChunkSession {
                                 if written[index / 64] & (1_u64 << (index % 64)) != 0 {
                                     return Err(fail(NoiseChunkErrorKind::InvalidGraph));
                                 }
-                                let value = self.sample_material()?;
-                                write(&mut values[index], value, pos, &mut self.work)?;
+                                sink.write(self, index, pos)?;
                                 charge(&mut self.work)?;
                                 written[index / 64] |= 1_u64 << (index % 64);
                                 writes += 1;
@@ -123,13 +174,7 @@ impl NoiseChunkSession {
             return Err(fail(NoiseChunkErrorKind::InvalidGraph));
         }
         self.stop_driver()?;
-        Ok(ChunkDensitySamples {
-            seed: self.seed(),
-            resource: self.resource(),
-            chunk: self.chunk,
-            geometry: self.geometry(),
-            values: values.into_boxed_slice(),
-        })
+        Ok(())
     }
     pub(super) fn fill_slice(&mut self, first: bool, x: i32) -> Result<(), NoiseChunkError> {
         self.require_driver(

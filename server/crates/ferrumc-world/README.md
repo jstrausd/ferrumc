@@ -10,11 +10,13 @@ graph metadata. They validate all 35 definitions, including unused graphs.
 `RouterTemplate::bind_seed` now constructs an immutable `SeededRouter` for
 explicit seeds. It samples the fifteen original router fields, all 35 named
 definitions and six climate axes in the original empty-Blender point context.
-The executable server still uses the flat generator described below; block
-chunks, aquifers, materials, biomes and surfaces need their own consumers.
+The executable server still uses the flat generator described below; biome,
+surface and actual chunk adoption need their own consumers.
 The separately bounded `SeededRouter::fresh_paper_noise_chunk` now executes
 original Paper interpolation, cache wrappers and one complete material-density
-loop, before any aquifer or block selection.
+loop. Its `sample_chunk_materials` alternative follows aquifer, vein and
+settings-default selection in the same driver and returns complete states and
+fluid postprocessing bits before surfaces, carvers or features.
 
 Admission retains both direct/reference `HolderHolder` nodes and distinct raw
 spline-coordinate holders. Bounds are 2 MiB distinct original source bytes,
@@ -24,8 +26,9 @@ codec widths, including signed zero. INT fields truncate/wrap with the pinned
 Gson rules before range validation. Required spline derivatives, resource roles
 and original geometry guards are checked. Extra field/finite/ascending-point
 restrictions are explicit `FerrumC` policy. Original inline noise parameters
-remain outside the closed builtin resource API. Default materials, surface
-rules and spawn targets are deferred payloads, without executable behavior.
+remain outside the closed builtin resource API. The material alternative
+admits deferred default block/fluid payloads through the existing pinned state
+registry. Surface rules and spawn targets remain unexecuted payloads.
 
 Structural fixtures decode the real original JAR's codecs and compare all
 35 definitions, seven routers and 32 node forms; this establishes no sampled
@@ -67,8 +70,15 @@ traces. Sessions own all mutable caches, share one explicit construction/query
 work budget, reject illegal phases before mutation, poison after query failures,
 and rebuild a complete candidate before reset. Public point/noise streams keep
 their original Vanilla policy; the chunk consumer privately follows Paper
-Build 60's widened End radius and float-rounded random offsets. Neither
-consumer creates terrain blocks or activates a natural-world identity.
+Build 60's widened End radius and float-rounded random offsets. The material
+alternative returns owned states and fluid bits; it does not activate a
+natural-world identity or install them into a live chunk. The
+[material corpus](tests/reference/material_chunk.md) compares all126 complete
+actual-Paper arrays (7,077,888 states and flags),499 independent finite endpoint
+cases and42 enabled-aquifer/cache/tie cases, including original request/RNG
+chronology and cache snapshots. Fifteen nonfinite original-Java probes instead
+verify Rust's additional typed refusal policy. All541 finite endpoint cases
+have separate exact shared-budget boundaries. Independent review remains open.
 
 This crate owns the world's block-storage value types and a flat-world
 generator:

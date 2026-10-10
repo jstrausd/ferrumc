@@ -12,11 +12,12 @@ use super::{
     NoiseGeometry, SeededRouter,
 };
 use crate::sample_work::SampleWork;
-use crate::WorldSeed;
+use crate::{BlockStateId, WorldSeed};
 
 mod cold;
 mod driver;
 mod fill;
+mod material;
 mod state;
 
 use state::{ChunkState, Lifecycle};
@@ -58,6 +59,16 @@ pub enum NoiseChunkLimit {
     Output,
     /// Distinct preliminary-surface quart columns.
     SurfaceColumns,
+    /// Bytes in one deferred settings block-state payload.
+    MaterialResolver,
+    /// Original aquifer grid slots, independently of bytes.
+    AquiferSlots,
+    /// Owned aquifer location/status array bytes.
+    AquiferBytes,
+    /// Complete material block-state bytes.
+    MaterialOutput,
+    /// Fluid postprocessing bitmap bytes.
+    FluidBitmap,
 }
 
 /// Classified construction, admission or evaluation rejection.
@@ -84,6 +95,15 @@ pub enum NoiseChunkErrorKind {
     },
     /// A private producer violated its checked shape or child-index contract.
     InvalidGraph,
+    /// A deferred settings state cannot be admitted by this material producer.
+    InvalidMaterialState { field: &'static str },
+    /// A private material query escaped its independently admitted domain.
+    MaterialPositionOutOfRange {
+        axis: &'static str,
+        coordinate: i32,
+        minimum: i32,
+        maximum: i32,
+    },
 }
 
 /// Typed failure; no partial chunk-density output is published.
@@ -169,11 +189,62 @@ impl ChunkDensitySamples {
     }
 }
 
+/// Complete owned fresh-noise material states, before surface/carvers/features.
+#[derive(Debug)]
+pub struct ChunkMaterialSamples {
+    seed: WorldSeed,
+    resource: NoiseSettingsResourceId,
+    chunk: ChunkPos,
+    geometry: NoiseGeometry,
+    states: Box<[BlockStateId]>,
+    fluid_updates: Box<[u64]>,
+}
+impl ChunkMaterialSamples {
+    /// Full original signed seed bits.
+    pub const fn seed(&self) -> WorldSeed {
+        self.seed
+    }
+    /// Original settings resource.
+    pub const fn resource(&self) -> NoiseSettingsResourceId {
+        self.resource
+    }
+    /// Admitted complete chunk column.
+    pub const fn chunk_pos(&self) -> ChunkPos {
+        self.chunk
+    }
+    /// Complete original settings noise geometry, without height clamping.
+    pub const fn geometry(&self) -> NoiseGeometry {
+        self.geometry
+    }
+    /// Ascending-Y/X/Z states; index `((y-minY)*16+localX)*16+localZ`.
+    pub fn block_states(&self) -> &[BlockStateId] {
+        &self.states
+    }
+    /// Returns a state only inside this chunk and its complete noise height.
+    pub fn block_state_at(&self, pos: BlockPos) -> Option<BlockStateId> {
+        self.states
+            .get(output_index(self.chunk, self.geometry, pos)?)
+            .copied()
+    }
+    /// Bit `i % 64` in word `i / 64` marks state index `i` for fluid work.
+    /// Padding bits are zero. This does not itself schedule simulation ticks.
+    pub fn fluid_update_bitmap(&self) -> &[u64] {
+        &self.fluid_updates
+    }
+    /// Returns the original material fluid flag only for an in-output position.
+    pub fn should_schedule_fluid_update(&self, pos: BlockPos) -> Option<bool> {
+        let index = output_index(self.chunk, self.geometry, pos)?;
+        let word = self.fluid_updates.get(index / 64)?;
+        Some(word & (1_u64 << (index % 64)) != 0)
+    }
+}
+
 /// Owned synchronous fresh-chunk consumer with the original five cache types.
 ///
 /// Uses Paper 1.21.8 build 60 numerical policy, empty blending, no retrogen or
 /// structure contributions, and complete settings geometry. This produces
-/// densities, preliminary surfaces and climate; it does not generate blocks.
+/// densities or material states, preliminary surfaces and climate. Material
+/// arrays precede surface/carvers/features and are not an active world generator.
 /// Mutable arrays and counters belong exclusively to this session. Reset may
 /// temporarily retain both the old session and a fully admitted candidate.
 pub struct NoiseChunkSession {
@@ -249,6 +320,22 @@ impl NoiseChunkSession {
             .require(Lifecycle::Fresh, "sample_chunk_densities")?;
         self.state.lifecycle = Lifecycle::Running;
         let result = self.drive();
+        self.state.lifecycle = if result.is_ok() {
+            Lifecycle::Complete
+        } else {
+            Lifecycle::Poisoned
+        };
+        result
+    }
+    /// Runs one complete original interpolation, aquifer and ore-material loop.
+    /// This consumes the same Fresh authority as `sample_chunk_densities`.
+    /// Preparation or execution failure poisons the session without publishing
+    /// partial states or fluid flags. Private material caches live for this run.
+    pub fn sample_chunk_materials(&mut self) -> Result<ChunkMaterialSamples, NoiseChunkError> {
+        self.state
+            .require(Lifecycle::Fresh, "sample_chunk_materials")?;
+        self.state.lifecycle = Lifecycle::Running;
+        let result = self.drive_materials();
         self.state.lifecycle = if result.is_ok() {
             Lifecycle::Complete
         } else {

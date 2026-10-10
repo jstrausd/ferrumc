@@ -357,6 +357,63 @@
   These establish the tested numerical context, not a playable Survival server,
   complete natural generation, Java-plugin compatibility or RAM/TPS improvement.
 
+## Fresh Paper material-array consumer
+
+- `sample_chunk_materials` shares the single Fresh/Running/Complete/Poisoned
+  authority with `sample_chunk_densities`; neither can run after the other
+  without successful reset. Its public output owns seed/settings/chunk/geometry,
+  at most131072 block states (512KiB), and a separately admitted fluid bitmap
+  (16KiB), in the identical ascending-Y/X/Z output order. A separate16KiB
+  exactly-once bitmap guards writes; it never doubles as fluid state.
+- One concrete private Sinkenum uses the existing complete interpolation loop.
+  Material density enters only at Running/ZUpdated, then aquifer→optional ore→
+  settingsdefault is evaluated in original order. Final postprocessing requires
+  the actual aquiferflag and selected non-air state with nonempty fluid.
+  Density arrays retain their existing numerical/request/work contracts.
+- Material preparation occurs only at its Fresh entry, before buffers/driver.
+  Original aquifer constructor and ore closure draw nothing; center/status/RNG
+  work stays lazy at actual branches. Preparation failures poison the admitted
+  run; rejected lifecycle requests leave it unchanged. No partial output escapes.
+  Atomic reset preserves old state on failure and publishes a new unprepared
+  Fresh session only after complete .3construction.
+- Original aquifer grid/index shape owns matching location/status arrays:
+  at most512 slots/12KiB, actual three enabled settings315slots. Long.MAX_VALUE
+  is the original location sentinel; status is absent until successful publish.
+  Four nearest centers preserve twelve X/Y/Z requests and >= tie chronology.
+  Pressure shares one original Barrier sentinel; skipped Density/RNG branches
+  are never evaluated in advance. Every actual bounded-int rejection draw is
+  charged before RNG mutation; all material work uses the same session meter.
+- Settingsstate resolver checks≤4096 sourcebytes and≤32properties through the
+  existing bounded JSONlexer and complete pinned Registry lookup. Default
+  inheritance is preserved; unknown fields/names/properties/values are typed
+  refusal. This is stricter malformed-input policy than Java's lenient optional
+  properties, not claimed error-input parity. Actual seven defaults plus fixed
+  aquifer/vein states form a closed fluid/state set; no AIRfallback or solidity-
+  based fluid inference is permitted.
+- F32thresholds widen from their actual f32bits in Double expressions. Global
+  fluid, original strict height/pressure/ore tests, quantize/map order and
+  wrapping MAXpreliminary+8 arithmetic are preserved. Requested nonfinite
+  Density results or material arithmetic refuse with rawbit classified failure.
+- The material-only physical halo is±30000128. Derived center displacement is
+  X/Z[-20,+20],Y[-22,+21]; original thirteen offsets and quartfloor produce
+  surfaceX[-71,+36],Z[-39,+36]. Before buffers/driver, i64derived extremes and
+  packed Center-Y in[-2048,+2047] are admitted. Foreign Spread addresses divide
+  physical X/Z by16 and Y by40; Lava divides X/Z by64/Yby40. Their separately
+  admitted scaled domains are not relative chunk-neighbor coordinates. Public
+  scalar/Climate/preliminary domains remain unchanged at±30000000.
+- Caches live only for this complete material-array run and are released with
+  the private sink; no public Carverreuse, surface/carver/feature/structure,
+  lighting, biome adoption, live natural-world identity, gameplay or plugin
+  compatibility follows. Full actual-Paper materialarrays and independent
+  branch/guard/budget acceptance are distinct from active server acceptance.
+- Bounded declared test leaves, exact point/status inputs, contexts and RNG
+  traces exist only under `cfg(test)`; production keeps concrete factories and
+  global-fluid logic without callbacks or per-block trace allocation. Original
+  enabled/cache evidence compares occupied arrays and signed-packed Preliminary
+  keys after every call, including repeats. Fifteen original nonfinite probes
+  verify typed raw-bit Rust refusal and failed cache nonpublication, not Java
+  successful-result parity.
+
 ## Block-entity persistence
 
 - `try_encode_block_entity` is the checked, versioned storage writer. Its

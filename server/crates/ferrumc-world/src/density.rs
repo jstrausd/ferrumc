@@ -13,8 +13,8 @@ mod json;
 mod seeded;
 
 pub use chunk::{
-    ChunkDensitySamples, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit, NoiseChunkSession,
-    NoiseChunkWorkBudget, MAX_NOISE_CHUNK_WORK,
+    ChunkDensitySamples, ChunkMaterialSamples, NoiseChunkError, NoiseChunkErrorKind,
+    NoiseChunkLimit, NoiseChunkSession, NoiseChunkWorkBudget, MAX_NOISE_CHUNK_WORK,
 };
 
 pub use seeded::{

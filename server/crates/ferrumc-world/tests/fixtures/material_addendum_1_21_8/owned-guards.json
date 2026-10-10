@@ -1,0 +1,54 @@
+[
+  {
+    "probe": "JAVA_TOOL_OPTIONS",
+    "refusal": "refuse Java option injection JAVA_TOOL_OPTIONS",
+    "scope": "real environment injection"
+  },
+  {
+    "probe": "_JAVA_OPTIONS",
+    "refusal": "refuse Java option injection _JAVA_OPTIONS",
+    "scope": "real environment injection"
+  },
+  {
+    "probe": "JDK_JAVA_OPTIONS",
+    "refusal": "refuse Java option injection JDK_JAVA_OPTIONS",
+    "scope": "real environment injection"
+  },
+  {
+    "probe": "JDK_JAVAC_OPTIONS",
+    "refusal": "refuse Java option injection JDK_JAVAC_OPTIONS",
+    "scope": "real environment injection"
+  },
+  {
+    "probe": "CLASSPATH",
+    "refusal": "refuse Java option injection CLASSPATH",
+    "scope": "real environment injection"
+  },
+  {
+    "probe": "worldgen_hash",
+    "refusal": "worldgen pin drift",
+    "scope": "controlled digest fault injection; real pinned reference unchanged"
+  },
+  {
+    "probe": "paper_inner_hash",
+    "refusal": "changed input /home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-runtime-1.21.8-60/versions/1.21.8/paper-1.21.8.jar",
+    "scope": "controlled digest fault injection; real pinned reference unchanged"
+  },
+  {
+    "probe": "approved_source_hash",
+    "refusal": "changed input /home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/Aquifer.java",
+    "scope": "controlled digest fault injection; real pinned reference unchanged"
+  },
+  {
+    "exit_code": 1,
+    "probe": "original_class_codesource",
+    "refusal": "wrong original origin net.minecraft.core.BlockPos",
+    "scope": "actual Java process with wrong declared original origin"
+  },
+  {
+    "exit_code": 1,
+    "probe": "fresh_helper_codesource",
+    "refusal": "wrong fresh helper origin class ferrumc.branchaddendum.MaterialBranchAddendum",
+    "scope": "actual Java process with correct original JAR and wrong declared fresh helper directory"
+  }
+]

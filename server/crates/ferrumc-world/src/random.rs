@@ -205,6 +205,49 @@ impl WorldgenRandomSource {
         }
     }
 
+    // Material callers provide the original positive constants 10/9/10. Each
+    // rejection draw shares their session meter; a refused draw changes no RNG
+    // bits. Public primitive sampling retains its established unmetered API.
+    pub(crate) fn bounded_positive_metered(
+        &mut self,
+        bound: u32,
+        work: &mut crate::sample_work::SampleWork,
+    ) -> Result<u32, crate::sample_work::SampleWorkExceeded> {
+        match &mut self.state {
+            State::Legacy(seed) => {
+                if bound.is_power_of_two() {
+                    work.charge()?;
+                    return Ok(
+                        ((u64::from(bound) * u64::from(legacy_bits(seed, 31))) >> 31) as u32,
+                    );
+                }
+                loop {
+                    work.charge()?;
+                    let bits = legacy_bits(seed, 31);
+                    let value = bits % bound;
+                    if bits
+                        .wrapping_sub(value)
+                        .wrapping_add(bound - 1)
+                        .cast_signed()
+                        >= 0
+                    {
+                        return Ok(value);
+                    }
+                }
+            }
+            State::Xoroshiro(seed) => {
+                let threshold = bound.wrapping_neg() % bound;
+                loop {
+                    work.charge()?;
+                    let product = u64::from(xoroshiro_long(seed) as u32) * u64::from(bound);
+                    if product as u32 >= threshold {
+                        return Ok((product >> 32) as u32);
+                    }
+                }
+            }
+        }
+    }
+
     /// Draws a signed Java long, including signed widening of both legacy ints.
     pub fn next_long(&mut self) -> i64 {
         match &mut self.state {
@@ -376,4 +419,78 @@ fn coordinate_seed(position: BlockPos) -> i64 {
         .wrapping_mul(42_317_861)
         .wrapping_add(value.wrapping_mul(11))
         >> 16
+}
+
+#[cfg(test)]
+mod material_meter_tests {
+    use super::*;
+    use crate::sample_work::SampleWork;
+
+    #[test]
+    fn metered_bounded_draws_preserve_public_values_and_charge_each_rejection() {
+        for algorithm in [
+            RandomAlgorithm::Legacy,
+            RandomAlgorithm::Xoroshiro128PlusPlus,
+        ] {
+            for seed in [0, 1, -1, i64::MIN, i64::MAX] {
+                for bound in [1, 8, 9, 10, 256] {
+                    let mut plain = WorldgenRandomSource::new(algorithm, WorldSeed::new(seed));
+                    let mut metered = plain;
+                    let mut work = SampleWork::new(10_000);
+                    for _ in 0..100 {
+                        assert_eq!(
+                            plain.bounded_positive(bound),
+                            metered.bounded_positive_metered(bound, &mut work).unwrap()
+                        );
+                        assert_eq!(plain, metered);
+                    }
+                    assert!(work.used() >= 100);
+                }
+            }
+        }
+        let cases = [
+            WorldgenRandomSource {
+                state: State::Xoroshiro(Seed128::new(0, 0x1_0000_0000)),
+            },
+            WorldgenRandomSource {
+                state: State::Legacy(0xa9c5_e77c_2aa9),
+            },
+        ];
+        for initial in cases {
+            let mut full = initial;
+            let mut allowance = SampleWork::new(10_000);
+            let value = full.bounded_positive_metered(10, &mut allowance).unwrap();
+            let n = allowance.used();
+            assert!(n >= 2, "constructed first rejection did not occur");
+            let mut exact = initial;
+            assert_eq!(
+                exact
+                    .bounded_positive_metered(10, &mut SampleWork::new(n))
+                    .unwrap(),
+                value
+            );
+            assert_eq!(exact, full);
+            let mut short = initial;
+            let mut work = SampleWork::new(n - 1);
+            assert!(short.bounded_positive_metered(10, &mut work).is_err());
+            assert_eq!(work.used(), n - 1);
+            let mut prefix = initial;
+            for _ in 0..n - 1 {
+                match &mut prefix.state {
+                    State::Legacy(bits) => {
+                        legacy_bits(bits, 31);
+                    }
+                    State::Xoroshiro(bits) => {
+                        xoroshiro_long(bits);
+                    }
+                }
+            }
+            assert_eq!(short, prefix);
+            let before = short;
+            assert!(short
+                .bounded_positive_metered(10, &mut SampleWork::new(0))
+                .is_err());
+            assert_eq!(short, before);
+        }
+    }
 }

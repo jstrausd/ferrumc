@@ -1,0 +1,150 @@
+{
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/MaterialBranchAddendum.java": {
+    "bytes": 25171,
+    "sha256": "bd69d9f196b2d635d2165858088cf23fd380ae8c8cba8621545598824e1ac018"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/README.md": {
+    "bytes": 6462,
+    "sha256": "fe1ab1f7e04a77112f3331ffc37d5d002faef0fb881b4158595606c1864e14ac"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/build_helper.py": {
+    "bytes": 11519,
+    "sha256": "82397e25c000c7a6f0e9299639c08cc23bbbb09e63d0d08f6b31a5dd661b00bd"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/cases.jsonl": {
+    "bytes": 45818,
+    "sha256": "d6b44ffe49312306b173e455fba9e88644c4dac5a451f8baf3eade48b9c2720a"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/addendum.jsonl": {
+    "bytes": 873181,
+    "sha256": "850ccb051798c73317bd26bc22d40ee60b8c29ef6eb1c1403fd40feeeb022d87"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/classes/ferrumc/branchaddendum/MaterialBranchAddendum$Leaf.class": {
+    "bytes": 3040,
+    "sha256": "869f6101dab790fc44b8c5371ecb6a627a2dd7fe850bb98f0dc0720b5d6a2a6e"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/classes/ferrumc/branchaddendum/MaterialBranchAddendum$Trace.class": {
+    "bytes": 2480,
+    "sha256": "85b24fb5731fb138d599652bfb9e7a833926bf7fa39e3427bdb08feec18ae928"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/classes/ferrumc/branchaddendum/MaterialBranchAddendum$TraceFactory.class": {
+    "bytes": 3134,
+    "sha256": "1df4886b00d95db56cd8043a4b2805daf6ffbc71cd3530cf8e773a3db41bd2a8"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/classes/ferrumc/branchaddendum/MaterialBranchAddendum$TraceRandom.class": {
+    "bytes": 2371,
+    "sha256": "a982cd99c764fe36669da9a49aeb0c35267d5180ca0f9bd8dd8205bef8b64ac3"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/classes/ferrumc/branchaddendum/MaterialBranchAddendum.class": {
+    "bytes": 23493,
+    "sha256": "fe929059ed61a2c4e2f66cd450f200468c095a068a0b572aafdd6c132906328b"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/invocation.json": {
+    "bytes": 39788,
+    "sha256": "dec01124b3ef1395ec38603788ffe6f8d5b4f649ba9802117ba94b5f721c61fb"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/javac.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/logs/latest.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/manifest.json": {
+    "bytes": 38597,
+    "sha256": "8e53a4a93234875305f5f328cf2449f4526f1df0ff1f143826b30b5bb82431b0"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/oracle.log": {
+    "bytes": 106,
+    "sha256": "5769b83238cc977488f0064645e1479a8db07b5c87418b38c08d81eeb4e8c1fa"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-normal/origins.json": {
+    "bytes": 5945,
+    "sha256": "ee71fb7ebaa8fe2258634fa42aee942c468ee880061070907825960fce56178d"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/addendum.jsonl": {
+    "bytes": 873181,
+    "sha256": "850ccb051798c73317bd26bc22d40ee60b8c29ef6eb1c1403fd40feeeb022d87"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/classes/ferrumc/branchaddendum/MaterialBranchAddendum$Leaf.class": {
+    "bytes": 3040,
+    "sha256": "869f6101dab790fc44b8c5371ecb6a627a2dd7fe850bb98f0dc0720b5d6a2a6e"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/classes/ferrumc/branchaddendum/MaterialBranchAddendum$Trace.class": {
+    "bytes": 2480,
+    "sha256": "85b24fb5731fb138d599652bfb9e7a833926bf7fa39e3427bdb08feec18ae928"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/classes/ferrumc/branchaddendum/MaterialBranchAddendum$TraceFactory.class": {
+    "bytes": 3134,
+    "sha256": "1df4886b00d95db56cd8043a4b2805daf6ffbc71cd3530cf8e773a3db41bd2a8"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/classes/ferrumc/branchaddendum/MaterialBranchAddendum$TraceRandom.class": {
+    "bytes": 2371,
+    "sha256": "a982cd99c764fe36669da9a49aeb0c35267d5180ca0f9bd8dd8205bef8b64ac3"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/classes/ferrumc/branchaddendum/MaterialBranchAddendum.class": {
+    "bytes": 23493,
+    "sha256": "fe929059ed61a2c4e2f66cd450f200468c095a068a0b572aafdd6c132906328b"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/invocation.json": {
+    "bytes": 39806,
+    "sha256": "1c3f59cbde3d21903493f84cec34848ad4cb4644bb3e2cc57e5db6aae4732c44"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/javac.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/logs/latest.log": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/manifest.json": {
+    "bytes": 38597,
+    "sha256": "8e53a4a93234875305f5f328cf2449f4526f1df0ff1f143826b30b5bb82431b0"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/oracle.log": {
+    "bytes": 106,
+    "sha256": "eeffce8afb89d7013336fa77ff2f5b36c1332fb7bd918d234c7dca8b507798a3"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/final-optimized/origins.json": {
+    "bytes": 5945,
+    "sha256": "ee71fb7ebaa8fe2258634fa42aee942c468ee880061070907825960fce56178d"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/guard-normal/guards.json": {
+    "bytes": 1669,
+    "sha256": "95d72dab795785f86f796854ea7bd8908c3bf862da618bcc944e514407296da6"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/guard-normal/wrong-helper-origin.log": {
+    "bytes": 226,
+    "sha256": "55cbc7692cda27489856b946101640a6bbd30b957471bfd95f825b16520839f2"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/guard-normal/wrong-origin.log": {
+    "bytes": 313,
+    "sha256": "42e886382b73af32cb0cb7ed0b535dfd4f4feebd156d8168d94af8f14bab4584"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/guard-optimized/guards.json": {
+    "bytes": 1669,
+    "sha256": "95d72dab795785f86f796854ea7bd8908c3bf862da618bcc944e514407296da6"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/guard-optimized/wrong-helper-origin.log": {
+    "bytes": 226,
+    "sha256": "55cbc7692cda27489856b946101640a6bbd30b957471bfd95f825b16520839f2"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/guard-optimized/wrong-origin.log": {
+    "bytes": 313,
+    "sha256": "42e886382b73af32cb0cb7ed0b535dfd4f4feebd156d8168d94af8f14bab4584"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/make_cases.py": {
+    "bytes": 4739,
+    "sha256": "967ef9266e6c78a2bb061b4240776b5a142531d7bd97c421d5f7947bf68994e7"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/probe_guards.py": {
+    "bytes": 5602,
+    "sha256": "38a771e06a122cdf8fc061a6de0fe70b85d3863fcae1fd64cd45d6caa15d685c"
+  },
+  ".codex-tmp/gen05_4-root-branch-oracle/addendum/run_addendum.py": {
+    "bytes": 8044,
+    "sha256": "c1e72d333afe3bd10a5bd14c21510b80ad33036a5348dc825e4296b450a4e533"
+  }
+}

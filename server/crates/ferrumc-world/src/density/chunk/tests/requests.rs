@@ -12,12 +12,14 @@ pub(in crate::density::chunk) struct Leaf {
     pub values: Vec<f64>,
     pub fail_at: Option<usize>,
     pub fail_fill: bool,
+    overrides: Vec<(BlockPos, f64)>,
     calls: usize,
 }
 pub(in crate::density::chunk) struct Requests {
     pub leaves: Vec<Leaf>,
     pub trace: Vec<Value>,
     with_chunk: bool,
+    pub material_values: bool,
 }
 impl Requests {
     pub fn record(&mut self, event: Value) {
@@ -32,7 +34,21 @@ impl Requests {
     ) -> Option<Result<f64, DensitySampleError>> {
         let index = self.leaves.iter().position(|l| l.root == root)?;
         let label = self.leaves[index].label;
-        self.record(json!({"kind":"request","case":label,"operation":"compute","context":context}));
+        let leaf = &self.leaves[index];
+        let value = leaf
+            .overrides
+            .iter()
+            .find(|(point, _)| *point == pos)
+            .map_or_else(
+                || leaf.values[pos.x().rem_euclid(leaf.values.len() as i32) as usize],
+                |(_, value)| *value,
+            );
+        let mut event =
+            json!({"kind":"request","case":label,"operation":"compute","context":context});
+        if self.material_values {
+            event["value_f64_bits"] = json!(format!("{:016x}", value.to_bits()));
+        }
+        self.record(event);
         let leaf = &mut self.leaves[index];
         let call = leaf.calls;
         leaf.calls += 1;
@@ -45,9 +61,7 @@ impl Requests {
                 kind: DensitySampleErrorKind::InvalidGraph,
             }));
         }
-        Some(Ok(
-            leaf.values[pos.x().rem_euclid(leaf.values.len() as i32) as usize]
-        ))
+        Some(Ok(value))
     }
 }
 pub(in crate::density::chunk) fn context(state: &ChunkState, pos: BlockPos, own: bool) -> Value {
@@ -87,12 +101,13 @@ pub(in crate::density::chunk) fn fill_declared(
     }
     Some(Ok(()))
 }
-fn fresh(with_chunk: bool) -> NoiseChunkSession {
+pub(in crate::density::chunk) fn fresh(with_chunk: bool) -> NoiseChunkSession {
     let mut s = probe(vec![(original(NodeKind::Constant(0.0)), "unused")], 0);
     s.state.requests = Some(Requests {
         leaves: Vec::new(),
         trace: Vec::new(),
         with_chunk,
+        material_values: false,
     });
     s
 }
@@ -106,7 +121,7 @@ fn node(s: &mut NoiseChunkSession, kind: BoundKind) -> usize {
     s.state.wrapper_nodes.push(None);
     root
 }
-fn leaf(
+pub(in crate::density::chunk) fn leaf(
     s: &mut NoiseChunkSession,
     label: &'static str,
     values: &[f64],
@@ -123,9 +138,27 @@ fn leaf(
         values: values.to_vec(),
         fail_at: None,
         fail_fill: false,
+        overrides: Vec::new(),
         calls: 0,
     });
     root
+}
+pub(in crate::density::chunk) fn point_overrides(
+    s: &mut NoiseChunkSession,
+    root: usize,
+    values: &[(BlockPos, f64)],
+) {
+    assert!(values.len() <= 128);
+    let leaf = s
+        .state
+        .requests
+        .as_mut()
+        .unwrap()
+        .leaves
+        .iter_mut()
+        .find(|l| l.root == root)
+        .unwrap();
+    leaf.overrides = values.to_vec();
 }
 fn controls(s: &mut NoiseChunkSession, root: usize, fail_at: Option<usize>, fail_fill: bool) {
     let l = s
@@ -140,7 +173,7 @@ fn controls(s: &mut NoiseChunkSession, root: usize, fail_at: Option<usize>, fail
     l.fail_at = fail_at;
     l.fail_fill = fail_fill;
 }
-fn take_trace(s: &mut NoiseChunkSession) -> Vec<Value> {
+pub(in crate::density::chunk) fn take_trace(s: &mut NoiseChunkSession) -> Vec<Value> {
     std::mem::take(&mut s.state.requests.as_mut().unwrap().trace)
 }
 fn bits(value: &Value) -> u64 {

@@ -1,10 +1,15 @@
 # GEN-05.4 — Aquifer, große Erzadern und Noise-Materialausgabe
 
-Status: abhängiges Folgeticket vorbereitet, noch nicht vergeben oder
-implementiert. Voraussetzung ist ein unabhängig CLEAN integrierter
-GEN-05.3-NoiseChunkconsumer. Genau ein Autor besitzt anschließend
+Status: GEN-05.3 unabhängig CLEAN und mit `e7565c38` integriert. Autor
+`/root/item_transfer_primitives` besitzt exklusiv
 `server/crates/ferrumc-world/**` und diesen Brief; keine neuen Dependencies,
 App-/Sim-/Storage-/Registryänderungen oder Gitmutation durch den Autor.
+Root hat den vollständigen konkreten Entwurf SHA256
+`0e907adbae119f18485f0e3d31b7d5e01362fdcac848db39f997fbaa671d48cd`
+und alle26 Base-/Appliedsourcepins unabhängig geprüft und zur gezielten
+Runtimeumsetzung freigegeben. Runtime und vollständige Referenzconsumer sind
+umgesetzt; alle finalen Wholechecks sind grün. Der Stand geht eingefroren an
+das unabhängige Review. CLEAN und Rootintegration stehen aus.
 
 ## Konkretes Ergebnis
 
@@ -16,7 +21,8 @@ frischen vollständigen 16×16-Noisechunks für alle sieben Builtinsettings.
 Das ist eine reine Worldausgabe vor Surface/Carvers/Features, noch kein aktiv
 spielbarer Naturalgenerator. Keine neue allgemeine Material-Engine.
 
-Öffentliche Methode und Ergebnisnamen werden vor Umsetzung konkretisiert.
+`NoiseChunkSession::sample_chunk_materials` und `ChunkMaterialSamples` sind
+umgesetzt, mit dem unten konkretisierten öffentlichen Vertrag.
 Der Consumer bleibt synchron und ausschließlich besessen, mit privaten
 Feldern. Material- und Dichtedriver dürfen denselben Sessionlauf nicht zweimal
 verwenden; dieselbe Fresh/Running/Complete/Poisoned-/Resetauthority und derselbe
@@ -184,3 +190,300 @@ Feature-/Oreplacements, Vegetation, Structures und Licht bleiben eigene
 Verbraucher, ebenso aktive Nether-/Enddimensionen und sämtliche Mobs/Bosse.
 Weder eine Materialarrayausgabe noch eine Numericalabnahme schließt die
 Survivalstrecke oder den angeforderten Drop-in-Vertrag ab.
+
+## Konkreter Implementierungsentwurf zur Rootprüfung
+
+### Öffentlicher Vertrag und gemeinsamer Driver
+
+`NoiseChunkSession::sample_chunk_materials(&mut self)` liefert
+`Result<ChunkMaterialSamples, NoiseChunkError>`. Das Ergebnis besitzt ausschließlich
+private Felder: `WorldSeed`, `NoiseSettingsResourceId`, `ChunkPos`, `NoiseGeometry`,
+`Box<[BlockStateId]>` und `Box<[u64]>` für die Fluidmarkierungen. Accessors heißen
+`seed`, `resource`, `chunk_pos`, `geometry`, `block_states`, `block_state_at`,
+`fluid_update_bitmap` und `should_schedule_fluid_update`. Die States behalten
+exakt den vorhandenen Index `((y-minY)*16+localX)*16+localZ`. Bit i bezeichnet
+denselben Stateindex; unbenutzte hohe Bits im letzten Wort sind null. Die
+Positionsaccessors geben außerhalb der eigenen Geometrie `None` zurück.
+
+Der vorhandene vollständige Driver bekommt einen privaten konkreten Sinkenum
+mit Density- und Materialvariante. Er behält initialize/firstslice/advance/
+select/Y/X/Z/material/swap/stop und die vollständige originale Loopreihenfolge.
+Der bestehende `sample_material` bleibt der checked Running/ZUpdated-Eintritt
+für die Konstruktor-Materialdichte. Der neue Materialsink ruft unmittelbar
+danach Aquifer, bei `None` den originalen Oreconsumer, bei erneutem `None` den
+Settingsdefault auf. Seine letztendliche Fluidmarkierung prüft sowohl das echte
+Aquiferflag als auch den tatsächlich ausgewählten Non-Airstate mit Fluid.
+Keine zweite Densityfahrt, kein Callbackframework und keine pro-Blockallokation.
+
+Material- und Densityfahrt teilen die vorhandene Freshauthority: jede beendet
+den einen erlaubten vollständigen Lauf. Nach Complete verweigert auch die
+jeweils andere Methode; Reset ermöglicht wieder genau eine Fahrt. Preliminary
+und Climate bleiben gemäß .3 in Fresh/Complete verfügbar. Der Materialsink
+besitzt seine Aquiferarrays über den gesamten Lauf; nach erfolgreicher Ausgabe
+werden diese privaten temporären Materialcaches freigegeben. Das Ergebnis
+behält nur States und Fluidbitmap. Eine öffentliche spätere Carver-/Aquifer-
+Wiederverwendung ist außerhalb dieses Tickets.
+
+### Constructorchronologie, Meter und Fehler
+
+Die Materialvorbereitung wird erst vom neuen öffentlichen Materialaufruf
+ausgeführt. Die bestehende .3-Sessionkonstruktion und ihr Dichte-/Climatevertrag
+werden nicht nachträglich mit Materialallokationen oder RNGdraws verändert.
+Originaler Aquiferconstructor initialisiert/sealed nur feste Arrays; er zieht
+keine Centerstreams. Orecreate hält Functions/Factory, zieht ebenfalls nichts.
+Die zeitlich verschobene Vorbereitung verändert daher keine tatsächliche
+RNG-/Densityrequestchronologie. Lazy Center-/Fluidstatusfüllung erfolgt weiterhin
+erst am tatsächlich verlangten Originalbranch, in Originalreihenfolge.
+
+Ein Lifecyclefehler bei verweigertem Fresh-Eintritt lässt Session und Meter
+unverändert. Nach erfolgreichem Eintritt setzt der Materialaufruf Running;
+sämtliche Preparation-/Ausführungsfehler setzen anschließend Poisoned. Das gilt
+auch für Resolver-, Halo-, Cache-, Output- und Budgetfehler während Preparation.
+Alle Shapes/Counts/Bytes/Domains werden vor der zugehörigen Allokation und vor
+Driverstart geprüft. Ein Fehler veröffentlicht weder States noch Bitmap.
+Atomic Reset baut weiterhin einen vollständigen .3-Kandidaten; bei Fehler bleiben
+alte Wrapper/Counters/Surface/Meter/Lifecycle vollständig erhalten. Bei Erfolg
+ist Materialpreparation wieder ungeschehen und Fresh.
+
+Der vorhandene Meter läuft ohne lokale Budgets weiter. Zusätzliche Charges
+liegen vor: Vorbereitungsschritt, bounded Resolverinputscan/Lookup/Properties,
+jeder Cacheinitialisierung, Aquiferentry, Globalfluidrequest, jedem der zwölf
+Centerkandidaten, Location-/Statuslookup und Cachepublish, Factory-at, jedem
+tatsächlich ausgeführten RNGdraw einschließlich jeder rejection-loop-Iteration,
+Surfaceoffset, DeepDark/Pressure/Surface-/Fluidtypebranch und finalem State-/
+Fluidbitwrite. Bestehende Density-/Surface-/Noiseroots verwenden unverändert
+denselben Meter. Barrier wird innerhalb des originalen gemeinsamen Pressure-
+Sentinels höchstens einmal angefordert. Kein Vorabberechnen von übersprungenen
+Erosion/Depth/Ridged/Gap/RNGbranches. N/N−1 prüft auch Cachepublish nach einem
+vollständig berechneten Wert und finalen Outputwrite.
+
+Neue Fehler sind klassifizierte `NoiseChunkErrorKind`-Varianten für ungültigen
+Materialstate und eine konkrete private Materialadresse außerhalb ihrer
+admittierten Domain; neue `NoiseChunkLimit`-Varianten trennen Materialresolver,
+Aquiferslots/-bytes, States und Fluidbitmap. Vorhandene Work-, Graph-, Lifecycle-
+und Nonfinitefehler bleiben erhalten. Keine ungeprüften Unknownstate-/AIR-
+Fallbacks oder erfolgreiche Fortsetzung nach nichtendlichem Densitychild.
+
+### Factoryherkunft und numerische Originaldetails
+
+Es werden ausschließlich die bereits besessenen `BoundRouter.aquifer_random`
+und `.ore_random` verwendet. Sie stammen aus RandomStates originalem
+Positionalfactoryfork und den Namen `minecraft:aquifer`/`minecraft:ore`.
+Aquifer leitet `at(gridX,gridY,gridZ)` ab und zieht10/9/10; Ore leitet am tatsächlichen
+Block ab und zieht seine1..3 Floats ausschließlich in ihren Originalbranches.
+Ein crate-private `WorldgenRandomSource`-Meterpfad charged jede tatsächliche
+bounded-positive rejectioniteration vor RNGmutation; öffentliche Randommethoden
+und sämtliche bisherigen Vanilla-Fixtures bleiben unverändert. Aquifer und Ore
+benötigen keine neuen `nextDouble`-Draws. Ihre normalen Noisefunktionen nutzen
+weiterhin .3s private tatsächlich geprüfte Paper-offsetbasis.
+
+Alle F32konstanten werden zunächst als f32 dargestellt und dann nach f64
+gewidened, wenn das Original sie im Doubleausdruck verwendet: insbesondere
+DeepDark−0.225F/0.9F, Vein0.4F/0.6F/0.1F/0.3F und Gap−0.3F. Floatdrawvergleiche
+bleiben f32. Double−0.3/0.8/−0.8/0.4 in Aquifer behalten ihre Doublebits.
+`clampedMap` bleibt `clampedLerp(outputMin,outputMax,inverseLerp(...))`,
+`quantize` bleibt Java-floor(value/factor) mit anschließender i32-Multiplikation.
+MAX-Preliminarysentinel+8 und anschließende i32-Arithmetik wrappen ausdrücklich.
+Centerdistanz-/Similaritytieordnung bleibt das originale `>=`; PackedBlockPos
+behält26/12/26 Bits und den ursprünglichen Long.MAX_VALUE-Locationsentinel.
+
+### Private Stateauflösung und zulässige Daten
+
+Keine neue Registrylane und keine eigene IDtabelle: die vorhandene vollständige
+`ferrumc_registry::block_state::{block_metadata,block_default_state,compute_state_id}`
+API liefert die gepinnten gültigen States. Der nur fünf Namen unterstützende
+Rootwrapper `default_block_state_id` wird hier nicht verwendet. Der private
+Worldresolver liest die statischen `RouterMetadata.default_block/default_fluid`
+Slices mit dem vorhandenen bounded JSONlexer und verlangt `Name` sowie optional
+`Properties`; unbekannte Felder/Blocks/Properties/Values oder falsche JSONtypen
+verweigern. Ausgelassene Properties erben den originalen Defaultstate.
+Inputcap4096Bytes,32Properties und die vorhandenen String-/JSONcaps gelten vor
+Produktion; die Inputs sind bereits bounded Originaldefinition-Slices.
+Die temporäre Parserallokation ist durch4096Sourcebytes und vorhandene128KiB/
+4096Node-Lexercaps begrenzt und wird vor Parsing durch den Inputscan metered.
+Unknown-/malformed-Properties werden strenger als das originale
+`lenientOptionalFieldOf("Properties")` verweigert; dies ist checked Policy,
+keine behauptete Fehlereingabeparität mit Java.
+
+AIR/WATER/LAVA, CopperOre/RawCopper/Granite und DeepslateIronOre/RawIron/Tuff
+werden einmal während Preparation über dieselbe bestehende Registry aufgelöst.
+Die sieben echten Settingsdefaultblöcke und -fluids werden exakt geprüft.
+Die geschlossene Materialausgabe kann nur die aufgelösten Settingsdefaults und
+diese festen Originalstates auswählen. Fluidklassifikation wird für die
+wirklich möglichen Air/Water/Lava/defaultfluidstates versiegelt, nicht aus
+Namensfragmenten oder Blocksolidity erraten. Unbekannte hypothetische Fluids
+verweigern Preparation. Originaldefaults/Propertycodec und die RawstateIDs
+werden mit tatsächlichen gepinnten JARwerten geprüft.
+
+### Halo und konkrete Foreigndomains
+
+Sei p ein ausgegebener Block. Aus `floorDiv(p−5,16)+{0,1}` und Jitter0..9
+folgt für Center X/Z genau eine sichere Deltaextent[−20,+20]; aus
+`floorDiv(y+1,12)+{−1,0,1}` und Jitter0..8 folgt[−22,+21]. Die13 Surfaceoffsets
+liegen in X[−48,+16]/Z[−16,+16]; Quartfloor fügt[−3,0] hinzu. Deshalb können
+Preliminaryadressen relativ p in X[−71,+36]/Z[−39,+36] liegen. Die private
+symmetrische128-Extent ist größer als jede dieser tatsächlich hergeleiteten
+Grenzen. Vor Allocation/Driver werden Chunkorigin, positive Corner, alle
+Extremadressen und Geometrie durch i64checked Ableitung geprüft.
+
+Nur private Materialqueries dürfen physische X/Z in
+`[−30_000_128,+30_000_128]` verwenden. Public .2/.3 Positionchecks bleiben
+unverändert. Center-Y wird zusätzlich auf `[minY−22,topY+20]` begrenzt, da
+der letzte Outputblock topY−1 ist; diese admitted Centers müssen vor dem Lauf
+in PackedBlockPos' unverfälschte Yrange[−2048,+2047] passen. Alle echten sieben
+Settings erfüllen diese Voraussetzung. Private hypothetische Geometrymutationen
+außerhalb der packedrange verweigern statt falsche Centerpositionen zu cachen.
+Preliminary scannt weiterhin seine vollständige ursprüngliche Geometry inkltop.
+
+Erosion/Depth/Floodedness verwenden den checked physischen Centercontext.
+Spread verwendet ausschließlich daraus abgeleitet
+`(floorDiv(x,16),floorDiv(y,40),floorDiv(z,16))`: X/Z
+`[−1_875_008,+1_875_008]`, Y die floordiv40-Endpunkte der admittierten Center-
+Yrange. Lava verwendet `(floorDiv(x,64),floorDiv(y,40),floorDiv(z,64))`:
+X/Z `[−468_752,+468_752]`, dieselbe Yrange. Diese skalierten Foreignadressen
+werden unabhängig von einer relativen Chunkhalo geprüft; ein far-chunk geteilter
+Wert ist kein physischer Nachbar. Barrier/Ore verwenden den echten owncontext.
+MAX-Surfacewrap beeinflusst Globalfluidhöhen und ursprüngliche Arithmetik,
+ändert aber keine fremde Noiseadresse in eine ungeprüfte i32-Extremaquery.
+
+### Separate Counts und Bytes
+
+| Kategorie | Checked Admission vor Allokation |
+| --- | --- |
+| Materialstates | Höchstens131072×4Bytes =512KiB; die originale height×256-Shape und vollständige Y/X/Z-Ordnung. |
+| Fluidbitmap | Höchstens2048×8Bytes =16KiB; unabhängig von States und Writebitmap. |
+| Exactly-once-Writebitmap | Vorhandene höchstens2048×8Bytes =16KiB; niemals als Fluidflag wiederverwenden. |
+| AquiferLocation/Status | Originale Gridindexform, höchstens512Slots; tatsächliche Builtins315. Getrennt maximal12KiB für `i64`-Locations und `Option<FluidStatus>` mit tatsächlichem `size_of`; beide Counts identisch. |
+| Preparationresolver | Höchstens4096Bytes je statischem Settingsstateinput,32Properties; zusätzliche Parserlimits oben. Keine RetainedJSONtrees, keine Blockloopallokation. |
+| Vorhandene .3Resourcen | Key/Graph/Wrapper/8MiBCache/4MiBScratch/2048Surfacecolumns unverändert und getrennt; alle Workpfade teilen268435456 maxUnits. |
+
+Materialsinkmetadata und vier nächste Centers/Pressure-Sentinel sind feste kleine
+Werte; keine per-BlockVecs. Keine neuen Dependencies, globalen Caches oder
+Performancezusagen. Neue Runtimefiles: `density/chunk/material.rs` und private
+`material/{aquifer,ore,blocks}.rs`; Driver/Chunkexports und der private RNGpfad
+werden gezielt erweitert. Tests/Originalrunners/Fixtures liegen im Worldscope.
+
+### Tatsächlich gelesene Quellen und noch ausstehende Abnahme
+
+Vollständig gelesen: Aquifer einschließlich constructor/computeSubstance/
+pressure/getStatus/computeFluid/surface/spread/lava, OreVeinifier einschließlich
+aller Branches und VeinTypes; NoiseChunkconstructor/MaterialRuleList/
+getInterpolatedState und vollständiger Driver; GeneratorcreateFluidPicker/
+doFill sowie der gesamte Generator-Sourcepatch; DeepDarkcallee; Mthfloor/
+inverseLerp/map/clampedMap/clampedLerp/quantize, DimensionTypekonstanten und
+BlockPospack/unpack; StateHoldercodec/BlockStatecodec sowie Propertydefault-
+auflösung; tatsächliche beide Factory-at und bounded-int/Floatmethoden.
+Die Sourcepatches für Generator und BlockState und die relevanten Feature-
+patchabschnitte0012(BlockPos) und0016(StateHolderoptimierung) werden zusammen
+mit Basis und angewandtem Code geprüft. Keine Aquifer-/Ore-/NoiseChunk-
+Source-/Featurepatchänderung wurde im gepinnten Checkout gefunden.
+
+Base liegt unter Paper-`paper-server/.gradle/caches/paperweight/mache/base/sources/`,
+Applied unter `paper-server/src/minecraft/java/`; Präfix `net/minecraft/`:
+
+| Originaldatei | Base SHA256 | Applied SHA256 |
+| --- | --- | --- |
+| world/level/levelgen/Aquifer.java | `6c55f04707514c491173a408f448025e06a9db08c7e9dd7c04377d9ac5e1315a` | gleich |
+| world/level/levelgen/OreVeinifier.java | `f68ed59d78a1621791de4bcd187cbb7ea4ed0a89a11bd6c293282d021d2371f1` | gleich |
+| world/level/levelgen/NoiseChunk.java | `e3c872cf3f6a15a063d255f1188296ea841ef012b01959d35ca7e0012d97c863` | gleich |
+| world/level/levelgen/NoiseBasedChunkGenerator.java | `1aee1be9952d347975d2a464da06ee330dc0980aba1a979ceca9d18e6d89dc71` | `2b586e7fca9059b65d214f33f6b84fcc7ae3de90285ad7cd9c8a56edc319f2d8` |
+| world/level/biome/OverworldBiomeBuilder.java | `cf35eb3b0e9ebc945e9199a641d1d87919725eada4cdc38a8171c0417aeb13b3` | gleich |
+| world/level/dimension/DimensionType.java | `627b841fdedb30b0ea35576baa67dadcc884180c1f083fda4cf42701a474ec92` | gleich |
+| util/Mth.java | `b16d2c4c6b1979c2999480952e4e4d624a67755204d96de909006dd99ff51a5c` | gleich |
+| core/BlockPos.java | `5c7bae8a163f077e1c4016cc86ce500e5f4a50ec73f434e8886b6a2e6e91a4c7` | `3721abe51c6206f9bf9d98cb1df543578e7f8a250f25fa4562fb42f2ca034843` |
+| world/level/block/state/BlockState.java | `82d7b1ff7ae2f76dbe595da8c55be5bb3f22f16ed2a2c09cf62463eb0e05c37b` | `9f47781fe7e32828d00d55de58586bcca792ccc7fab6b122dbb81a622ebb2c33` |
+| world/level/block/state/StateHolder.java | `950c134ea03ad199db2b9287ed48f5af8155c2c1cbd516bb24d2629146c8cc65` | `c3decaef0dbb20fa69e152bc2d2dfe976c59a8cdc07137afc3d38375dfb198cf` |
+| world/level/levelgen/XoroshiroRandomSource.java | `76a1af8439d57038d3e80ea41dc7b38ca3d9cbfe3a8db8bd87982b5aa363e70f` | gleich |
+| world/level/levelgen/LegacyRandomSource.java | `f05787a1b23d609499ec99e403ff267fecbc500f71bcc15311fce14a3a6a6c02` | gleich |
+| world/level/levelgen/BitRandomSource.java | `726528fb348082c248218899112a2d6fba1a1897dad719aa41939eff643ff2c1` | gleich |
+
+Ganze relevante Patchdateipins (gelesene Abschnitte oben, nicht behauptet alle
+übrigen Moonrisemechaniken geprüft): Generator-Sourcepatch
+`031f165c23c23c603320cde05ecee4ce5656a5762a4e21abda2bdff9fb31e04a`,
+BlockState-Sourcepatch
+`41cb04435d2d247c92d833997305cd3787db12839cea0b9618697cb50ca76e6e`,
+Feature0012
+`05917edf3c780e02fbea9b667afbeaf0bb09100aea10baf53da7f92909371dd0`,
+Feature0016
+`267e01eaeb0873893c09a903bae3d9880de7a98c757b59fca03bc827de06297b`.
+
+Diese Sourceprüfung und dieser Entwurf sind keine Runtimeabnahme. Die bereits
+unabhängig eingefrorenen126 vollständigen Paperarrays werden ohne neue Formel-
+oracle oder Reexport des alten .3Bitscorpus wiederverwendet. Dazu kommen echte
+JARbranch-/Requesttraces, Guard-/Origin-/normal/−O-Nachweise sowie die oben
+definierten malformed/halo/threshold/tie/sentinel/N/N−1/Poison/Resettests.
+Erst nach erfolgreicher kompletter State-/Fluidflagmatrix und unabhängigem
+Review wird GEN-05.4 als CLEAN zur Rootintegration gemeldet.
+
+## Eingefrorener Autorstand für das unabhängige Review
+
+Umgesetzt sind die vier privaten Runtimefiles `material.rs` und
+`material/{aquifer,ore,blocks}.rs`, der eine konkrete Density-/Materialsink im
+bestehenden Driver, das besessene öffentliche `ChunkMaterialSamples` und der
+crate-private metered bounded-int-Pfad. Materialvorbereitung ist aufgeschoben,
+die alte .3-Sessionkonstruktion bleibt ohne zusätzliche Materialdraws. Das
+Productiondispatch verwendet konkrete Factory-/Fluid-/Statewerte; sämtliche
+deklarierten Float-/Point-/Picker-/Context-/Tracehooks sind `cfg(test)`.
+
+Tatsächlich bestanden:
+
+| Prüfung | Eingefrorener Umfang |
+| --- | --- |
+| Komplette Paper-Materialausgabe | Alle126 Chunks und7.077.888 States/Flags exakt; sieben Settings, asymmetrische Seeds und signed Near-/Far-Endmatrix. |
+| Unabhängige finite Endpunkte |499:Pressure69/Surface151/Spread70/Fluid66/Ore107/Disabled36; Results/Rawbits/Requestcontexts/Factory-/Floatchronologie exakt. |
+| Aquifer-Addendum |42 finite Enabled27/Ties6/Fluidscan6/Fluidcache3; vollständige Resultate, Cache-Snapshots vor/nach jedem Call und Density/RNG/Globalfluid-Interleaving exakt. |
+| Zusätzliche Nonfinitepolicy |15 echte Java-Ergebnisproben mit NaN/+Inf/−Inf für Substance/Floodedness/Spread/Preliminary/Barrier. Rust verweigert typisiert mit ursprünglichen Rawbits und unveröffentlichtem Status/Surfacecache; keine Java-Ergebnisparität behauptet. |
+| Endpunkt-Workgrenzen |Alle541 finiten Fälle erfolgreich mit exaktN, typed Fehler beiN−1 und unveränderter vollständiger bzw. Prefix-Tracechronologie. |
+| Session-/Publikationsverträge |VolloutputN/N−1; Preparation/State-/Bitmapwrites getrennt; Poison/atomarer Reset; Resolvermalformed/Unknownfluids; vier Weltkanten/private scaled-/packedDomains; Aquifermiss/hit/failed Cachepublish; metered RNGrejections. |
+| Ergebnisbesitz und Reihenfolge |Für alle sieben Settings zwei gleichzeitig bestehende Sessions desselben Routers, Neighborlauf zwischen erstem Lauf und Reset, rückwärts angeforderte Chunks desselben Routers, Ergebnis nach Drop von Router/Session gültig. |
+| WholeWorld Debug und Release |Je205 Unit +46 Integration =251 Tests;0 Fehler/0 Ignored. |
+| Werkzeuge |Strict Alltargetclippy mit `-D warnings`, `cargo fmt -p ferrumc-world --check`, Rustdoc ohne Dependencies mit `RUSTDOCFLAGS=-D warnings`, alle grün. Offline/locked, `-j 2`, eigener Scratchtarget. |
+
+Die unabhängigen Originalhelpers enthalten keine nachgeschriebene Aquifer-/
+Pressure-/Ore-/Surface-/Center-Ranking-/RNG-Erwartungsformel. Adoptierte Java-
+Helpers und deklarierte Inputs bleiben bytegleich. Die beiden Rootfreezes für
+Endpunkte und Addendum haben SHA256
+`ad582f936bb33dfb507504f38b86249f979ea695ca8ab91e1d638ef038aee714`
+bzw.
+`3e7529d90389b90332729b67bbb45d287622ce9e22787186ba23ae3ff2c4b41c`.
+JSONL499:475.091Bytes, SHA256
+`4ae88195e5fb1008794f0f4ac2b4ee69b6fc1a63f0902b52f00baf9ad21ff4ab`.
+JSONL57:873.181Bytes, SHA256
+`850ccb051798c73317bd26bc22d40ee60b8c29ef6eb1c1403fd40feeeb022d87`.
+
+Owned-Reexport normal/−O reproduziert Rootmaterialarrays, beide Rootbranch-
+JSONLs, tatsächliche ClassOrigins und alle Helperclasses bytegleich. Die
+jeweiligen Ownedmanifests sind normal/−O identisch; ihre SHA256s sind
+`57b46d9f74305d7263c230cd646fef3780933eca81a4dcdd29c2ddce2acc4f66`
+(Arrays), `e6441992c50ca861ee2dcfd4a554e6cfa38027de38e6152ec2b236ba73f0342c`
+(499) und `04cbfdb7f5654a8959c88188a7908084a4a15d6e8a3e8dc29656b4a9175598f0`
+(57). Alle19/8/10 Ownedguards bestehen in beiden Pythonmodi. Feste Helper-/
+Input-/Builder-/JDKpins,26 Base-/Appliedsourcepins,120 Paperartefaktpins,
+Pre-/Posthashes, tatsächliche CodeSources und Helper-shadow-/Environment-
+Verweigerungen gelten. Nichtendliche Javaergebnisse werden nicht normalisiert.
+
+Gegen `.codex-tmp/gen05_3-world.freeze.json` bleiben109/118 Dateien bytegleich,
+einschließlich aller24 alten Fixtures und28 Referencefiles. Nur neun zuvor
+konkretisierte Runtime-/Testhook-/Dokudateien sind geändert; es gibt keine
+unerwartete Änderung oder Dependency-/Cargo.toml-/Cargo.lockmutation.
+Vergleich: `.codex-tmp/gen05_4-prior-contract-compare.json`.
+Referenzadoption und normal/−O-Vergleiche:
+`.codex-tmp/gen05_4-frozen-reference-adoption-compare.json`,
+`.codex-tmp/gen05_4-owned-final-reexport-compare.json`,
+`.codex-tmp/gen05_4-owned-branches-final-compare.json`,
+`.codex-tmp/gen05_4-owned-addendum-final-compare.json`.
+
+Finale Logs heißen `.codex-tmp/gen05_4-final-{debug,release,clippy,fmt,rustdoc}.log`;
+World-/Brief-Authorfreeze und zugehörige Checknachweise liegen unter
+`.codex-tmp/gen05_4-author-world.freeze.json` und
+`.codex-tmp/gen05_4-author-finalchecks.json`. Nach Freeze editiert der Autor nur
+auf konkrete Reviewfindings. Root verwaltet unabhängige Reviewentscheidung,
+Integration und Push; der Autor hat kein Git verwendet.
+
+Diese Abnahme liefert ausschließlich frische Materialarrays vor
+Surface/Carvers/Features. Aktive Naturwelt, Biome-/Surface-/Chunkadoption,
+Nether/Endbetrieb, Survival, Java-/Paperplugins, komplette Vanilla-/Paper-
+Parität und RAM/TPSverbesserungen werden damit nicht behauptet. Der separate
+GEN-05.5-Scratchentwurf konkretisiert als nächste Producerstrecke vollständige
+Biomeparameter → originalen historyhaltigen RTree-Selector → Quartarray;
+keine .5Runtime ist durch dieses Ticket aktiviert.

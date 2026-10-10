@@ -1,0 +1,34 @@
+{
+  ".codex-tmp/gen05_4-root-material-goldens-normal/chunks.jsonl": {
+    "bytes": 32562,
+    "sha256": "7782ac995e1adaa7c58c23478101521d633764babb4b5ec46e7fa4124fcd3455"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens-normal/manifest.json": {
+    "bytes": 29595,
+    "sha256": "326eb8d1b34888566693a15584cdf8c1a35ce6f6b53b0fdc0a9797030b8b61a6"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens-normal/material_states.bits": {
+    "bytes": 35389440,
+    "sha256": "e27a497fbbed2adb8060e3bc9556f6341a0ecb6ab5eb0ef565e70570113ed384"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens-optimized/chunks.jsonl": {
+    "bytes": 32562,
+    "sha256": "7782ac995e1adaa7c58c23478101521d633764babb4b5ec46e7fa4124fcd3455"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens-optimized/manifest.json": {
+    "bytes": 29595,
+    "sha256": "326eb8d1b34888566693a15584cdf8c1a35ce6f6b53b0fdc0a9797030b8b61a6"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens-optimized/material_states.bits": {
+    "bytes": 35389440,
+    "sha256": "e27a497fbbed2adb8060e3bc9556f6341a0ecb6ab5eb0ef565e70570113ed384"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens/ChunkMaterialGoldens.java": {
+    "bytes": 10979,
+    "sha256": "8e8b2c0a2cc965cc17cc8071142fe030a972c697d99dd582cdd544d8d66c68fb"
+  },
+  ".codex-tmp/gen05_4-root-material-goldens/run_goldens.py": {
+    "bytes": 5301,
+    "sha256": "f50711f5822e3411a93b2749cffbe6daf173da77c72471047b19a536b8a72b09"
+  }
+}

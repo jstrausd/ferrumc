@@ -1,0 +1,109 @@
+{
+  "design_sha256": "0e907adbae119f18485f0e3d31b7d5e01362fdcac848db39f997fbaa671d48cd",
+  "files": {
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/core/BlockPos.java": {
+      "bytes": 24183,
+      "sha256": "5c7bae8a163f077e1c4016cc86ce500e5f4a50ec73f434e8886b6a2e6e91a4c7"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/util/Mth.java": {
+      "bytes": 24517,
+      "sha256": "b16d2c4c6b1979c2999480952e4e4d624a67755204d96de909006dd99ff51a5c"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/biome/OverworldBiomeBuilder.java": {
+      "bytes": 49348,
+      "sha256": "cf35eb3b0e9ebc945e9199a641d1d87919725eada4cdc38a8171c0417aeb13b3"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/block/state/BlockState.java": {
+      "bytes": 827,
+      "sha256": "82d7b1ff7ae2f76dbe595da8c55be5bb3f22f16ed2a2c09cf62463eb0e05c37b"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/block/state/StateHolder.java": {
+      "bytes": 7207,
+      "sha256": "950c134ea03ad199db2b9287ed48f5af8155c2c1cbd516bb24d2629146c8cc65"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/dimension/DimensionType.java": {
+      "bytes": 8692,
+      "sha256": "627b841fdedb30b0ea35576baa67dadcc884180c1f083fda4cf42701a474ec92"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/Aquifer.java": {
+      "bytes": 20905,
+      "sha256": "6c55f04707514c491173a408f448025e06a9db08c7e9dd7c04377d9ac5e1315a"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/BitRandomSource.java": {
+      "bytes": 1376,
+      "sha256": "726528fb348082c248218899112a2d6fba1a1897dad719aa41939eff643ff2c1"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/LegacyRandomSource.java": {
+      "bytes": 2787,
+      "sha256": "f05787a1b23d609499ec99e403ff267fecbc500f71bcc15311fce14a3a6a6c02"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java": {
+      "bytes": 20516,
+      "sha256": "1aee1be9952d347975d2a464da06ee330dc0980aba1a979ceca9d18e6d89dc71"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/NoiseChunk.java": {
+      "bytes": 30157,
+      "sha256": "e3c872cf3f6a15a063d255f1188296ea841ef012b01959d35ca7e0012d97c863"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/OreVeinifier.java": {
+      "bytes": 3337,
+      "sha256": "f68ed59d78a1621791de4bcd187cbb7ea4ed0a89a11bd6c293282d021d2371f1"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/.gradle/caches/paperweight/mache/base/sources/net/minecraft/world/level/levelgen/XoroshiroRandomSource.java": {
+      "bytes": 4766,
+      "sha256": "76a1af8439d57038d3e80ea41dc7b38ca3d9cbfe3a8db8bd87982b5aa363e70f"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/core/BlockPos.java": {
+      "bytes": 26373,
+      "sha256": "3721abe51c6206f9bf9d98cb1df543578e7f8a250f25fa4562fb42f2ca034843"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/util/Mth.java": {
+      "bytes": 24517,
+      "sha256": "b16d2c4c6b1979c2999480952e4e4d624a67755204d96de909006dd99ff51a5c"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/biome/OverworldBiomeBuilder.java": {
+      "bytes": 49348,
+      "sha256": "cf35eb3b0e9ebc945e9199a641d1d87919725eada4cdc38a8171c0417aeb13b3"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/block/state/BlockState.java": {
+      "bytes": 1258,
+      "sha256": "9f47781fe7e32828d00d55de58586bcca792ccc7fab6b122dbb81a622ebb2c33"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/block/state/StateHolder.java": {
+      "bytes": 9302,
+      "sha256": "c3decaef0dbb20fa69e152bc2d2dfe976c59a8cdc07137afc3d38375dfb198cf"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/dimension/DimensionType.java": {
+      "bytes": 8692,
+      "sha256": "627b841fdedb30b0ea35576baa67dadcc884180c1f083fda4cf42701a474ec92"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/Aquifer.java": {
+      "bytes": 20905,
+      "sha256": "6c55f04707514c491173a408f448025e06a9db08c7e9dd7c04377d9ac5e1315a"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/BitRandomSource.java": {
+      "bytes": 1376,
+      "sha256": "726528fb348082c248218899112a2d6fba1a1897dad719aa41939eff643ff2c1"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/LegacyRandomSource.java": {
+      "bytes": 2787,
+      "sha256": "f05787a1b23d609499ec99e403ff267fecbc500f71bcc15311fce14a3a6a6c02"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/NoiseBasedChunkGenerator.java": {
+      "bytes": 20646,
+      "sha256": "2b586e7fca9059b65d214f33f6b84fcc7ae3de90285ad7cd9c8a56edc319f2d8"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/NoiseChunk.java": {
+      "bytes": 30157,
+      "sha256": "e3c872cf3f6a15a063d255f1188296ea841ef012b01959d35ca7e0012d97c863"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/OreVeinifier.java": {
+      "bytes": 3337,
+      "sha256": "f68ed59d78a1621791de4bcd187cbb7ea4ed0a89a11bd6c293282d021d2371f1"
+    },
+    "/home/jstrauss/Schreibtisch/mchosting/ferrumc/.codex-tmp/paper-1.21.8-reference/paper-server/src/minecraft/java/net/minecraft/world/level/levelgen/XoroshiroRandomSource.java": {
+      "bytes": 4766,
+      "sha256": "76a1af8439d57038d3e80ea41dc7b38ca3d9cbfe3a8db8bd87982b5aa363e70f"
+    }
+  }
+}

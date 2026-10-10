@@ -130,54 +130,51 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | GEN-05.1 | `item_transfer_primitives`, Review Root | `server/crates/ferrumc-world/**`, eigener GEN-05-Brief; Root besitzt Lockresolution | Unabhängig CLEAN und integriert `c4e3dc76`: alle35 Definitionen/7 Router,128 tatsächliche Original-JAR-Records, Debug/Release je177 und3 eigene Probes grün. Frischer Originalreexport normal/-O bytegleich, Freeze17/17 und strictchecks grün. [Review](agent-tasks/GEN-05_1_DENSITY_COMPILER_REVIEW.md); Seed-/Sample-/Chunkconsumer folgen. |
 | GEN-05.2 | `item_transfer_primitives`, Vertragsreview Root, Codereview `feature_catalog` | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN und integriert `290e5343`: Debug/Release je188, drei zusätzliche unabhängige Debug-/Releaseprobes, strictchecks und29/29 Freezehashes grün. Frischer normal/-O Originalreexport bytegleich;17.213 tatsächliche JAR-Records. [Review](agent-tasks/GEN-05_2_SEEDED_ROUTER_REVIEW.md). Chunk-/Terrainconsumer bleiben offen. |
 | GEN-05.3 | `item_transfer_primitives`, Runtime-Review `feature_catalog` und Root | `server/crates/ferrumc-world/**`, gemeinsamer GEN-05-Brief | Unabhängig CLEAN integriert `e7565c38`:126 Chunks/7.077.888 tatsächliche Paperdichten, Wrapper/Provider/Constructor/Climate; Root Debug/Release je232 Tests und strictchecks,118/118 Autorenpins geprüft. Zwei Lifecyclefindings korrigiert und unabhängig gegengetestet. [Review](agent-tasks/GEN-05_3_NOISE_CHUNK_REVIEW.md); Aquifer-/Blockausgabe und aktive natürliche Welt folgen. |
+| GEN-05.4 | `item_transfer_primitives`, unabhängiger Review Root | `server/crates/ferrumc-world/**`, eigener .4-Brief | Unabhängig CLEAN: frische Archivprüfung Debug/Release je251, strictchecks ohne Ausnahmen;160 Autorenpins unverändert.126 vollständige Paper-Materialarrays/7.077.888 States+Flags,499+42 finite Methodenfälle inkl Cache-/Request-/RNGchronologie und15 zusätzliche Nonfinitepolicyfälle. [Review](agent-tasks/GEN-05_4_AQUIFER_MATERIAL_REVIEW.md). Naturweltaktivierung und Surface folgen. |
 | NET-04.0 | `feature_catalog`, unabhängiger Review Root | `server/crates/ferrumc-proto-gen/**`, eigener Brief | Unabhängig CLEAN integriert `e563b971`:27 Unit/2 WholeGeneratorchecks, frische Archivcopy,6 eigene Rawwireproben Debug/Release,54 WholeProtoDebug; strictchecks und9/55 Freeze-Dateien unabhängig geprüft. Produktionsspec/Generatedfiles bytegleich; ProtoRustdoc mit dokumentierter einzelner Baselinelintausnahme. [Review](agent-tasks/NET-04_0_BOUNDED_REMAINING_BYTES_REVIEW.md). |
 | NET-04.0b | `feature_catalog`, unabhängiger Review Root | `server/crates/ferrumc-proto-gen/**`, eigener Brief | Unabhängig CLEAN als `cc3503e5` integriert: ausschließlich begründete methodenspezifische Dispatchdecode-Zeilenlintausnahme;29 Generatortests und strictchecks. Root9/43/35 Source-/Evidence-/Readonlypins geprüft; frischer echter xtask mit unveränderter Spec und separater Drei-Packet-Probe, jeweils48 Prototests und strictclippy grün. [Review](agent-tasks/NET-04_0b_GENERATED_DISPATCH_REVIEW.md). |
-| NET-04.0c | Root | ausschließlich tatsächlich erzeugte Proto-Generatedfiles und Integrationsdocs | CLEAN adoptiert durch echten Produktionsxtask; sechs Dateien bytegleich zum unabhängigen Rootoutput, genau neun neue Methodattribute in fünf States. `--check` grün, Spec unverändert. .0b/.0c werden erst gemeinsam gepusht; tatsächliche Entitypakete folgen .1. |
+| NET-04.0c | Root | ausschließlich tatsächlich erzeugte Proto-Generatedfiles und Integrationsdocs | CLEAN adoptiert durch echten Produktionsxtask; sechs Dateien bytegleich zum unabhängigen Rootoutput, genau neun neue Methodattribute in fünf States. `--check` grün, Spec unverändert. .0b/.0c sind gemeinsam auf main `f6eb7111` veröffentlicht; [CI38092928296](https://github.com/jstrausd/ferrumc/actions/runs/38092928296) läuft. Tatsächliche Entitypakete folgen .1. |
 | DUR-03.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-storage/**`, eigener [Transferbrief](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER.md) | Unabhängig CLEAN und integriert `eaedabd2`: Debug/Release jeweils280 Tests einschließlich zwei zusätzlicher Rootprobes, strictchecks und21/21 Freezehashes grün. Tatsächliche joint redb-Transaction, Memoryauthority, CAS/Tombstone/Receipts, Cutpoints/Uncertainty und Grenzen. [Review](agent-tasks/DUR-03_1_PLAYER_ENTITY_TRANSFER_REVIEW.md); Onlineconsumer folgt. |
 | DUR-04.1 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-sim/**`, eigener [Consumerbrief](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) | Unabhängig CLEAN als `4f7d5037` integriert und CI-grün: frischer Archivlauf, WholeSim Debug/Release je290 einschließlich drei eigener Rootproben auf Memory/redb; strictchecks ohne Ausnahmen,43 Runtime-/22 Referenz-/3 Appfixture-/44 Ownedpins und fünf Autorenlogs geprüft. Versiegelte echte Store-/Receipt-/Currentpostimageevidence, SnapshotOnly-Clone und volle Playerreservation. [Review](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER_REVIEW.md). Timer-/Dirtyconsumer und Appdriver folgen. |
 | DUR-04.2a / SRV-02.2 | `select_world_ticket`, Vertragsreview Root | `server/crates/ferrumc-sim/**`, eigener Counterbrief | Vollständiger konkreter Entwurf `77c7e70a…` einschließlich künftigem Boundarypreflight geprüft und intern freigegeben. Alle residenten Items pro logicalTick, confirmed-before/live-after, Dirty-/Save-/Due-/Deferauthority; Saveauswahl64Slots getrennt vom Countertick. Noch kein geprüfter Runtimefreeze, keine Physics-/Javaevent-/Livegameplayabnahme. |
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
-Aktuell arbeiten neben Root drei Agents parallel: `item_transfer_primitives`
-hat GEN-05.3 unabhängig CLEAN als `e7565c38` integriert und bearbeitet jetzt
-[GEN-05.4](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) für tatsächliche Block-/
-Fluidzustände. `select_world_ticket` hat
-[DUR-04.1](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md) unabhängig CLEAN
-abgeschlossen und implementiert den freigegebenen DUR-04.2a-Vertrag für
-Itemcounter/Dirty/Saves.
-`feature_catalog` hat den [GEN-05.3-Review](agent-tasks/GEN-05_3_NOISE_CHUNK_REVIEW.md)
-CLEAN abgeschlossen und hat NET-04.0 als enge Generatorvoraussetzung integriert
-vor [NET-04.1](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md).
-NET-04.0 liefert einen ausdrücklich opaque bounded unprefixed Bytetyp. Der
-vollständige Entwurf ist intern freigegeben; der Autorenfreeze ist unabhängig
-CLEAN geprüft, einschließlich frischer Archivcopy und eigener roher Wiregrenzen. Die
-bisherige Produktionsspec/Generatedfiles bleiben unverändert. NET-04.1 folgt
-nach separater Integration für die tatsächlichen Item-Entity-Pakete.
-Root hat alle118 Runtimepins,11 unabhängigen Reviewbelege und acht
-Autorencheckdateien nach Größe/SHA geprüft; eigene frische Worldcopy besteht
-Debug/Release je232 Tests, strict Alltargetclippy/Fmt/Rustdoc.
-GEN-05.4s vollständiger API-/RNG-/Halo-/Ressourcenentwurf ist intern
-freigegeben; alle26 Sourcepins wurden unabhängig geprüft. Die lokale
-Rustmatrix trifft126 Chunks/7.077.888 Blockstates und Flüssigkeitsflags
-gegen die eingefrorenen vollständigen Paperarrays. Gezielte Originalmethoden-
-Branches sind lokal geprüft; finaler Runtimefreeze und unabhängiger
-Runtime-/Grenzreview bleiben vor Integration offen.
-`feature_catalog` hat dafür ausschließlich einen separaten Scratchoracle erstellt.
-Der499-Fälle-Originalmethodenoracle ist separat eingefroren; der Rustconsumer
-trifft alle Ergebnisbits sowie Dichte-/RNG-/Contexttraces. Ein getrenntes
-Addendum prüft zusätzlich enabled Substance, Center-Ties, Cache-/RNG-
-Reihenfolge, die13 Surfaceoffsets und Schedulingflags:42 finite Fälle und15
-Nichtfinite-Scopeproben. Root hat beide Originalexporte frisch reproduziert,
-bytegleich einschließlich Manifeste/Origins und jeweils fünf Helperclasses;
-34/37 Frozenpins nachgerechnet. Der Autor trifft zusätzlich alle42 finite
-Addendumtraces einschließlich Caches und15 typed Nichtfinite-Refusals; finaler
-Worldfreeze und unabhängiger Rustarchivlauf folgen.
-Die Helperpointleaves sind compute-only Inputs; ihre unbenutzten min/max-
-Metadaten sind keine vollständige DensityFunction-Metadataparität. Nichtfinite
-Javaergebnisse sind ausdrücklich keine JavaRefusal; Rusts Finiteadmission bleibt
-benannte Policy. Die getrennte NET-04.0b-Generatorarbeit ist unabhängig CLEAN;
-Generatedadoption erfolgt ausschließlich als eigener Rootconsumer NET-04.0c.
+Aktuell arbeiten neben Root drei Agents parallel. `item_transfer_primitives`
+hat GEN-05.4 eingefroren; Root hat die vollständige Worldimplementierung
+unabhängig CLEAN geprüft. Der Agent konkretisiert jetzt REG-BIOME-01 im
+Registrycrate: vollständige65 Biomekeys/-Definitionen und7593/5 geordnete
+Originalparameter, lokale Resource-IDs ausdrücklich getrennt von dynamischen
+Original-/Clientregistryindizes. Worldfreeze und frühere Referenzen bleiben
+unverändert. Anschließend folgt der historyhaltige Selector/Quartarrayconsumer.
+
+`select_world_ticket` implementiert den freigegebenen DUR-04.2a-Vertrag mit
+Itemcounter/Dirty/Saves, künftigem readonly Boundarypreflight und getrenntem
+confirmed-before/live-after. Saveoperationen verwenden einen bounded,
+move-owned Driver-ID-Pool mit maximal32 IDs; keine erfundene injektive
+Namespace-/Sequenzabbildung. Alle residenten Items erhalten ihren echten
+Counterstep; die64-Slot-Grenze betrifft ausschließlich die Saveauswahl.
+Noch kein geprüfter .2a-Runtimefreeze und keine Itemphysik-/Appaktivierung.
+
+`feature_catalog` implementiert den konkret freigegebenen
+[NET-04.1-Wirevertrag](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md): Metadata0x5c,
+Motion0x5e und TakeItem0x75. Die Rawmetadata ist eine opaque, lokal begrenzte
+Hülle und beansprucht keine Serializer-/Terminatoradmission. Der autorisierte
+isolierte Paperreferenzboot exportiert echte Originalcodec-Fixtures im echten
+Sanitizerkontext. Vor Veröffentlichung folgt unmittelbar der getrennte
+[NET-04.1b-Netconsumer](agent-tasks/NET-04_1b_ITEM_PACKET_DELIVERY.md), da dessen
+zwei bisherigen Paketklassifikationsmatches exhaustive sind. .1/.1b werden
+zusammen veröffentlicht; Sessionbuilder und Appdriver folgen danach.
+
+GEN-05.4s endgültiger160-Dateien-Authorfreeze ist unabhängig nachgerechnet,
+einschließlich fünf Autorenlogs und Originaladoptionen. Rootfrischlauf besteht
+Debug/Release je251 Tests und striktes Alltargetclippy/Fmt/Rustdoc; alle
+160 Archiv-/Arbeitscheckoutpins sind danach unverändert.126 vollständige
+Paperarrays,499 Endpunkte und42 finite Addendumfälle stimmen exakt, auch
+Cachezustände, Requestcontexts und RNGchronologie. Die zusätzlich15 nichtfiniten
+Werte sind benannte Rustadmission, keine originale JavaRefusal. Pointleaf-
+Metadaten bleiben ausschließlich compute-only Evidenz. Aktives Terrain und
+alle Survivaletappen bleiben offen.
 
 Für GEN-05.5 sind zusätzlich tatsächliche Original-RTree-Strukturen und3287
 Selectoraufrufe normal/-O bytegleich eingefroren. Overworld hat9112 Nodes/
@@ -222,14 +219,15 @@ Nachweis für diese neue Runtime.
 
 ## Vorbereitete unmittelbare Verbraucher
 
-Nach CLEAN folgen direkt
-[GEN-05.4 Aquifer/Ore/Material](agent-tasks/GEN-05_4_AQUIFER_MATERIAL.md) und
-[DUR-04.1 Player-/Item-Entityconsumer](agent-tasks/DUR-04_1_PLAYER_ENTITY_CONSUMER.md).
-GEN-05.4 ist nach GEN-05.3-CLEAN vergeben; DUR-04.1 ist nach der Speicherintegration in Arbeit.
+GEN-05.4 und DUR-04.1 sind unabhängig CLEAN geprüft. Unmittelbar folgen
+REG-BIOME-01 mit GEN-05.5-Worldconsumer sowie DUR-04.2a mit Itemtimern,
+Dirty-/Save-/Dueauthority. Der echte Format6-Appdriver folgt nach ihren
+Storage-/Wire-/Sessionabhängigkeiten.
 Vor dem Live-Drop-/Pickupdriver ist
 [NET-04.1](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md) konkret vorbereitet:
 Metadata0x5c, Motion0x5e und TakeItem0x75 fehlen im aktuellen Protokollproducer.
-Der nach GEN-05.3-CLEAN freie Reviewslot bearbeitet zuerst die enge Generatorvoraussetzung NET-04.0, dann diese Wireabhängigkeit.
+NET-04.0/.0b/.0c sind integriert; .1 ist konkret freigegeben. Der anschließende
+Netconsumer .1b stellt die echte Klassifizierung und den Workspacebuild her.
 Zusätzlich ist [SRV-05.2](agent-tasks/SRV-05_2_SINGLE_ITEM_RECIPES_FUEL.md)
 für alle114 Koch-/254 Steinschneiderrezepte und originale Brennstoffe vorbereitet;
 Vergabe folgt nach dem Wireproducer. Er aktiviert noch keinen Ofen.

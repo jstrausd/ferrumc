@@ -96,21 +96,7 @@ pub(super) struct BoundRouter {
     pub registered_definitions: BTreeMap<DensityFunctionResourceId, usize>,
     pub noises: Box<[(NoiseResourceId, NormalNoise)]>,
     pub end: SimplexNoise,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Original immutable factory is retained for the following aquifer consumer; actual draws are tested."
-        )
-    )]
     pub aquifer_random: PositionalRandomFactory,
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Original immutable factory is retained for the following ore consumer; actual draws are tested."
-        )
-    )]
     pub ore_random: PositionalRandomFactory,
 }
 
