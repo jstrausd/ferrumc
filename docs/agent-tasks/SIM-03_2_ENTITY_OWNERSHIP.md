@@ -1,6 +1,9 @@
 # SIM-03.2 — Begrenzte shardbesessene Entity-Verwaltung
 
-Status: an `feature_catalog` vergeben, Umsetzung beginnt nach APIabstimmung.
+Status: an `feature_catalog` vergeben, API abgestimmt; Produktionsbeginn nach
+separatem REG-ENTITY001-Registryproducer. Der bestehende Registryexport enthält
+noch keinen EntityTypeId oder Entitytypenlookup. Agent implementiert zuerst
+diesen Producer in einem eigenen Ticket und einer eigenen Crate.
 Core-UUID ist unabhängig geprüft: sechs Default-/vier No-default-Contracttests
 im Rootlauf grün, Freeze7/7 bestätigt und Review CLEAN.
 Produktions-Crate ausschließlich `ferrumc-sim`.

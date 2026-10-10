@@ -428,7 +428,7 @@ unsupported Methoden müssen konkrete Fehler liefern.
 
 ## Abgenommene Teilverträge und nächste Untertickets
 
-Die 214 Haupttickets bleiben der Gesamtumfang. Die ersten beiden Wellen schließen nur
+Die 214 Haupttickets bleiben der Gesamtumfang. Die ersten drei Wellen schließen nur
 die folgenden ausdrücklich begrenzten Teilverträge; lokale kombinierte Prüfungen,
 Artefakte und verbleibende Grenzen stehen im
 [ersten Wellenbericht](AGENT_WAVE_01_VALIDATION.md) und
