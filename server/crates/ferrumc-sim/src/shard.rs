@@ -3301,20 +3301,20 @@ mod tests {
         let mut s = shard_with_player(p).await;
         let lower = BlockPos::new(8, 65, 8);
         let upper = BlockPos::new(8, 66, 8);
-        // yaw 0 -> facing south; no neighbours -> hinge right.
+        // Yaw 0 faces south; the helper's x/z=0.5 cursor tie gives hinge left.
         let outputs = place_block(&mut s, p, lower, OAK_DOOR, Direction::Up, 0.5, 0.0, 1);
-        assert_eq!(block_at(&s, lower), Some(BlockStateId::new(4717))); // south, lower, hinge=right
-        assert_eq!(block_at(&s, upper), Some(BlockStateId::new(4709))); // south, upper, hinge=right
+        assert_eq!(block_at(&s, lower), Some(BlockStateId::new(4713))); // south, lower, hinge=left
+        assert_eq!(block_at(&s, upper), Some(BlockStateId::new(4705))); // south, upper, hinge=left
                                                                         // The lower half is acked to the placer; the upper half is broadcast-only.
         assert!(outputs.contains(&GameOutput::BlockChanged {
             position: lower,
-            state: BlockStateId::new(4717),
+            state: BlockStateId::new(4713),
             sequence: 1,
             cause: MutationCause::PlayerCreative { player: p },
         }));
         assert!(outputs.contains(&GameOutput::BlockChanged {
             position: upper,
-            state: BlockStateId::new(4709),
+            state: BlockStateId::new(4705),
             sequence: 1,
             cause: MutationCause::Command,
         }));
