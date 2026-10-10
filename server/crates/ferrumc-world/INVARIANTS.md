@@ -75,6 +75,42 @@
   multiple dimensions and natural terrain are separate consumer work. This
   contract alone does not protect restart or migrate existing worlds.
 
+## Original random and noise primitives
+
+- Random streams are exclusively owned and preserve all signed seed bits.
+  Explicit legacy/xoroshiro selection, numeric seed upgrade, zero-state fallback,
+  signed legacy `nextLong` summands, Java int-before-long coordinate overflow,
+  UTF16 name hashing, MD5 UTF-8 seed halves, and parent fork consumption follow
+  the pinned Minecraft 1.21.8 algorithms. Copies are independent snapshots.
+- Positional factories are immutable; coordinate/name/seed request order does
+  not affect derived streams. Legacy numeric derivation ignores factory seed;
+  xoroshiro numeric derivation XORs both halves, as in the original.
+- Invalid signed bounded-int requests and excessive explicit consumption fail
+  before state mutation. Consume count zero is no-op; the explicit per-call CPU
+  bound is 1,048,576. Gaussian and Java isolated-surrogate strings are not modeled.
+- Improved noise owns exactly 256 permutation entries and three original
+  seeded offsets. Sampling and analytic derivative evaluation allocate nothing
+  and do not consume random output. Vertical quantization changes gradient y,
+  while the y interpolation weight remains unshifted.
+- Perlin configuration validates before allocation or RNG consumption: 1..64
+  stored amplitudes, first/last octave in -64..32, finite amplitudes and a finite
+  calculated maximum. Legacy positive octaves fail. These resource/numeric
+  restrictions and earlier error timing are explicit differences from Java.
+- Modern initialization consumes one positional fork and uses `octave_N`
+  name-derived noise; zero amplitudes retain gaps. Legacy always constructs
+  initial octave zero and consumes exactly 262 next-int steps per skipped
+  lower octave. Gap skipping is not substituted with noise construction.
+- Public sampling/wrap coordinates and vertical parameters must be finite and
+  at most 2,147,483,136 in magnitude. Nonfinite calculated results fail rather
+  than becoming a terrain fallback. Octave wrapping and amplitude accumulation
+  preserve original evaluation order; no deliberate FMA or reassociation.
+- Goldens come from direct reflection calls into the hash-pinned original JAR,
+  with pinned official mappings and bundled library hashes. Comparisons use
+  exact integers and float bits. They establish the tested primitive cases on
+  the documented toolchain, not complete world-seed or cross-platform parity.
+- No density router, chunk consumer, Natural-world identity, persistence gate,
+  event, storage/thread handle or Gaussian API is activated by these modules.
+
 ## Block-entity persistence
 
 - `try_encode_block_entity` is the checked, versioned storage writer. Its

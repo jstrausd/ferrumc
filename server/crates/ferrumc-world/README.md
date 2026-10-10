@@ -47,6 +47,33 @@ Nether/End, textual/random seed selection and restart migration remain later
 tickets. See [WG-001 notes](../../../docs/agent-tasks/WG-001_GENERATION_CONTRACT.md)
 for pinned reference behavior and consumer dependencies.
 
+## Original random and noise primitives
+
+`random` implements the explicitly selected original Legacy48 and
+Xoroshiro128++ streams, numeric/128-bit seeds, fork/reseed and immutable
+coordinate/name factories. Names follow Java UTF16 hashing for legacy and MD5
+of UTF-8 for xoroshiro. Gaussian sampling and Java strings with isolated
+surrogates remain outside this API. Invalid bounds preserve the stream;
+explicit consume calls are capped at 1,048,576 steps.
+
+`noise` provides `ImprovedNoise` (including original vertical quantization and
+analytic derivatives) and `PerlinNoise` with explicit first octave/amplitudes,
+modern named-octave construction or original legacy gap consumption. Sampling
+allocates nothing and does not mutate the sampler. Construction accepts 1..64
+amplitudes with exponents -64..32, finite amplitudes and finite calculated bounds;
+legacy additionally rejects positive octaves. Coordinates and y parameters must
+be finite with magnitude at most 2,147,483,136. These explicit `FerrumC` limits
+reject unsupported configurations; they do not extend Vanilla's contracts.
+
+Checked fixtures invoke the real original Minecraft 1.21.8 JAR and compare
+16,556 records, full permutations and raw floating-point bits without tolerance.
+Reproduction, exact pins and numerical scope are in
+[GEN-04.1](../../../docs/agent-tasks/GEN-04_1_RANDOM_NOISE.md).
+These modules activate no natural terrain and add no executable generator
+identity. Density routing/sampling, Normal-/Blended-/Simplex noise,
+`WorldgenRandom` feature/decoration seeding, Overworld/Nether/End consumers and
+world seed parity remain separate work.
+
 ## Block-entity storage codec
 
 `try_encode_block_entity` appends a versioned payload only after the full entity

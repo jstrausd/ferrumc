@@ -777,6 +777,7 @@ dependencies = [
  "ferrumc-math",
  "ferrumc-nbt",
  "ferrumc-registry",
+ "md-5",
  "thiserror",
 ]
 

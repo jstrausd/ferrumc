@@ -14,6 +14,8 @@ ferrumc-registry = { workspace = true }
 # depends only on codec/nbt/registry, so this edge is acyclic (it never reaches
 # back to world) and keeps container contents modelled as the canonical item type.
 ferrumc-items = { workspace = true }
+# Original Xoroshiro positional names use MD5-128, already pinned in the workspace lock.
+md5 = { package = "md-5", version = "0.10" }
 # Classifying error variants for bit-packing / indexing failures.
 thiserror = { workspace = true }
 

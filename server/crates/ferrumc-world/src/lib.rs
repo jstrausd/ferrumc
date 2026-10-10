@@ -42,8 +42,10 @@ mod generation;
 mod generator;
 mod heightmap;
 mod network;
+pub mod noise;
 mod packed_array;
 mod paletted_container;
+pub mod random;
 
 pub use block_entity::{
     is_chest_state, sign_kind_for_state, BlockEntity, ChestInventory, Sign, SignFace, SignKind,
