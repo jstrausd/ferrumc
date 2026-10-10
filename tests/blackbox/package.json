@@ -7,7 +7,8 @@
   "scripts": {
     "smoke": "node smoke.mjs",
     "java-plugin": "node java-plugin.mjs",
-    "check": "node --check smoke.mjs && node --check java-plugin.mjs"
+    "inventory-cursor": "node inventory-cursor.mjs",
+    "check": "node --check smoke.mjs && node --check java-plugin.mjs && node --check inventory-cursor.mjs"
   },
   "dependencies": {
     "minecraft-protocol": "1.66.2",

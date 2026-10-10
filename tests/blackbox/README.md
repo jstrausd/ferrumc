@@ -168,3 +168,35 @@ This decoder limitation must not prompt a change to Minecraft's NBT encoding.
 For a separately managed fixture server, set `MC_JAVA_EXTERNAL=1`, `MC_HOST`,
 and `MC_PORT`. That mode runs the two-client checks; the operator or container
 harness must separately check shutdown and persisted lifecycle counters.
+
+## Full-bag inventory cursor regression (I01)
+
+`inventory-cursor.mjs` always manages a built server on a free loopback port with
+a fresh temporary world. It requires the dependencies already pinned here:
+
+```sh
+MC_SERVER_BIN=/path/to/ferrumc node inventory-cursor.mjs
+```
+
+It fills all 36 main/hotbar slots with 64 stone each, picks 13 diamonds out of a
+chest, and checks the authoritative cursor and total counts after close/reopen,
+switching chests, delayed repeated closes, a stale click, disconnect/rejoin and
+a full process restart with a chest still open. A concurrent connection for the
+same offline UUID must be explicitly rejected while the original cursor remains
+unchanged. An immediate rejoin may retry only the explicit transient UUID-reserved
+reason, within a bounded admission budget; other join failures fail the gate.
+It then deposits exactly 13
+diamonds into the second chest, verifies the first chest is empty, and restarts
+again to verify that deposit persisted without duplication. Every action waits
+for its inventory snapshot, slot echo, sequence acknowledgement or process exit;
+there are no timing-based absence assertions. Any failed mandatory step exits
+nonzero and leaves the fresh logs/world for diagnosis; cleanup reaps the owned
+server, including a bounded forced-stop fallback.
+
+A separate live check verifies a custom-named stack survives a full-bag close,
+reopen and chest switch, then returns it to one freed player slot before removing
+that setup item. Named components are deliberately not tested across restart:
+the current persistence codec stores componentless stacks. This gate exercises
+normal left-click exchanges only; it does not imply shift/drag/right-click or
+full vanilla inventory support. External-server mode is intentionally absent,
+because both process restarts are required assertions.

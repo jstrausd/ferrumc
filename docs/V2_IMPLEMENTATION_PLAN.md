@@ -6,7 +6,7 @@ Stand: 10.10.2026. Ausgangspunkt: upstream `rework/v2-skeleton`, Commit
 wurden nach Sicherung entfernt.
 
 Dieser Plan basiert auf dem Quellcode und den vorhandenen Tests. Die älteren
-[FEATURES.md](FEATURES.md), [ROADMAP.md](ROADMAP.md) und Teile des README sind
+[FEATURES.md](FEATURES.md) und [ROADMAP.md](ROADMAP.md) sind
 überholt: Spieler-Persistenz, Anvil-Import, Paketbudgets und dynamische Plugins
 sind inzwischen tatsächlich verdrahtet. Sie werden nicht erneut implementiert.
 Die unten genannten Testdateien belegen vorhandene Abdeckung; der aktuelle
@@ -52,7 +52,7 @@ Protokolldateien werden ausschließlich über den Generator geändert.
 | --- | --- | --- | --- |
 | H01 | P0 / umgesetzt | Build-Anleitung, auditierter Plan, dokumentierte Prüfergebnisse. | Frischer Checkout wird aus `server/` mit `--locked` gebaut; Plan nennt vorhandene Funktionen und echte Lücken. |
 | H02 | P0 / lokal geprüft | Mehrstufiges Container-Image, separates Installer-Image und importierbares Pterodactyl-Egg. | Nicht-root-Laufzeit, `/home/container`, konfigurierter Allocation-Port, persistente Daten, Ready-Erkennung, SIGINT/SIGTERM und Reinstall ohne Datenüberschreiben lokal geprüft; Installer ohne Entrypoint-/User-Override wie bei Wings gestartet. |
-| H03 | P0 / lokal umgesetzt | Rust 1.99.0 fest gepinnt; vorhandene Lintfehler crateweise behoben; CI für `main` mit Java- und unabhängigen Client-Gates verdrahtet. | Format, strenges Workspace-Clippy, Workspace-/Doc-Tests und Generator lokal bestanden. Java-Maven-Tests, opt-in Rust/JAR-Abnahme und beide Client-Tests sind verpflichtende CI-Schritte; Claim-Prüfung gegen den Index. GitHub-Ausführung wird separat protokolliert. |
+| H03 | P0 / lokal und auf GitHub geprüft | Rust 1.99.0 fest gepinnt; vorhandene Lintfehler crateweise behoben; CI für `main` mit Java- und unabhängigen Client-Gates verdrahtet. | GitHub-Lauf [38043766725](https://github.com/jstrausd/ferrumc/actions/runs/38043766725) für `44f81bea` vollständig bestanden. Der zusätzliche Inventarcursor-Gate ist im Workflow verpflichtend; Ergebnisse neuer Commits werden separat protokolliert. |
 | H04 | P1 / offen | Fork-eigene CI-Branch-Regeln und Release-Pipeline für glibc Linux x86_64/aarch64. | Commit/Version im Artefakt, Prüfsummen, Image-Digest, native Plugin-Ziel dokumentiert; Egg verwendet veröffentlichtes, geprüftes Image. |
 | H05 | P1 / offen | Backup-/Restore- und Upgrade-Verfahren. | Kopie nach sauberem Stop wird auf leerer Instanz wiederhergestellt; Welt, Spieler und unterstützte Plugin-Daten werden geprüft. Schemawechsel hat Test und Rückweg. |
 
@@ -70,7 +70,7 @@ nicht. Ein v1-Release darf nicht als v2-Artefakt installiert werden.
 | N04 | P1 / offen | Begrenzung neuer Verbindungsversuche je IP in `ferrumc-net`, dann separater App-Wiring-Schritt. | Bounded IP-Tabelle mit Ablauf, Burst-/Refill-Tests, genaue Ablehnungszähler; bestehendes Gleichzeitigkeit-Limit bleibt separat. |
 | N05 | P1 / offen | Vorhandene strengere `PlayIngress`-/Bytebudget-Regeln in den App-Laufzeitpfad integrieren. | Große Frames, komprimierte Daten und unbekannte Pakete beanspruchen begrenzte Bytes/CPU; Paketanzahl-Budget bleibt zusätzlich aktiv. |
 | N06 | P1 / offen | Fristen und einen sicheren Abbruchvertrag für zustandsändernde Handler-/Container-Waits definieren (`ferrumc-app`). | Verzögerte Simulation oder Speicherung blockiert eine Verbindung nicht unbegrenzt; Abbruch verliert oder dupliziert keine Items und lässt keine halb abgeschlossene Transaktion zurück. |
-| I01 | P0 / offen | Cursor-Stack bei voller Spielertasche erhalten (`ferrumc-app`). In `play.rs` und `handlers.rs` werden Reste derzeit nur geloggt und verworfen. | Anzahl und Inhalt der Items bleiben bei Fenster-Schließen, Disconnect und Rejoin erhalten, auch bei voller Tasche. Kein Duplizieren durch wiederholtes Schließen. |
+| I01 | P0 / umgesetzt und geprüft | `PlayerInventory` besitzt den einzigen Cursor; Fenster-Schließen und Disconnect behalten Einzahlungsreste. Spielerdaten-Schema 2 speichert den Cursor, Schema 1 migriert mit leerem Cursor. UUID-Reserve vor dem Load bis nach Save/Leave-Ack; fehlgeschlagene Saves/unklare Freigaben sperren die UUID bis zum Neustart. | Unabhängiger Client bestätigt volle Tasche, falsche/veraltete IDs, Fensterwechsel, doppelte Anmeldung, Rejoin, zwei Neustarts und exakte Gesamtmenge. Komponenten bleiben während der Verbindung erhalten; Neustart-Vertrag beschränkt sich bis S02 auf Item-ID/Anzahl. Spawn-Tickets werden nach tatsächlicher Erwerbsantwort erfasst; Review, Workspace- und aktuelle Client-Abnahmen bestanden; Details im Prüfbericht. |
 | I02 | P0 / umgesetzt | Truhen-Klick-State-ID und Fensterzustand prüfen (`ferrumc-app`); Chest-Snapshot im Driver atomar vergleichen. | Veraltete/falsche Fenster-ID oder State-ID mutiert nichts und synchronisiert Slots/Cursor zurück. Bei Konflikt bleibt der Cursor unverändert; echte Zwei-Client-Regressionsabnahme bestanden. Proaktive Viewer-Updates bleiben I04. |
 | I03 | P1 / offen | Normale Links-/Rechtsklicks für Spielerfenster 0; danach Shift-, Zahlentasten-, Drag-/Split-Klicks in einzelnen Schritten (`ferrumc-app`). | Item-Erhaltung für jedes Klickmodell, manipulierte clientseitige Änderungen zurückweisen, begrenzte Verarbeitung. |
 | I04 | P1 / offen | Offene Truhenfenster aller Betrachter nach einer Mutation aktualisieren. | Zwei Spieler sehen dieselben Slots/Versionen ohne zusätzlichen Klick; konkurrierende alte Klicks werden zurückgewiesen. |
@@ -192,7 +192,7 @@ Voraussetzungen für APIs, deren Spielmechanik FerrumC noch nicht besitzt.
 | ID | Status / Arbeit | Abnahme |
 | --- | --- | --- |
 | J01 | Umgesetzt und lokal geprüft: Java-21-Sidecar mit echter Paper-1.21.8-API, klassischem `plugin.yml`-Loader, Lifecycle/Konfiguration, Commands/Aliases/Namespaces und Join-/Quit-Listenern; Rust-App-Wiring. | Gewöhnliches, ohne FerrumC-API gebautes JAR aktiviert sich und verarbeitet Client-Commands/Events. Java-Prozess-, Rust-Socket- und unabhängige Zwei-Client-Abnahme bestanden; Rechte, UTF-8, Listener-Reihenfolge, Startup-Rollback, Disable-once und Restart geprüft. Frames/IDs/Metadaten/Queues/Fristen begrenzt; Prozessverlust, Cancel und fehlerhafte Antworten geprüft. |
-| J02 | Offen: Command-Tab-Completion, Bukkit-Permissions samt Defaults/Attachments und Plugin-Services vervollständigen. | Bestehende Permission-Plugins mit genau festgehaltener Version; keine Rechteausweitung durch Sender-Metadaten oder Clientdaten; Kommandokonflikte, Aliases und Suggestions nachvollziehbar. |
+| J02 | Teilweise umgesetzt: Plugin-TabCompleter mit realem `PluginCommand`-Fallback und `minecraft:ask_server`-Ankündigung. Bukkit-Permissions samt Defaults/Attachments und Plugin-Services bleiben offen. | Java-Prozesstests und unabhängiger Client prüfen Rechte, originale Alias-Schreibweise, leere Argumente, UTF-16-Bereiche, Unicode, Grenzen und Fehler-Recovery. Standard-Spielernamen-Fallback bleibt offen; Completion-Waits beachten Play-Frist und Shutdown. Permission-Plugins brauchen anschließend eigene versionsgenaue Abnahme. |
 | J03 | Offen: Bukkit-Scheduler und synchroner API-Thread-Vertrag. | Tasks folgen autoritativen Rust-Ticks statt eigener Java-Wanduhr; Delay/Repeat/Cancel, Lag und Plugin-Disable geprüft. Bidir-RPC kann keine Java-/Simulations-Deadlocks erzeugen. |
 | J04 | Offen: World-/Chunk-/Block-/Biome-Fassaden und Rückgaben. | Reads stammen aus autoritativem Zustand; synchrone Mutation hat definierte Commit-Grenze. Block-Edit-Plugins mit unabhängiger Welt-/Client-Abnahme, Chunk-Lebensdauer und Failure-Tests. |
 | J05 | Offen: Player-/Entity-/Inventory-/ItemMeta-/Recipe-APIs. | Item-Erhaltung, Komponenten und Transaktionen stimmen mit M1/M6 überein; GUI-, Inventory- und Survival-Plugins geprüft. |
@@ -206,7 +206,8 @@ Fixture erledigt weder M1–M6 noch J02–J09. Siehe den API-Vertrag in
 [ADR-0009](adr/0009-java-plugin-compatibility.md) und die genauen Grenzen in
 [`server/java-bridge/README.md`](../server/java-bridge/README.md). Die erste
 Rechteübertragung umfasst erlaubte Command-Nodes und konfigurierte Operators;
-Plugin-TabCompleter, allgemeine Bukkit-Permissions und Broadcasts bleiben offen.
+allgemeine Bukkit-Permissions, Standard-Spielernamen-Completion und Broadcasts
+bleiben offen.
 
 ## Abnahme eines Arbeitsschritts
 

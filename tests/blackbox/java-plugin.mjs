@@ -109,6 +109,16 @@ async function command(connection, value, matches) {
   return connection.state.messages.slice(start);
 }
 
+async function complete(connection, text, transactionId) {
+  connection.client.write('tab_complete', { transactionId, text });
+  await until(() => {
+    if (connection.state.error) throw connection.state.error;
+    if (connection.state.ended) throw new Error('Client disconnected during completion');
+    return connection.state.suggestions?.transactionId === transactionId;
+  }, `completion for ${text}`);
+  return connection.state.suggestions;
+}
+
 async function disconnect(connection) {
   connection.client.end('java fixture complete');
   await deadline(new Promise(resolve => {
@@ -180,6 +190,11 @@ async function main() {
   const labels = connection => connection.state.graph.nodes.map(node => node.extraNodeData?.name);
   assert(labels(operator).includes('bridgefixture') && labels(operator).includes('bfixture'));
   assert(!labels(guest).includes('bridgefixture') && !labels(guest).includes('bfixture'));
+  for (const route of ['bridgefixture', 'bfixture', 'bridgefixture:bfixture']) {
+    const node = operator.state.graph.nodes.find(node => node.extraNodeData?.name === route);
+    const args = operator.state.graph.nodes[node.children[0]];
+    assert.equal(args.extraNodeData.suggestionType, 'minecraft:ask_server', `server suggestions declared for ${route}`);
+  }
   console.log('PASS: ordered join listeners and permission-filtered command graph');
 
   const expected = `fixture:bfixture:JavaOperator:${operator.client.uuid}:true:true:FerrumC:1.0.0`;
@@ -189,9 +204,22 @@ async function main() {
   await command(operator, 'bridgefixture unicode-bmp', message => message === 'Grüße Ω');
   const denied = await command(guest, 'bfixture', message => message.includes('permission'));
   assert(!denied.some(message => message.startsWith('fixture:')));
-  operator.client.write('tab_complete', { transactionId: 17, text: '/bf' });
-  await until(() => operator.state.suggestions?.transactionId === 17, 'alias tab completion');
-  assert(operator.state.suggestions.matches.some(match => match.match === 'bfixture'));
+  assert((await complete(operator, '/bf', 17)).matches.some(match => match.match === 'bfixture'));
+  const explicit = await complete(operator, '/BFIXTURE explicit', 18);
+  assert.deepEqual(explicit.matches.map(match => match.match), ['explicit:BFIXTURE:JavaOperator']);
+  const utf16 = await complete(operator, '/bfixture 🌍', 19);
+  assert.equal(utf16.start, 10); assert.equal(utf16.length, 2);
+  assert.deepEqual(utf16.matches.map(match => match.match), ['🌍']);
+  const trailing = await complete(operator, '/bridgefixture:bfixture probe ', 20);
+  assert.equal(trailing.length, 0);
+  assert.deepEqual(trailing.matches.map(match => match.match), [`probe:bridgefixture:bfixture:${operator.client.uuid}:2:`]);
+  assert.deepEqual((await complete(operator, '/bfixture probe  ', 24)).matches.map(match => match.match), [`probe:bfixture:${operator.client.uuid}:3:`]);
+  const deniedCompletion = await complete(guest, '/bfixture fail', 21);
+  assert.deepEqual(deniedCompletion.matches, []);
+  const failureStart = operator.state.messages.length;
+  assert.deepEqual((await complete(operator, '/bfixture fail', 22)).matches, []);
+  assert(operator.state.messages.slice(failureStart).some(message => message.includes('fixture completer failed')));
+  assert.deepEqual((await complete(operator, '/bfixture a', 23)).matches.map(match => match.match), ['alpha']);
   console.log('PASS: alias, canonical UUID, UTF-8 text, Rust permissions and completion');
 
   await command(operator, 'bridgefixture world', message => message.includes('does not implement'));

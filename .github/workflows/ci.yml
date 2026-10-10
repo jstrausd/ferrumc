@@ -113,3 +113,9 @@ jobs:
           FERRUMC_JAVA_BRIDGE_JAR: ${{ github.workspace }}/server/java-bridge/runtime/target/ferrumc-java-bridge-0.1.0.jar
           FERRUMC_JAVA_FIXTURE_JAR: ${{ github.workspace }}/server/java-bridge/fixture/target/standard-bukkit-fixture-0.1.0.jar
         run: FERRUMC_JAVA_EXECUTABLE="$JAVA_HOME/bin/java" node java-plugin.mjs
+
+      - name: Full inventory cursor and restart conservation
+        working-directory: tests/blackbox
+        env:
+          MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
+        run: node inventory-cursor.mjs

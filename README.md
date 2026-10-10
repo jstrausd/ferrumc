@@ -36,10 +36,10 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 - Multiplayer: other players are visible and move, **face the right way** (body + head rotation), and you can **see their held main-hand item**.
 - In-game chat and `/` command autocomplete (`/spawn`, `/gamemode`, permission-filtered).
 - Persistence across **leave/rejoin and restart** — placed blocks stick.
-- Player position, game mode, hotbar and inventory are loaded/saved on join/leave/shutdown; item components are currently omitted.
+- Player position, game mode, hotbar, inventory and retained full-bag cursor are loaded/saved on join/leave/shutdown. Schema 1 migrates to schema 2; item components are currently omitted from persistence.
 - Limited startup import of Anvil blocks, plain signs and empty chests.
 - Built-in and **trusted native plugins** with events, mutation intents and block-edit decisions through a versioned C ABI. Dynamic bundles are target-specific and require a manifest and pinned library hash; additional host facades remain unfinished.
-- Optional ordinary Bukkit `plugin.yml` JARs: lifecycle and configuration, declared commands/aliases, current-player identity/messages, Rust command permissions, and join/quit listeners. Unsupported Java APIs report concrete errors; see the [tested API contract](server/java-bridge/README.md).
+- Optional ordinary Bukkit `plugin.yml` JARs: lifecycle and configuration, declared commands/aliases, plugin argument completion, current-player identity/messages, Rust command permissions, and join/quit listeners. Unsupported Java APIs report concrete errors; see the [tested API contract](server/java-bridge/README.md).
 - A read-only observability dashboard at `http://127.0.0.1:9090` (loopback-only by design).
 
 **Limitations (not done yet):**
@@ -48,7 +48,7 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 - Offline mode only — no online-mode authentication/encryption.
 - Full-bright lighting (placeholder, no light engine).
 - No survival, mobs, redstone, or full vanilla parity.
-- Player inventory clicks, cursor conservation and component persistence need further work.
+- Player inventory clicks and component persistence need further work. Cursor conservation is tested for normal closes, rejoin and successful graceful saves; player/chest crash-atomicity remains unfinished.
 - Java world/entity/inventory APIs, scheduler, full Bukkit permissions, Paper bootstrap and NMS integration need further work.
 
 **Roadmap:** reliable hosting and connection handling, state correctness,

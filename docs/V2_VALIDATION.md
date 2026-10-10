@@ -15,14 +15,23 @@ Die Upstream-Branches wurden nicht verändert.
 - Play-Keep-alive mit exakten IDs, absoluten Fristen, fairer Bearbeitung und
   cancellation-sicherer Socket-/Chunk-Übergabe.
 - Truhen-Klicks prüfen Fenster-/State-ID; der Driver vergleicht die letzte
-  Chest-Sicht atomar. Veraltete Klicks verändern keine Items. Close-Pakete für
-  andere Fenster schließen das aktuelle Fenster nicht.
+  Chest-Sicht atomar. Veraltete Klicks verändern keine Items. Ein einziges
+  spielereigenes Cursor-Item bleibt bei voller Tasche über Fensterwechsel,
+  Rejoin und erfolgreiche Saves erhalten. Schema 2 speichert den Cursor;
+  Schema 1 migriert ausdrücklich. Eine begrenzte UUID-Reserve verhindert
+  paralleles Laden bis nach Save und bestätigtem Leave. Unklare Freigaben
+  oder fehlgeschlagene Saves sperren die UUID bis zum Instanzneustart.
+- Der Driver bleibt während Connection-Cleanup aktiv. Expliziter Stop und
+  geschlossener Commandkanal durchlaufen denselben finalen Storage-Flush.
 - Rust 1.99.0 numerisch gepinnt. Bestehende Compiler-/Clippy-Diagnosen wurden
   crateweise korrigiert und einzeln committed. Die strenge Workspace-Prüfung
   ist lokal grün.
 - Optionale Java-21-Brücke gegen die echte, timestamp-gepinnte Paper-1.21.8-API:
   gewöhnlicher `plugin.yml`-Loader, Lifecycle/Konfiguration, deklarierte Commands,
   Aliases/Namespaces, aktuelle Spieleridentität/-nachrichten und Join-/Quit-Events.
+  Argument-Suggestions verwenden den echten Bukkit-TabCompleter-/Executor-Pfad,
+  mit originaler Alias-Schreibweise, leeren Argumenten, UTF-16-Bereichen und
+  begrenzten Antworten. Stateless Completion-Waits beachten Play-Frist und Stop.
 - Docker/Pterodactyl enthalten Java-Laufzeit, Adapter, Lizenzhinweise und
   entsprechende Quellen. CI verwendet `main` und verpflichtende Java- und
   unabhängige Client-Gates.
@@ -32,7 +41,9 @@ gehören der Rust-Laufzeit. Die Java-Brücke implementiert eine getestete
 API-Teilmenge. Die Grenzen stehen im
 [Adaptervertrag](../server/java-bridge/README.md) und
 [ADR-0009](adr/0009-java-plugin-compatibility.md).
-Es wurden keine generierten Protokolldateien geändert.
+Der neue PlayDisconnect mit begrenztem NBT-Grund wurde über
+`packets.toml` und den Generator erzeugt; Critical/Mandatory priorisiert ihn
+vor bereits wartendem Weltverkehr. Unabhängige Wire-Fixtures prüfen das Paket.
 
 ## Code-Prüfung
 
@@ -40,12 +51,12 @@ Es wurden keine generierten Protokolldateien geändert.
 | --- | --- |
 | `cargo fmt --all --check`, `git diff --check` | Bestanden. |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Bestanden, ohne CLI-Lint-Ausschlüsse. Drei dokumentierte trait-lokale Ausnahmen betreffen den von `async_trait` erzeugten `double_must_use`-Lint. |
-| `cargo test --workspace --locked --no-fail-fast` | 1.975 Tests in 146 Gruppen bestanden, einschließlich Doc-Tests und nativer Plugin-Fixtures. Ein expliziter Java-Artefakt-Test ist standardmäßig ignoriert und wurde separat erfolgreich aufgerufen. |
-| App-Unit-Abnahme | 208 Tests bestanden; Keep-alive, Truhen-State und Bridge-Parser/Aktor-Fehlerpfade enthalten. |
+| `cargo test --workspace --locked --no-fail-fast` | 2.013 Tests in 147 Gruppen bestanden, einschließlich Doc-Tests und nativer Plugin-Fixtures. Ein expliziter Java-Artefakt-Test ist standardmäßig ignoriert und wurde separat erfolgreich aufgerufen. |
+| App-Unit-Abnahme | 233 Tests bestanden; Keep-alive, Truhen-State und Bridge-Parser/Aktor-Fehlerpfade enthalten. |
 | Rust/JAR-Socket-Abnahme | `cargo test -p ferrumc-app --locked --test java_compat -- --ignored` bestanden; fehlende Java-/JAR-Artefakte führen bei Aufruf zum Fehler. Dieser Aufruf ist obligatorisch in CI. |
 | `cargo xtask generate --check` | Bestanden; eingecheckter Protokollcode aktuell. |
 | `cargo metadata --no-deps --locked --format-version 1` | Bestanden. |
-| Java `mvn -B clean verify` | 11 Parser-/Archiv-Unit-Tests und sechs echte Prozessintegrationstests bestanden; keine übersprungenen Tests. |
+| Java `mvn -B clean verify` | 11 Parser-/Archiv-Unit-Tests und sieben echte Prozessintegrationstests bestanden; keine übersprungenen Tests. |
 
 Die Java-/Rust-Brücke wurde unabhängig auf Prozessbesitz, Reaping, begrenzte
 Frames/Queues/Metadaten, IDs, absolute Fristen inklusive Warteschlange,
@@ -63,7 +74,9 @@ Die Fixture wird separat ausschließlich gegen Paper-API und Java-Standard-API
 kompiliert. Ihr JAR enthält keine FerrumC-Aufrufe und wird ohne Bytecode-Änderung
 geladen. Die Socket-Abnahme prüft den tatsächlich versendeten Commandbaum,
 Login-UUID, Uppercase-/Alias-/Namespace-Routen, Rechte und Autocomplete,
-Listener-Reihenfolge und Neustart. Welt-/Scheduler-Aufrufe melden konkrete
+Listener-Reihenfolge, TabCompleter-/Executor-Fallback und Neustart. Completion
+prüft Alias-Schreibweise, leere Argumente, Rechte, Fehler und anschließende
+Recovery. Welt-/Scheduler-Aufrufe melden konkrete
 Fehler; danach funktionieren Commands weiter. Unicode-Exceptions bleiben
 begrenzte Remote-Fehler. Nachrichten an andere Spieler werden abgewiesen.
 
@@ -73,8 +86,10 @@ deaktivieren die reale Plugin-Instanz einmal und geben den Listener-Port frei.
 
 `tests/blackbox/java-plugin.mjs` besteht zusätzlich mit unabhängigen
 PrismarineJS-Decodern und zwei Clients. Geprüft werden Join-Prioritäten,
-Command-Rechte, Alias, kanonische UUID, nicht-ASCII-Text, Literal-Completion,
-Fehlerfeedback, Recovery und Nachrichtenrouting. Eine Antwort auf dem
+Command-Rechte, Alias, kanonische UUID, nicht-ASCII-Text, Literal- und echte
+Plugin-Completion, `minecraft:ask_server`, leere Argumente, originale
+Alias-Schreibweise, Emoji und UTF-16-Bereiche, Fehlerfeedback, Recovery und
+Nachrichtenrouting. Eine Antwort auf dem
 Gast-Stream bildet eine Barriere vor der Prüfung auf fremde Nachrichten.
 Nach SIGTERM sind `enabled=1`, `disabled=1`, `join-count=2`, `quit-count=2`
 und genau ein Disable-Log belegt.
@@ -96,6 +111,16 @@ stimmen nach Reconnect und Neustart: Stein, ausgerichteter Log, ausgerichtete
 Treppe, ein entfernter Block und ein zweiter Stein über der Chunk-Grenze.
 Beide Serverprozesse endeten sauber mit Code 0.
 
+Der zusätzliche unabhängige `inventory-cursor.mjs` prüft eine volle Tasche
+mit 2.304 Stein-Items und 13 Diamant-Markern. Er bestätigt Cursor-Erhalt bei
+Close/Reopen, Truhenwechsel, veralteten IDs, parallelem Login derselben UUID,
+Rejoin sowie zwei Prozessneustarts. Die Marker werden genau einmal eingezahlt.
+Ein benannter Cursor wird während der Verbindung geprüft; Neustartprüfungen
+verwenden Items ohne Komponenten. Alle drei Prozesse enden sauber mit Code 0,
+der Listener-Port ist geschlossen und die frühere Leave-Quarantäne-Warnung
+tritt nicht mehr auf. Das alte Binary scheitert erwartungsgemäß am Verlust
+von sieben Cursor-Items; die unveränderte Abnahme besteht mit dem neuen.
+
 ## Container und Pterodactyl
 
 Das Runtime-Image `mchosting/ferrumc:v2-local` und das separate
@@ -113,15 +138,17 @@ Die Java-Container-Abnahme ist reproduzierbar über
 `python3 deploy/tests/container-java.py`. Sie verwendet den echten Installer,
 Java21 und den unabhängigen Zwei-Client-Test im Image. Zusätzlich prüft sie
 eingebettete Lizenzhinweise, API-/Adapterquellen und Plugin-Lifecycle/Persistenz
-bei graceful Stop und Reinstall.
+bei graceful Stop und Reinstall. Beide Images wurden nach den Cursor-,
+Completion- und Shutdown-Änderungen neu gebaut; Java- und native
+Container-Abnahme bestanden erneut.
 
 ## Verbleibende Grenzen
 
 Die Fixture belegt die genannte Teilmenge. Scheduler, World/Inventory/Entity-
 APIs, Bukkit-Rechtebaum, Broadcasts, Paper-Bootstrap, NMS/CraftBukkit und viele
 Spielmechaniken fehlen. FerrumC läuft weiter im Offline-Modus; Spielernamen
-sind keine authentifizierten Identitäten. Cursor-Overflow, normale Inventar-
-Klicks, Item-Komponenten, proaktive Viewer-Updates und Survival bleiben im
+sind keine authentifizierten Identitäten. Normale Inventar-Klicks, verlustfreie
+Item-Komponenten-Persistenz, proaktive Viewer-Updates und Survival bleiben im
 [Umsetzungsplan](V2_IMPLEMENTATION_PLAN.md) offen.
 
 Zustandsändernde Handler-/Containertransaktionen werden nicht mitten in einer
@@ -131,4 +158,9 @@ beendeter Java-Prozess garantiert keine Disable-Hooks.
 Die Client-Abnahme ist keine interaktive Vanilla-Client- oder Lastabnahme.
 Panel/Wings wurden nicht tatsächlich installiert; Images wurden nicht in
 eine Registry veröffentlicht. GitHub-CI-Ausführung ist von lokalen Prüfungen
-zu unterscheiden. Kein bestehender Hosting-Server wurde geändert oder migriert.
+zu unterscheiden. Der Basisstand `44f81bea` bestand den vollständigen
+[GitHub-Lauf 38043766725](https://github.com/jstrausd/ferrumc/actions/runs/38043766725);
+dieser Lauf belegt nicht die späteren Cursor-/Completion-/Shutdown-Änderungen.
+Deren CI-Ergebnis ist beim jeweiligen Commit in
+[GitHub Actions](https://github.com/jstrausd/ferrumc/actions/workflows/ci.yml)
+nachzusehen. Kein bestehender Hosting-Server wurde geändert oder migriert.

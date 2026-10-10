@@ -49,7 +49,10 @@ tatsächliche Mitgliedschaft in Rusts konfigurierter `ops`-Liste. Bukkit-Default
 Children, Attachments und allgemeine Permission-Plugin-Integration sind noch
 nicht implementiert. Native Grants ohne Command-Deklaration werden nicht als
 vollständiger Bukkit-Rechtebaum übertragen. Root-/Alias-Suggestions verwenden
-den Rust-Commandbaum; Plugin-TabCompleter werden noch nicht aufgerufen.
+den Rust-Commandbaum. Argument-Suggestions rufen inzwischen den normalen
+`PluginCommand.tabComplete`-Pfad mit `TabCompleter`-/Executor-Fallback auf;
+Rechte, Aliasnamen, UTF-16-Bereiche und begrenzte Antworten sind geprüft.
+Der Standard-Fallback auf Online-Spielernamen bleibt offen.
 Nachrichten richten sich in dieser Stufe an den Spieler der aktuellen Anfrage
 oder die Konsole. Broadcasts und Nachrichten an andere Spieler fehlen;
 veränderte Join-/Quit-Broadcasttexte melden deshalb einen konkreten Fehler.
