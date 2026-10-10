@@ -117,6 +117,15 @@ jobs:
           FERRUMC_JAVA_FIXTURE_JAR: ${{ github.workspace }}/server/java-bridge/fixture/target/standard-bukkit-fixture-0.1.0.jar
         run: FERRUMC_JAVA_EXECUTABLE="$JAVA_HOME/bin/java" node java-plugin.mjs
 
+      - name: Door hinges through real items, observers and process restart
+        working-directory: tests/blackbox
+        env:
+          MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
+        run: |
+          node --check door-hinge.mjs
+          node door-hinge.mjs --self-test
+          node door-hinge.mjs
+
       - name: Live operator commands and CLI recovery across restart
         working-directory: tests/blackbox
         env:

@@ -261,3 +261,18 @@ place-one, offhand equipment broadcast, stale/unsupported actions, spectator
 refusal and conservative close behavior with full storage and crafting inputs.
 The client-supplied slot deltas are ignored in favor of server-owned state.
 This gate does not establish recipes, armor insertion or other click modes.
+
+## Door hinge placement and restart (BLK-01.1)
+
+`MC_SERVER_BIN=/path/to/frozen/ferrumc node door-hinge.mjs` uses a fresh world
+and two server processes. Real Creative item placement checks four player
+directions, cursor 0.25/0.5/0.75 and a mixed birch/oak neighbor: fourteen doors,
+both halves, an independent observer and newly decoded chunks after restart.
+The executable's SHA-256 must remain identical across both starts. Run
+`node door-hinge.mjs --self-test` to check its independent registry goldens;
+`MC_PORT=0` selects a free test port.
+
+This gate covers hinge decisions in the current flat world. Collision/support,
+opening, redstone, removal of the other half, hard-kill durability and a live
+Paper comparison remain separate features. The task's executed results are in
+[PLACE-DOOR-HINGE_CLIENT.md](../../docs/agent-tasks/PLACE-DOOR-HINGE_CLIENT.md).
