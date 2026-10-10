@@ -1,0 +1,153 @@
+{
+  "applied_exact_helpers": [
+    {
+      "path": "io/papermc/paper/inventory/recipe/ItemOrExact.java",
+      "sha256": "f3268060712d0d8f06df454c1d378e4e60a0975fb3df1ae25e63d4de137cca6d"
+    },
+    {
+      "path": "io/papermc/paper/inventory/recipe/StackedContentsExtrasMap.java",
+      "sha256": "6ade12b78307179490fd010d7c916c36e98ed119d4c39bdaba2b55b67ac24317"
+    }
+  ],
+  "exact_choice_feature": {
+    "path": "patches/features/0020-Improve-exact-choice-recipe-ingredients.patch",
+    "sha256": "ea698810cf80a9ca27ad14256cf060bebb735bb46cc6c7c40342be656203e79d"
+  },
+  "minecraft": "1.21.8",
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "source_files": [
+    {
+      "applied_sha256": "69057c22765cad90eac888c7cb89bf4ce2e59f5a69b200212ce4c3144226670b",
+      "byte_equal": false,
+      "original_sha256": "769a8b5ea04e16eb7559730a5b9b0db10d790f0259fdc5ebaa9a57a0a99998ba",
+      "source": "net/minecraft/world/item/crafting/ShapedRecipe.java",
+      "sourcepatch_sha256": "ee64ce825c506931fe6498f0a4c9edc02244a74f13d8df1384535f1c4cc840bd"
+    },
+    {
+      "applied_sha256": "e6ce166ae84337eab6edf2f7c246c1b3ee6a4782522dc0cde17fee46ca66fc4f",
+      "byte_equal": true,
+      "original_sha256": "e6ce166ae84337eab6edf2f7c246c1b3ee6a4782522dc0cde17fee46ca66fc4f",
+      "source": "net/minecraft/world/item/crafting/ShapedRecipePattern.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "6a341e4c30288524e4dc673642a3b9cca55439b043aa585461834dfe87503fbe",
+      "byte_equal": false,
+      "original_sha256": "0ed1264571cc112b37c3df17b48590acfa3705807b81151ad59e03500aec4ac3",
+      "source": "net/minecraft/world/item/crafting/ShapelessRecipe.java",
+      "sourcepatch_sha256": "c1fb94a46e085f437ba85ce9de59497d0d8859fde462084a7bf090e781e81f44"
+    },
+    {
+      "applied_sha256": "f6bd5619281d59f67a38f24d104942792823e30d73ba4ed6e5810ee3e5d874b7",
+      "byte_equal": false,
+      "original_sha256": "f88b11cbf067dc57d2f11c39482614ea7c84a056bb9b4e0f8fc06aa02a81fd59",
+      "source": "net/minecraft/world/item/crafting/Ingredient.java",
+      "sourcepatch_sha256": "fd1a05f640ad6922094be71c10573a504e5c2cb9e001639e898d60a3861e203d"
+    },
+    {
+      "applied_sha256": "251b57eda4e7643c980ee0b50e88461b6b0b342a58bf9cc3a33b03e1fcd80161",
+      "byte_equal": true,
+      "original_sha256": "251b57eda4e7643c980ee0b50e88461b6b0b342a58bf9cc3a33b03e1fcd80161",
+      "source": "net/minecraft/world/item/crafting/CraftingInput.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "bbb44913b97be2bdad00a2eab4e8c11b7b535208a05741163ca55312bce78f05",
+      "byte_equal": true,
+      "original_sha256": "bbb44913b97be2bdad00a2eab4e8c11b7b535208a05741163ca55312bce78f05",
+      "source": "net/minecraft/world/item/crafting/CraftingRecipe.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "36caac6fb4049496b1be9715f95bfe61638d586e3508a9ee4da0b356af6e5dfa",
+      "byte_equal": false,
+      "original_sha256": "fb816ae1959db9c643d21425b311691791af963753aedfe6f4b337cbbd20df66",
+      "source": "net/minecraft/world/item/crafting/Recipe.java",
+      "sourcepatch_sha256": "94e86c38e78e7c9059bd6bdbfc97667885dd8c79f8803fc7167365db51ff162f"
+    },
+    {
+      "applied_sha256": "895f826f82be459023ece4382cfefdde3f77232b078a544de36e34919e4f9b32",
+      "byte_equal": false,
+      "original_sha256": "21a2776f9f4f3a67bcddf6e5841581cb1b23046e612abb6d36c05b03ec3acfe8",
+      "source": "net/minecraft/world/item/crafting/RecipeManager.java",
+      "sourcepatch_sha256": "8594804a4c74e1649e9f43d5c7d619e0ad274086abf2e00c9d94609eb56977c8"
+    },
+    {
+      "applied_sha256": "fa05982018da980bb226967af41c7d534a18fb4bd0971f5d73d3eeefc8b485a3",
+      "byte_equal": false,
+      "original_sha256": "40490a0cd5eec424c3eb3949b1faa5cff8a44df6415d304c8e0fd02e1ec7de34",
+      "source": "net/minecraft/world/item/crafting/RecipeMap.java",
+      "sourcepatch_sha256": "ae1d5e7e8dc6ee9c9c53fef23a53aa0107a8734cb67c9e9a271b83af11314745"
+    },
+    {
+      "applied_sha256": "730cf184627072bdda442f2342d2700e1d29654cebf0c2feee1a523a1fd42a42",
+      "byte_equal": true,
+      "original_sha256": "730cf184627072bdda442f2342d2700e1d29654cebf0c2feee1a523a1fd42a42",
+      "source": "net/minecraft/world/item/crafting/PlacementInfo.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "9e0d74e63849b5c731ccb5de9db2c63f8fc01d7f9ec847ab5fec3b9afe3a73b8",
+      "byte_equal": false,
+      "original_sha256": "209e7edcef5c03e6d4416104e75dfa97cfb82444c83fddabd3bc8d9413dbb01c",
+      "source": "net/minecraft/world/entity/player/StackedContents.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "34bc16a079650fdef6ca79839275408d81d94e406691ed2838a3b10e9288e263",
+      "byte_equal": false,
+      "original_sha256": "fefc88457c06ae6fa0619a039af6df8379a7cf19443f51cbb4cc847786fe5fa9",
+      "source": "net/minecraft/world/entity/player/StackedItemContents.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "c1c3cf26020d7b552e1b38cccd62931521d3ad071af7d1be36a72c63a2e7b7b4",
+      "byte_equal": false,
+      "original_sha256": "375c87d44902b0d94695bd4870310f2669e695ba37191dc5e7532e66899bff86",
+      "source": "net/minecraft/world/inventory/ResultSlot.java",
+      "sourcepatch_sha256": "69b4ab64b2c8db5dea3c18b7822ac3e0b0a7f27f9485f1b0db7793f9d4e33219"
+    },
+    {
+      "applied_sha256": "34822f13d3a31270d38c92e0e0455ac04ee6fb811fce01cdf3d9885970ca1124",
+      "byte_equal": true,
+      "original_sha256": "34822f13d3a31270d38c92e0e0455ac04ee6fb811fce01cdf3d9885970ca1124",
+      "source": "net/minecraft/world/item/Item.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "6332042d6d3c10a6cde47eb29803fd9b15cb3721f586c541e5ab9bc0cc8fbff6",
+      "byte_equal": false,
+      "original_sha256": "89283b1e4dd1e62d41ec8630e36eb7f3fbafe6ed9c576c714bccb5cbefd0bb56",
+      "source": "net/minecraft/world/item/ItemStack.java",
+      "sourcepatch_sha256": "aa57ad4c4ea98117effa1340a5aefff314b4fe781289dfe0e26b4cdb48bb5a3e"
+    },
+    {
+      "applied_sha256": "ac871e8c51be7681af1a9f853ba9101a9c38cba734fa8d5a1906ad88646f4f62",
+      "byte_equal": false,
+      "original_sha256": "711d25204df82eb9f9cd3d1dc584205bdd5e5fed1f305213464ae71cc2af928e",
+      "source": "net/minecraft/tags/TagLoader.java",
+      "sourcepatch_sha256": "07e44b78b7faf8d0441d3ff7b214ea281ee74e7f88f0ecee6ff8de320cd8ff87"
+    },
+    {
+      "applied_sha256": "24a773b55561cb519316f89dc4dd7b2b177fca6c4ad68723ef471b5232ce3f58",
+      "byte_equal": false,
+      "original_sha256": "de31aedf3adc05a09a218a53b4dec119ba62e971f5024cb3582d044df6f5f6ef",
+      "source": "net/minecraft/server/packs/repository/ServerPacksSource.java",
+      "sourcepatch_sha256": "0e70612f3f35591fadb811ca6db983a593e8fab0a44f172557d9ed0b438bce24"
+    },
+    {
+      "applied_sha256": "a5023438c2ae3b58e64a687dda5289ed94535c680f8fe79f35003b1acab21a87",
+      "byte_equal": true,
+      "original_sha256": "a5023438c2ae3b58e64a687dda5289ed94535c680f8fe79f35003b1acab21a87",
+      "source": "net/minecraft/network/RegistryFriendlyByteBuf.java",
+      "sourcepatch_sha256": null
+    },
+    {
+      "applied_sha256": "8823eadf2bdd68fbdbe70f35ca4b4931ac46812e27a7edfd48a53e5111fef0b6",
+      "byte_equal": false,
+      "original_sha256": "885e9d880b7882e62529f27dd4e58f84e9c7cce11cf564fa844f59ffb28a9c8b",
+      "source": "net/minecraft/core/component/DataComponentPatch.java",
+      "sourcepatch_sha256": "30a7e5a2d84fa06706fccbdec312415fe4e332e644cd4d3e27688b24c336f6b4"
+    }
+  ]
+}

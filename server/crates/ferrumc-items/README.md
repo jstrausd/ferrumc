@@ -158,3 +158,48 @@ Plans do not contain inventory revisions, compare-and-swap checks, replay guards
 transaction identifiers, storage writes, or crash recovery. Applying one output,
 reusing a stale plan, or saving the outputs separately can lose or duplicate
 items. Persistent item conservation remains a separate consumer/Storage contract.
+
+## Normal crafting plans
+
+`NormalRecipes::builtin()` materializes the 968 original 1.21.8 normal recipes:
+673 shaped and 295 shapeless, including all 16 Suspicious-Stew component outputs.
+Private generated descriptors come from the actual original `Recipe.CODEC`,
+bound vanilla item tags, item remainder methods, and result stream codecs.
+The catalog shares 479 static ingredient sets (1506 memberships), without a
+runtime JSON parser or added Rust dependencies. Construction checks descriptor
+limits and all 1416 original item id/name/default-count-ceiling pins before
+materializing fixed outputs. The actual producer and cases live in
+`tests/reference` and `tests/fixtures`.
+
+Select a recipe explicitly with `recipe("minecraft:stick")`; `iter()` is in
+resource-name order and does not define Paper recipe priority. Admit borrowed
+slots using `CraftingGrid::new(2, &slots)` or `CraftingGrid::new(3, &slots)`, then
+call `matches` or `plan_one`. Grid validation uses the existing lossless stack
+preflight, refuses present-air, and bounds the entire grid before copying.
+Empty outer input space is trimmed; original indices remain stable. Shaped
+patterns match horizontal mirrors and preserve internal holes. Shapeless
+matching finds a complete assignment with at most nine ingredients and slots.
+Count64 in one position remains one ingredient position. Normal item/tag
+ingredients ignore input patches, while fixed results retain their original
+patches and never inherit unrelated input data.
+
+A `SingleCraftPlan` consumes exactly one item from each occupied position.
+`grid_after()` preserves surviving count/patch representation and restores
+canonical empty on draining. `crafting_remainders()` separately preserves every
+actual rest (for example all three cake buckets). Sim must decide whether each
+rest belongs in an empty grid position, a semantically compatible stack, the
+inventory, or a drop; this API never silently overwrites a full/incompatible
+grid leftover. `into_parts()` transfers ownership to that consumer.
+
+The grid admits at most 512 KiB encoded schema-1 bytes and 1 MiB logical clone
+bytes; the entire plan admits at most 1 MiB encoded and 2 MiB logical clone
+bytes. Logical accounting includes inline stacks/components, cloned NBT nodes,
+compound entries/names, lists, arrays, strings, and opaque lengths. Retained
+caller capacities and allocator overhead are excluded, so this is not an RSS
+claim. No plan clones an unchecked tree or returns a partial result.
+
+Special recipes, noncrafting serializers, plugin `ExactChoice`, Paper manager
+priority/cache, result clicks, shift-crafting, recipebook, Java events, and
+durable commits are separate consumer tickets. The current model's registry
+count ceiling and opaque passthrough contract remain unchanged; crafting does
+not introduce prototype/component semantic normalization.

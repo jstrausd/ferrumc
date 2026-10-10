@@ -118,7 +118,7 @@ impl OpaqueComponent {
     /// Builds a checked opaque component, or `None` if `type_id` is out of range
     /// ([`ComponentTypeId::is_in_range`]) or dangerous
     /// ([`ComponentTypeId::is_dangerous`]), or if `raw` exceeds
-    /// [`MAX_COMPONENT_BYTES`](crate::MAX_COMPONENT_BYTES).
+    /// [`MAX_COMPONENT_BYTES`].
     #[must_use]
     pub fn new(type_id: i32, raw: Vec<u8>) -> Option<Self> {
         let tid = ComponentTypeId::new(type_id);

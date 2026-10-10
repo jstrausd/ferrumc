@@ -52,3 +52,23 @@
   component byte caps do not equal decoded/clone heap caps.
 - No unsafe code, no production `unwrap`/`expect`, no unbounded untrusted
   allocation, and rustdoc on every public item.
+- The closed normal crafting catalog admits only the original 673 shaped and
+  295 shapeless recipes. Real tags/remainders/fixed result patches come from the
+  pinned original JAR producer; item/tag suffix heuristics are forbidden.
+- Crafting grids are borrowed 2×2/3×3 slices with at most nine slots. Every
+  stack passes the lossless persistence preflight before any clone; present-air
+  is a typed refusal and is never silently turned into empty.
+- Shaped input/pattern trimming, inner holes, original offsets and horizontal
+  mirrors agree with the original. Shapeless matching finds a complete
+  bipartite assignment; stack totals cannot replace occupied positions.
+- Normal ingredients match item membership regardless of patches. Each craft
+  consumes one item per occupied position, preserves surviving patch
+  representation, drains to canonical empty, and copies only the fixed output.
+- Grid leftovers and actual crafting remainders remain separate vectors with
+  original indices. The consumer owns remainder merge/inventory/drop placement,
+  semantic component eligibility, selection priority, events, and durability.
+- Grid aggregate encoded/clone budgets are 512 KiB/1 MiB, and complete-plan
+  budgets are 1 MiB/2 MiB. Clone accounting walks validated logical lengths and
+  inline node/entry values without allocation; allocator/RSS costs and retained
+  caller capacities are not represented. All postimages are accounted before
+  copying. A craftplan has no revision or durable-commit authority.

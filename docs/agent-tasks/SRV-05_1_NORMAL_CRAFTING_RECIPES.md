@@ -1,6 +1,7 @@
 # SRV-05.1 — Normale Craftingrezepte und konservative Craftpläne
 
-Status: Autor `/root/feature_catalog`; konkreter Entwurf intern zur Umsetzung freigegeben.
+Status: Autor `/root/feature_catalog`; implementiert und geprüft, Freeze für
+unabhängigen Rootreview. Integration/Onlineconsumer bleiben Rootaufgaben.
 Root orchestriert; der zugewiesene Autor besitzt genau `ferrumc-items` und
 diesen Brief. Kein Sim-/App-/Storage-/Registry-/Coreedit, kein Gitcommit.
 
@@ -162,3 +163,64 @@ Negative Hash-/Herkunfts-/Descriptor-/Budgetproben und unveränderte Inputs bei
 Refusal ergänzen die vollständigen Items-Debug-/Release-/Clippy-/Fmt-/Rustdoc-
 Checks. Danach exakter Freeze für unabhängigen Review. Dieser reine Katalog
 und Plan aktiviert weder GUI-/Outputklicks noch Shiftcraft/Recipebook/Durability.
+
+## Implementierung und Autorenabnahme
+
+Implementiert ausschließlich in `ferrumc-items`: geschlossener immutable
+`NormalRecipes`-Katalog, expliziter `NormalRecipe`, borrowed `CraftingGrid`,
+trim/mirror Matcher, vollständiges augmenting-path Shapelessmatching und
+konservativer `SingleCraftPlan`. Originalslots, count−1, feste Outputs und
+separate Remainders bleiben erhalten. Present-air ist eine typed Refusal.
+Persistencegröße und logischer Clonebestand werden allokationsfrei geprüft;
+`copy_at_count` wird crateintern wiederverwendet. Bestehende Transfer- und
+Persistenceformen/-semantik bleiben unverändert. Für strict öffentliche
+Rustdoc wurde außerdem ein bereits redundantes Linkziel in `component.rs`
+entfernt; keine Runtimeänderung daran.
+
+Der actual Original-JAR-Producer bindet echte Vanillapacktags über den
+Original-TagLoader und `PendingTags.apply`, decodiert `Recipe.CODEC`, ruft
+Match/Assembly/Remainder/Copy-Methoden auf und exportiert echte Streamcodecbytes.
+Er erzeugt **968 Rezepte**, **479 Ingredientsets**, **1506 Mitgliedschaften**
+(größtes Set44), **25 Itemtagreferenzen**, **1416 Registrypins**, alle fünf
+Item-Craftingremainders und sämtliche16 komponententragenden Stewoutputs.
+Es wurden keine Itemtagheuristiken, handgeschriebenen Rezeptlisten,
+Rustdependencies, Lockfile-, Git- oder anderen Crateänderungen eingeführt.
+
+Frische Exporte in `.codex-tmp/srv05_1-final-normal` und
+`.codex-tmp/srv05_1-final-optimized` sind bytegleich: RawJSONL, Deskriptoren,
+TSVcases und vollständiges Manifest. **21855 tatsächliche Fälle** ergeben
+**15119 Matches** und **6736 Refusals**. Jeder normale Rezeptoutput und alle
+Remainders werden tatsächlich geprüft; sämtliche shaped Offsets/Mirrors,
+jede Ingredientalternative, fehlende/zusätzliche Zutaten, Count1/Maximum und
+Komponenteninputs sind enthalten. Ein getrenntes erschöpfendes
+Assignmentsuchmodell sowie Mengen-/Patchrepräsentations-/Slotbilanzen prüfen
+die Rustpläne. Weitere Tests decken Descriptor-/Component-/Aggregategrenzen,
+Present-air, ungültige Models, Greedyfallen, Floatbits/NBTduplikate und
+unveränderte Inputs ab.
+
+Rust/Cargo1.99.0, Edition2021, `--locked --offline`, Jobs2 und eigener Target
+`.codex-tmp/srv05_1-author-target`: **84/84 Debug**, **84/84 Release**, jeweils
+**3/3 Doctests**, strict all-target Clippy `-D warnings`, package Fmtcheck und
+öffentliche Rustdoc `RUSTDOCFLAGS=-D warnings` bestehen. Logs und kompakte
+Evidenz stehen in `.codex-tmp/srv05_1-checks`. Producernegativprüfungen bestehen
+normal und `-O` jeweils8/8: Digest-/Symlink-/Shadow-/Descriptor-/Census-/Case-
+Refusals, tatsächlich ausgeführte Original-/Helper-CodeSource-Refusals und alle
+drei Javaoption-Injectionguards. Referenz-/Producer-/Fixturequellen und eine
+19-Dateien-Original/Applied/Patchmatrix liegen in der Itemscrate.
+
+Evidenzpins:
+
+- RawJSONL SHA256
+  `6110a3130294599a11d480e8eb0c3f74ff7854f208ece81514a22090fe1cbd7c`.
+- CaseTSV SHA256
+  `64f90f5b3cff75eb6885993f33cbcb6b8c9992e0f36a63f7a9ed55041fbd6649`.
+- Deskriptoren SHA256
+  `fbdc704830a75bcf457457fbc5a54be67a9e6b560ab1eeb1cdf3275ad5b70f3c`.
+- Manifest SHA256
+  `05c3bba8aacebc01af9fd58a2951c15c25fa714514574ce68b108e70a641d4a3`.
+
+Der exakte Dateifreeze steht in `.codex-tmp/srv05_1-author-freeze.sha256`,
+die separaten Check-/Reexportartefakte in
+`.codex-tmp/srv05_1-author-evidence.sha256`. Nach der Übergabe keine
+Autorenänderung an diesen produktiven Dateien ohne koordinierte Reviewkorrektur.
+Unabhängiger Review und Rootintegration sind ausdrücklich noch offen.

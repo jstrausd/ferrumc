@@ -170,7 +170,10 @@ pub fn plan_transfer(
     })
 }
 
-fn copy_at_count(stack: &ItemStack, count: u8) -> Result<ItemStack, ItemPersistenceError> {
+pub(crate) fn copy_at_count(
+    stack: &ItemStack,
+    count: u8,
+) -> Result<ItemStack, ItemPersistenceError> {
     match (stack.item(), count) {
         (_, 0) | (None, _) => Ok(ItemStack::empty()),
         (Some(item), _) => Ok(ItemStack::try_new(item, count, stack.components().clone())?),

@@ -171,6 +171,11 @@ pub(crate) fn validate_authoritative_stack(stack: &ItemStack) -> Result<(), Item
     preflight_stack(stack).map(|_| ())
 }
 
+/// Reuses the lossless preflight to account the exact schema-1 record size.
+pub(crate) fn authoritative_encoded_size(stack: &ItemStack) -> Result<usize, ItemPersistenceError> {
+    preflight_stack(stack).map(|preflight| preflight.capacity)
+}
+
 struct StackPreflight {
     payload_sizes: [usize; MAX_COMPONENTS],
     capacity: usize,
