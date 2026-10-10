@@ -264,7 +264,7 @@ mod tests {
         let spec = load_spec();
         assert_eq!(spec.protocol_version, EXPECTED_PROTOCOL_VERSION);
         assert_eq!(spec.data_version, EXPECTED_DATA_VERSION);
-        assert!(!spec.source_commit.is_empty());
+        assert_ne!(spec.source_commit.len(), 0);
     }
 
     #[test]
