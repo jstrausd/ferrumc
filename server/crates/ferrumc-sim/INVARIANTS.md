@@ -29,6 +29,13 @@
 - Dirty chunks are *collected* for saving (`take_dirty`, and on unload) but
   never persisted here, and no flush policy is implemented — that is the
   caller's concern.
+- Production overlay capture uses `try_take_persist_dirty_bounded`: requested
+  capacity is clamped to storage's `MAX_SAVE_BATCH` before allocation. All
+  selected records are captured immutably before any selected dirty mask clears
+  or the deterministic fairness cursor advances. Failure retains every mask,
+  item component, chunk and cursor; an unselected tail stays dirty and receives
+  its turn before newly re-dirtied lower keys. Legacy `take_persist_dirty` and
+  the experimental scheduler's internal variant remain explicitly lossy seams.
 - Chunk loading selects a stored full `ChunkRecord` when present, otherwise a
   deterministic generated base, and then applies the stored overlay. Overlay
   records must use exactly the current schema; old and future schemas are
@@ -36,6 +43,18 @@
   sections they carry; an empty overlay is a no-op. A non-empty current overlay
   carries the complete block-entity snapshot, so removals persist while imported
   entities survive empty overlays.
+- Overlay application uses strict `try_apply_to_chunk`. A malformed entity
+  rejects the entire admission without adding a resident chunk or ticket, and
+  no load path rewrites corrupt data as empty/default contents.
+- Every load key must describe a complete 16×16 column in the i32 block domain
+  before storage reads or generation. Full-record and overlay positions must
+  match that key even when a custom `WorldStore` bypasses backend validation.
+- Chest exchanges stage a private candidate and keep authoritative slots/cursor
+  unchanged until the complete candidate passes checked item/entity persistence.
+  The current entity is checked before cloning. An invalid cursor or candidate
+  beyond the aggregate 16 KiB entity cap returns the original cursor and current
+  snapshot without changing dirty masks. An invalid current chest refuses the
+  call, preserving the caller's existing cursor ownership.
 - Resident chunks and their tickets live in ordered containers (`BTreeMap`), so
   the resident set, its iteration order, and dirty batches are deterministic for
   identical acquire/release/mutate sequences.

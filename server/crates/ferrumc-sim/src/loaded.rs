@@ -23,12 +23,13 @@
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
-use std::ops::Bound::{Excluded, Unbounded};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 
 use ferrumc_core::{DimensionId, WorldId};
 use ferrumc_math::ChunkPos;
 use ferrumc_storage::{
     ChunkKey, ChunkOverlayRecord, ChunkRecord, SchemaVersion, StorageError, WorldStore,
+    MAX_SAVE_BATCH,
 };
 use ferrumc_world::{Chunk, FlatWorldGenerator};
 
@@ -190,12 +191,14 @@ struct ResidentChunk {
 ///    exists; otherwise generate a fresh flat chunk for `key`'s position.
 /// 2. **Overlay**: when [`WorldStore::load_chunk_overlay`] returns a record, apply
 ///    only its player-modified sections over that base with
-///    [`ChunkOverlayRecord::apply_to_chunk`]. An imported full record therefore
+///    [`ChunkOverlayRecord::try_apply_to_chunk`]. An imported full record therefore
 ///    remains authoritative everywhere the overlay has no data.
 ///
 /// An overlay whose schema differs from [`OVERLAY_SCHEMA_VERSION`] is refused
 /// with [`StorageError::IncompatiblePreAlphaData`] before any of its data is
 /// applied.
+/// A malformed or unrepresentable block entity rejects the complete load;
+/// invalid contents are never admitted as an empty/default container.
 ///
 /// The returned [`ChunkProvenance`] is [`Loaded`](ChunkProvenance::Loaded) when
 /// either record exists and [`Generated`](ChunkProvenance::Generated) only when
@@ -211,6 +214,7 @@ pub async fn load_or_generate(
     key: ChunkKey,
 ) -> SimResult<(Chunk, ChunkProvenance)> {
     let pos = key.pos();
+    validate_load_position(pos)?;
 
     // The durable full record is the base when present. In particular, this is
     // the shape produced by Anvil import and must not be bypassed merely because
@@ -220,6 +224,9 @@ pub async fn load_or_generate(
         .await
         .map_err(|source| SimError::ChunkLoad { pos, source })?;
     let has_stored_base = stored.is_some();
+    if let Some(record) = &stored {
+        validate_loaded_column(pos, record.chunk().pos())?;
+    }
     let mut chunk = stored.map_or_else(|| generator.generate(pos), ChunkRecord::into_chunk);
 
     // Apply only the overlay's carried sections and block entities over the
@@ -230,6 +237,7 @@ pub async fn load_or_generate(
         .await
         .map_err(|source| SimError::ChunkLoad { pos, source })?;
     if let Some(overlay) = overlay {
+        validate_loaded_column(pos, overlay.pos())?;
         if overlay.schema_version() != OVERLAY_SCHEMA_VERSION {
             return Err(SimError::ChunkLoad {
                 pos,
@@ -253,7 +261,7 @@ pub async fn load_or_generate(
             }
         }
         overlay
-            .apply_to_chunk(&mut chunk)
+            .try_apply_to_chunk(&mut chunk)
             .map_err(|source| SimError::ChunkLoad {
                 pos,
                 source: source.into(),
@@ -285,6 +293,36 @@ pub async fn load_or_generate(
     } else {
         Ok((chunk, ChunkProvenance::Generated))
     }
+}
+
+/// A trait implementation may return a record for another column. Enforce this
+/// at the simulation admission boundary even when backend validation was bypassed.
+fn validate_loaded_column(expected: ChunkPos, actual: ChunkPos) -> SimResult<()> {
+    if expected != actual {
+        return Err(SimError::ChunkLoad {
+            pos: expected,
+            source: StorageError::ChunkPositionMismatch { expected, actual }.into(),
+        });
+    }
+    Ok(())
+}
+
+/// Origin and all 15 remaining block coordinates must fit before the generator
+/// can multiply chunk coordinates; invalid keys never reach storage or generation.
+fn validate_load_position(pos: ChunkPos) -> SimResult<()> {
+    for coordinate in [pos.x(), pos.z()] {
+        if coordinate
+            .checked_mul(16)
+            .and_then(|origin| origin.checked_add(15))
+            .is_none()
+        {
+            return Err(SimError::ChunkLoad {
+                pos,
+                source: StorageError::ChunkPositionOutsideDomain { pos }.into(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The chunks a shard owns in memory for one world and dimension.
@@ -600,13 +638,84 @@ impl LoadedChunkMap {
     /// [`OVERLAY_SCHEMA_VERSION`]. The batch is ordered by [`ChunkPos`] for
     /// determinism. As with `take_dirty`, this captures and clears but does not
     /// itself persist — flush *policy* is the caller's. This legacy public path
-    /// retains its complete-drain behavior; the scheduler uses the separately
-    /// bounded internal variant.
+    /// retains its complete-drain behavior and lossy entity capture for source
+    /// compatibility. Production consumers must instead use
+    /// [`Self::try_take_persist_dirty_bounded`]; the experimental scheduler still
+    /// uses the separately bounded legacy variant.
     #[must_use]
     pub fn take_persist_dirty(&mut self, tick: u64) -> Vec<(ChunkKey, ChunkOverlayRecord)> {
         let batch = self.take_persist_dirty_up_to(tick, usize::MAX);
         self.persist_scan_after = None;
         batch
+    }
+
+    /// Captures a bounded, lossless batch and then transfers its dirty ownership.
+    ///
+    /// The requested `capacity` is clamped to [`MAX_SAVE_BATCH`] before allocation.
+    /// Every selected overlay is captured immutably first. Only after the entire
+    /// batch succeeds are its per-flush masks cleared and its deterministic scan
+    /// continuation advanced. A failure leaves all chunks and that continuation
+    /// unchanged, including records captured before the failing one.
+    ///
+    /// The continuation visits deferred higher keys before wrapping, so repeatedly
+    /// re-dirtying lower keys cannot starve the tail. The returned batch is sorted
+    /// by chunk position even when selection wraps. Cumulative edited masks remain
+    /// set so each record is a complete overlay snapshot. This transfers ownership
+    /// into the returned records; the caller still owns durable save and retry.
+    ///
+    /// # Errors
+    ///
+    /// Returns the checked storage capture error for an invalid/unrepresentable
+    /// entity or record. No selected dirty mask is cleared on any such error.
+    pub fn try_take_persist_dirty_bounded(
+        &mut self,
+        tick: u64,
+        capacity: NonZeroUsize,
+    ) -> Result<Vec<(ChunkKey, ChunkOverlayRecord)>, StorageError> {
+        let capacity = capacity.get().min(MAX_SAVE_BATCH);
+        let mut batch = Vec::with_capacity(capacity.min(self.resident.len()));
+        let mut last_selected = None;
+        let after = self.persist_scan_after;
+        let following = self
+            .resident
+            .range((after.map_or(Unbounded, Excluded), Unbounded));
+        let wrapping = self
+            .resident
+            .range((Unbounded, after.map_or(Unbounded, Included)))
+            .take(if after.is_some() {
+                self.resident.len()
+            } else {
+                0
+            });
+        for (&pos, resident) in following
+            .chain(wrapping)
+            .filter(|(_, resident)| resident.chunk.persist_dirty_sections().any())
+            .take(capacity)
+        {
+            let record = ChunkOverlayRecord::try_from_chunk(
+                OVERLAY_SCHEMA_VERSION,
+                pos,
+                &resident.chunk,
+                tick,
+            )?;
+            batch.push((ChunkKey::new(self.world, self.dimension, pos), record));
+            last_selected = Some(pos);
+        }
+
+        // There are no awaits or external mutation between immutable selection
+        // and commit: every selected position still belongs to this map.
+        for (key, _) in &batch {
+            if let Some(resident) = self.resident.get_mut(&key.pos()) {
+                resident.chunk.clear_persist_dirty();
+            }
+        }
+        self.persist_scan_after = if self.has_persist_dirty() {
+            last_selected
+        } else {
+            None
+        };
+        batch.sort_unstable_by_key(|(key, _)| key.pos());
+        Ok(batch)
     }
 
     /// Collects at most `capacity` persist-dirty overlays in deterministic
@@ -617,6 +726,8 @@ impl LoadedChunkMap {
     /// deferred tail before wrapping to lower keys, so repeatedly re-dirtying a
     /// low chunk cannot starve older work. Returned records remain sorted by
     /// chunk position even when selection wraps.
+    /// This experimental scheduler seam retains legacy lossy entity capture;
+    /// production persistence must use [`Self::try_take_persist_dirty_bounded`].
     pub(crate) fn take_persist_dirty_bounded(
         &mut self,
         tick: u64,
@@ -713,6 +824,10 @@ impl LoadedChunkMap {
         Some((ChunkKey::new(world, dimension, pos), record))
     }
 }
+
+#[cfg(test)]
+#[path = "loaded/persistence_tests.rs"]
+mod persistence_tests;
 
 #[cfg(test)]
 mod tests {

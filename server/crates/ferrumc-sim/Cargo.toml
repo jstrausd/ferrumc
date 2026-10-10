@@ -39,6 +39,9 @@ ferrumc-storage = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# A read-only malformed-store fixture implements the dyn-compatible WorldStore
+# contract independently of the backends' own validation.
+async-trait = "0.1"
 # The load-or-generate flow is `async` because `WorldStore` is. Tests drive it
 # with `#[tokio::test]`; `test-util` lets deterministic replay tests pause the
 # clock rather than observe wall time. Tokio remains dev-only here (the library

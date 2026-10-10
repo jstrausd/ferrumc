@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroUsize;
 
 use ferrumc_core::{DimensionId, GameMode, PlayerId, WorldId};
-use ferrumc_items::{left_click_exchange, ItemStack};
+use ferrumc_items::{encode_persisted_stack, left_click_exchange, ItemStack};
 use ferrumc_math::{BlockPos, Cuboid, Direction, ShardPos, Vec3};
 use ferrumc_placement::{
     compute_fence_connection_state, compute_placement, is_water_source, NeighborQuery,
@@ -14,8 +14,8 @@ use ferrumc_placement::{
 };
 use ferrumc_registry::block_state::{block_metadata, state_id_to_block_name};
 use ferrumc_world::{
-    is_chest_state, sign_kind_for_state, BlockEntity, BlockStateId, ChestInventory, Sign,
-    SIGN_LINES,
+    is_chest_state, sign_kind_for_state, try_encode_block_entity, BlockEntity, BlockStateId,
+    ChestInventory, Sign, SIGN_LINES,
 };
 
 use crate::cross_shard::{CrossShardIntent, CrossShardPayload};
@@ -1477,6 +1477,10 @@ impl SimShard {
     /// not resident, the target is out of reach, the block is no longer a chest,
     /// or `slot` is out of range — in every such case neither the chest nor the
     /// passed cursor is mutated, so the cursor item is never lost.
+    /// An already invalid or unrepresentable current chest also refuses the
+    /// exchange. A candidate that cannot fit the checked 16 KiB entity storage
+    /// budget returns the original cursor and current snapshot without changing
+    /// the chest or its dirty mask. Component patches are never stripped to fit.
     pub fn container_left_click(
         &mut self,
         player: PlayerId,
@@ -1495,12 +1499,36 @@ impl SimShard {
         if !is_chest_state(chunk.get_block(position)?.as_u32()) {
             return None;
         }
-        let Some(BlockEntity::Chest(chest)) = chunk.block_entity_mut(position) else {
+        let Some(entity @ BlockEntity::Chest(_)) = chunk.block_entity(position) else {
             return None;
         };
-        let slot_ref = chest.slot_mut(slot)?;
-        left_click_exchange(slot_ref, &mut cursor);
-        let snapshot = chest.snapshot();
+        // The current entity must fit before cloning its component-bearing
+        // slots. Imported/plugin-authored invalid data cannot drive that clone.
+        try_encode_block_entity(entity, &mut Vec::new()).ok()?;
+        let BlockEntity::Chest(chest) = entity else {
+            return None;
+        };
+        chest.slot(slot)?;
+        if encode_persisted_stack(&cursor).is_err() {
+            return Some((cursor, chest.snapshot()));
+        }
+        let original_cursor = cursor.clone();
+        let mut candidate = BlockEntity::Chest(chest.clone());
+        let BlockEntity::Chest(candidate_chest) = &mut candidate else {
+            return None;
+        };
+        left_click_exchange(candidate_chest.slot_mut(slot)?, &mut cursor);
+        if encode_persisted_stack(&cursor).is_err()
+            || try_encode_block_entity(&candidate, &mut Vec::new()).is_err()
+        {
+            return Some((original_cursor, chest.snapshot()));
+        }
+        let BlockEntity::Chest(candidate_chest) = &candidate else {
+            return None;
+        };
+        let snapshot = candidate_chest.snapshot();
+        let entity = chunk.block_entity_mut(position)?;
+        *entity = candidate;
         // The exchange mutated the chest block entity (not the block state), so mark
         // the chunk persist-dirty here (as an accepted block edit does) to write the
         // new contents to the overlay store; an out-of-range slot returned above
@@ -3703,5 +3731,103 @@ mod tests {
         // The chest is untouched.
         let snapshot = s.container_open(p, chest).expect("chest opens");
         assert!(snapshot.iter().all(|slot| slot.item().is_none()));
+    }
+
+    fn component_heavy_stack() -> ItemStack {
+        use ferrumc_items::{
+            ComponentPatch, ComponentValue, ItemId, OpaqueComponent, MAX_COMPONENT_BYTES,
+        };
+
+        ItemStack::try_new(
+            ItemId::from_name("diamond").expect("diamond"),
+            5,
+            ComponentPatch::new(
+                vec![ComponentValue::Opaque(
+                    OpaqueComponent::new(6, vec![0; MAX_COMPONENT_BYTES]).expect("bounded payload"),
+                )],
+                Vec::new(),
+            ),
+        )
+        .expect("valid count")
+    }
+
+    #[tokio::test]
+    async fn oversized_chest_candidate_preserves_every_slot_cursor_and_dirty_mask() {
+        let p = player("bounded_chest");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let marker = component_heavy_stack();
+        let (cursor, first_snapshot) = s
+            .container_left_click(p, position, 0, marker.clone())
+            .expect("first payload fits");
+        assert_eq!(cursor, ItemStack::empty());
+        assert_eq!(first_snapshot[0], marker);
+        s.loaded_chunks_mut()
+            .try_take_persist_dirty_bounded(1, NonZeroUsize::new(1).unwrap())
+            .expect("first entity is persistable");
+        let before = s
+            .loaded_chunks()
+            .get(position.to_chunk_pos())
+            .unwrap()
+            .clone();
+
+        // Each child is within its 8192-byte component cap; together the chest
+        // would exceed the aggregate 16 KiB entity cap. The refusal is atomic.
+        let (returned, snapshot) = s
+            .container_left_click(p, position, 1, marker.clone())
+            .expect("refusal returns original cursor");
+        assert_eq!(returned, marker);
+        assert_eq!(snapshot, first_snapshot);
+        assert_eq!(
+            s.loaded_chunks().get(position.to_chunk_pos()),
+            Some(&before)
+        );
+        assert!(!s.loaded_chunks().has_persist_dirty());
+    }
+
+    #[tokio::test]
+    async fn invalid_chest_cursor_is_returned_whole_without_mutating_the_chest() {
+        let p = player("invalid_cursor");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        s.loaded_chunks_mut()
+            .try_take_persist_dirty_bounded(1, NonZeroUsize::new(1).unwrap())
+            .expect("clean initial chest");
+        let before = s
+            .loaded_chunks()
+            .get(position.to_chunk_pos())
+            .unwrap()
+            .clone();
+        let invalid = stack("diamond_sword", 2);
+        let (returned, snapshot) = s
+            .container_left_click(p, position, 0, invalid.clone())
+            .expect("refusal retains cursor");
+        assert_eq!(returned, invalid);
+        assert!(snapshot.iter().all(|slot| slot.item().is_none()));
+        assert_eq!(
+            s.loaded_chunks().get(position.to_chunk_pos()),
+            Some(&before)
+        );
+        assert!(!s.loaded_chunks().has_persist_dirty());
     }
 }
