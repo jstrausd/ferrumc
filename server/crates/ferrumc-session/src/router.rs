@@ -408,8 +408,7 @@ impl SessionRouter {
     /// Exact coverage or a world-covering fallback may satisfy the lookup.
     pub fn is_shard_registered(&self, shard: ShardPos) -> bool {
         ShardPartitioner::for_shard(DEFAULT_WORLD, DEFAULT_DIMENSION, shard)
-            .ok()
-            .is_some_and(|target| self.shards.resolve(target).is_some())
+            .is_ok_and(|target| self.shards.resolve(target).is_some())
     }
 
     /// The number of players with an active session.
@@ -2586,21 +2585,27 @@ mod tests {
 
         // A lone player is never shown their own entity, and an accepted move is
         // authoritative client-side: neither is echoed back.
-        assert!(router
-            .route_output(&GameOutput::PlayerSpawned {
-                player: p,
-                position: spawn_pos(),
-            })
-            .is_empty());
-        assert!(router
-            .route_output(&GameOutput::PlayerMoved {
-                player: p,
-                position: Vec3::new(4.0, 5.0, 6.0),
-                yaw: 0.0,
-                pitch: 0.0,
-                position_changed: true,
-            })
-            .is_empty());
+        assert_eq!(
+            router
+                .route_output(&GameOutput::PlayerSpawned {
+                    player: p,
+                    position: spawn_pos(),
+                })
+                .len(),
+            0
+        );
+        assert_eq!(
+            router
+                .route_output(&GameOutput::PlayerMoved {
+                    player: p,
+                    position: Vec3::new(4.0, 5.0, 6.0),
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    position_changed: true,
+                })
+                .len(),
+            0
+        );
         assert!(handle.try_recv().is_none());
         // The move still refreshed the cached position used for routing.
         assert_eq!(router.player_position(p), Some(Vec3::new(4.0, 5.0, 6.0)));
@@ -2617,7 +2622,7 @@ mod tests {
             player: p,
             position: Vec3::new(8.0, 64.0, 8.0),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::SynchronizePlayerPosition(sync) =
             handle.try_recv().expect("a sync packet").into_packet()
         else {
@@ -2634,7 +2639,7 @@ mod tests {
         let mut handle = router.join_player(p, "grace", spawn_pos()).expect("join");
 
         let closed = router.route_output(&GameOutput::PlayerDespawned { player: p });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         assert!(handle.try_recv().is_none());
     }
 
@@ -2648,7 +2653,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
     }
 
     #[test]
@@ -2756,7 +2761,7 @@ mod tests {
             position_changed: true,
         });
         // The viewer is full, not closed: nothing to disconnect.
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
     }
 
     #[test]
@@ -2817,7 +2822,7 @@ mod tests {
             player: p,
             position: Vec3::new(7.0, 8.0, 9.0),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let packet = handle.recv().await.expect("a packet").into_packet();
         let ClientboundPlayPacket::SynchronizePlayerPosition(sync) = packet else {
@@ -3012,7 +3017,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::UpdateEntityPositionAndRotation(rel) = viewer_handle
             .try_recv()
             .expect("a relative move")
@@ -3054,7 +3059,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::EntityTeleport(tp) =
             viewer_handle.try_recv().expect("a teleport").into_packet()
         else {
@@ -3091,7 +3096,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         assert!(near_handle.try_recv().is_none());
     }
 
@@ -3113,7 +3118,7 @@ mod tests {
             sequence: 0,
             cause: MutationCause::Command,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::BlockUpdate(update) = viewer_handle
             .try_recv()
             .expect("a block update")
@@ -3144,7 +3149,7 @@ mod tests {
             sequence: 0,
             cause: MutationCause::Command,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         assert!(viewer_handle.try_recv().is_none());
     }
 
@@ -3187,7 +3192,7 @@ mod tests {
             position,
             sign: Box::new(sign),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let ClientboundPlayPacket::BlockEntityData(packet) = viewer_handle
             .try_recv()
@@ -3216,7 +3221,7 @@ mod tests {
             position: BlockPos::new(88, 64, 8),
             sign: Box::new(Sign::new(SignKind::Sign)),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         assert!(viewer_handle.try_recv().is_none());
     }
 
@@ -3234,7 +3239,7 @@ mod tests {
             player: placer,
             position,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let ClientboundPlayPacket::OpenSignEditor(packet) = placer_handle
             .try_recv()
@@ -3260,7 +3265,7 @@ mod tests {
             player: player("ghost"),
             position: BlockPos::new(0, 64, 0),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
     }
 
     #[test]
@@ -3289,7 +3294,7 @@ mod tests {
             sequence: 55,
             cause: MutationCause::PlayerCreative { player: actor },
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         // The actor sees the authoritative BlockUpdate (it is in range too) and
         // then the AcknowledgeBlockChange echoing its sequence.
@@ -3348,7 +3353,7 @@ mod tests {
             requested_state: BlockStateId::AIR,
             authoritative_state: BlockStateId::new(1),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let ClientboundPlayPacket::BlockUpdate(update) =
             actor_handle.try_recv().expect("actor resync").into_packet()
@@ -3490,7 +3495,7 @@ mod tests {
             player: actor,
             position: spawn_pos(),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         // The viewer-broadcast BlockUpdate is droppable (full -> dropped), but the
         // actor's ack is mandatory and the channel is full, so the actor is
@@ -3551,12 +3556,15 @@ mod tests {
         // Pre-fill the viewer's 2-slot channel with two mandatory corrections so it
         // has no room left for the joiner's incoming add + spawn.
         for _ in 0..2 {
-            assert!(router
-                .route_output(&GameOutput::PlayerPositionCorrected {
-                    player: viewer,
-                    position: spawn_pos(),
-                })
-                .is_empty());
+            assert_eq!(
+                router
+                    .route_output(&GameOutput::PlayerPositionCorrected {
+                        player: viewer,
+                        position: spawn_pos(),
+                    })
+                    .len(),
+                0
+            );
         }
 
         // The joiner's arrival tries to send the (full) viewer a mandatory add then
@@ -3590,7 +3598,7 @@ mod tests {
             requested_state: BlockStateId::AIR,
             authoritative_state: BlockStateId::new(1),
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let resync = handle.try_recv().expect("resync envelope");
         assert!(matches!(
@@ -3650,7 +3658,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         assert_player_info_add(&mut viewer_handle, mover);
         assert_entity_spawn(&mut viewer_handle, mover, mover_eid, near_pos);
         // No movement packet this tick — the spawn already carries the position.
@@ -3666,7 +3674,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::UpdateEntityPositionAndRotation(rel) = viewer_handle
             .try_recv()
             .expect("a relative move after the spawn seeded the baseline")
@@ -3761,7 +3769,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::EntityTeleport(tp) =
             viewer_handle.try_recv().expect("a teleport").into_packet()
         else {
@@ -3799,7 +3807,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         // Drain the two join packets; the channel is now empty.
         assert_player_info_add(&mut viewer_handle, mover);
@@ -3815,7 +3823,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
         let ClientboundPlayPacket::UpdateEntityPositionAndRotation(rel) = viewer_handle
             .try_recv()
             .expect("a relative move")
@@ -3943,7 +3951,7 @@ mod tests {
             pitch: 0.0,
             position_changed: true,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let ClientboundPlayPacket::UpdateEntityPositionAndRotation(rel) = viewer_handle
             .try_recv()
@@ -3994,7 +4002,7 @@ mod tests {
             pitch: 45.0,
             position_changed: false,
         });
-        assert!(closed.is_empty());
+        assert_eq!(closed.len(), 0);
 
         let ClientboundPlayPacket::UpdateEntityRotation(rot) = viewer_handle
             .try_recv()

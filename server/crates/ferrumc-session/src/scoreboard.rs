@@ -764,7 +764,7 @@ mod tests {
     fn team_remove_has_empty_tail() {
         let p = unwrap_team(team_remove("red").expect("remove"));
         assert_eq!(p.method(), TEAM_METHOD_REMOVE);
-        assert!(p.rest().is_empty());
+        assert_eq!(p.rest().len(), 0);
         assert_wire_frame(
             &p,
             SetPlayerTeam::encode,
@@ -839,7 +839,7 @@ mod tests {
     fn boss_bar_remove_has_empty_tail() {
         let p = unwrap_boss(boss_bar_remove(Uuid::nil()));
         assert_eq!(p.action(), BOSS_BAR_ACTION_REMOVE);
-        assert!(p.rest().is_empty());
+        assert_eq!(p.rest().len(), 0);
         assert_wire_frame(
             &p,
             BossBar::encode,
