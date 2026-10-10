@@ -21,9 +21,12 @@ Containerartefakte werden separat ausgewiesen.
 
 Der [Survival-Lieferplan](SURVIVAL_DELIVERY_PLAN.md) erfasst die gemeldeten
 Spielprobleme und fehlenden Systeme. Der aktuelle Stand ist kein vollständig
-spielbarer Survival-Server. Der reale Torch-Item-Pfad enthält einen statisch
-gefundenen Mapping-/Klassifikationswiderspruch, den bisherige direkte Blockstate-
-Tests nicht abdecken; Live-Reproduktion und Behebung sind offen. Die
+spielbarer Survival-Server. Der reale Torch-Item-Pfad wurde reproduziert und korrigiert:
+Boden und vier Wandrichtungen aller drei Familien bestehen echte
+Verbindungs-/Beobachter-/Restart-Tests. Umfang und offene Support-/Physikregeln
+stehen im [D0-Prüfbericht](D0_PLACEMENT_VALIDATION.md). Auch begrenzter
+Fence-Refresh nach regulärem Place/Break samt Erhalt von Wasser/anderen Armen
+ist dort abgenommen; vollständige Anschlussflächen bleiben offen. Die
 folgenden Bestandsergebnisse bleiben auf ihren jeweiligen Testumfang begrenzt.
 
 - Play-Keep-alive mit exakten IDs, absoluten Fristen, fairer Bearbeitung und
@@ -75,8 +78,9 @@ Die ergänzende [Paper-Quellenprüfung](PAPER_REFERENCE.md) vom 10.10.2026
 verwendet den offiziell zugeordneten Paper-1.21.8-Build-60-Commit und das
 bereits gepinnte API-Sources-JAR. Gelesen wurden Serverpatches für Items und
 Container sowie CraftBukkit-Scheduler-/Lifecycle-Quellen. Vollständige
-Vanilla-Basisquellen und Vergleichsläufe gegen einen laufenden Paper-Server
-sind noch offen. Diese reine Referenzprüfung ergänzt die untenstehenden
+Minecraft-Basisquellen samt beiden Patchschichten wurden inzwischen mit
+`applyPatches` erzeugt und für Torch/Fence gelesen. Vergleichsläufe gegen
+einen laufenden Paper-Server bleiben offen. Diese reine Referenzprüfung ergänzt die untenstehenden
 FerrumC-Tests und belegt keine weitere Gameplay- oder Plugin-Kompatibilität.
 
 Aktuelle lokale Vollabnahme der N02/I03/S02-Erweiterung; CI führt zusätzlich

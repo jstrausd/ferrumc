@@ -48,7 +48,9 @@ Verträge. Der bewegliche Branch `ver/1.21.8` allein reicht nicht als Nachweis.
   Mechanik nötig. Ein Patch enthält nur Änderungen und Kontext. Papers
   [Build-Anleitung](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/README.md)
   beschreibt `./gradlew applyPatches` mit Java 21 zum Erzeugen der Quellen.
-  Das wurde in dieser Referenzprüfung noch nicht ausgeführt.
+  `applyPatches` wurde am 10.10.2026 mit Java 21 erfolgreich ausgeführt;
+  vollständige Basis und beide Patchschichten liegen lokal zur Prüfung vor.
+  Das ist kein Laufzeitvergleich mit einem gestarteten Paper-Server.
 - **Protokoll-Fixtures und Laufzeitbeobachtung** prüfen die sichtbaren Folgen
   unabhängig von FerrumCs eigener Implementierung. Prismarine-Fixtures belegen
   Wire-Formate; sie belegen keine Mining-, Pickup- oder Tick-Regeln.
@@ -69,12 +71,25 @@ Die Befunde beschreiben Paper, keine neuen FerrumC-Funktionen.
 | V03/J05/J06: Drag/Open/Close | [AbstractContainerMenu-Patch](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/paper-server/patches/sources/net/minecraft/world/inventory/AbstractContainerMenu.java.patch); [CraftEventFactory](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/paper-server/src/main/java/org/bukkit/craftbukkit/event/CraftEventFactory.java), `callInventoryOpenEvent` | Drag bereitet Slots vor und reduziert den Cursor vor dem Event als Schutz beim Schließen durch ein Plugin; DENY stellt den Cursor wieder her. Open kann das vorherige Fenster schließen und transferiert bei Cancellation zurück. Cancellation nimmt nicht beliebige direkte Pluginänderungen zurück. Reentrancy, Screenwechsel und Resync gehören zur Abnahme. |
 | J03/J07: Scheduler/Lifecycle | [CraftScheduler](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/paper-server/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java), `mainThreadHeartbeat`, `handle`, `cancelTasks`; [PaperPluginInstanceManager](https://github.com/PaperMC/Paper/blob/29c8822d90899c89d2689338e81a98f690bcba12/paper-server/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java), `disablePlugin` | Ausführung und Wiederholung folgen Ticks; gleiche Fälligkeit verwendet FIFO. Disable beendet Plugin-Tasks. FerrumC muss diesen beobachtbaren Vertrag mit seiner autoritativen Rust-Simulation verbinden; eine separate Java-Wanduhr reicht nicht. Scheduler und vollständiger Thread-Vertrag fehlen derzeit. |
 
+Für D0 wurden zusätzlich die vollständig erzeugten `Items`,
+`StandingAndWallBlockItem`, `BaseTorchBlock`, `WallTorchBlock`, `FenceBlock`,
+`FenceGateBlock` und `Block` sowie die Fence-Tags gelesen. `Items` registriert
+jede der drei Torch-Familien mit stehender Basis, Wandvariante und
+Attachment-Richtung `DOWN`. `StandingAndWallBlockItem.registerBlocks` trägt
+beide Blöcke für dasselbe Item ein: Ein Reverse-Mapping kann deshalb die
+Wandvariante behalten, ohne damit eine gültige Placement-Basis zu bestimmen.
+Die vollständige Placement-Methode prüft Blickrichtungsreihenfolge,
+`canSurvive` und Unobstructed/`BlockCanBuildEvent`. FerrumCs erste Korrektur
+behebt ausschließlich die Item-Basis und die vorhandenen Boden-/Wandfälle;
+Support, Fallback, Nachbarphysik und dieses Java-Event sind damit nicht umgesetzt.
+Die bestandene FerrumC-Abnahme steht im [D0-Prüfbericht](D0_PLACEMENT_VALIDATION.md).
+
 Dies ist eine erste Quellenprüfung, keine vollständige Serverprüfung und keine
 bestandene Paper-Differenzialabnahme. Auch die bestehenden I03-Klicks haben
 noch keine solche Abnahme. Mining/Loot, Rezepte, Kampf, Hunger, Mobs,
 Weltgenerierung, Licht, Fluids, Redstone, übrige Block-Entities, Permissions,
-weitere Events und NMS bleiben anhand ihrer Planzeilen offen. Sämtliche
-unveränderten Basiszweige und Itemphysik müssen vor V01-Aktivierung zusätzlich
+weitere Events und NMS bleiben anhand ihrer Planzeilen offen. Weitere
+unveränderte Basiszweige und Itemphysik müssen vor V01-Aktivierung zusätzlich
 gelesen und getestet werden.
 
 ## Pflicht vor jeder betroffenen Implementierung

@@ -14,17 +14,19 @@ Ein normal spielbarer Survival-Server oder ein Paper-Ersatz ist damit nicht
 erreicht. Bestandene Codec-, Socket- und Fixture-Tests belegen jeweils ihren
 begrenzten Vertrag; sie belegen keinen vollständigen Minecraft-Spielablauf.
 
-Die vom Betreiber gemeldeten Laufzeitprobleme sind offen. In dieser Planung
-wurden Quellen gelesen, aber kein neuer Live-Spieltest durchgeführt. Das konkret
-verwendete Serverbinary, Image und seine Konfiguration müssen zu Beginn der
-Fehlerbehebung festgehalten werden, damit alte Artefakte und Codefehler eindeutig
-auseinandergehalten werden können.
+Die ursprüngliche Planung ist durch erste D0-Implementierung ergänzt:
+Torch-Items verwenden nun ihre stehende Placement-Basis. Echte Verbindungen
+prüfen Boden und vier Wandrichtungen für alle drei Familien samt Beobachter
+und Redb-Neustart. Bestehende Zäune aktualisieren nach regulärem Place/Break
+das betroffene Verbindungsbit und behalten Wasser/andere Arme. Der [D0-Prüfbericht](D0_PLACEMENT_VALIDATION.md) hält
+Artefakt, Umfang und offene Physik fest. Die übrigen Laufzeitprobleme und
+vollständige Spielbarkeit bleiben offen.
 
 | Meldung | Am Ausgangscode belegter Stand | Geplante Abnahme |
 | --- | --- | --- |
 | Keine normale Weltgenerierung | [world.rs](../server/app/src/world.rs) verwendet ausschließlich `FlatWorldGenerator`; [generator.rs](../server/crates/ferrumc-world/src/generator.rs) erzeugt feste horizontale Schichten. Importierte Chunks ersetzen keine natürliche Generierung. | Neue Welt liefert Terrain, Biome, Ressourcen und Höhlen; derselbe Seed bleibt bei anderer Ladefolge und Neustart gleich. |
-| Fackeln immer an der Wand | Der reale Item-Pfad führt über [item_id.rs](../server/crates/ferrumc-items/src/item_id.rs) zum [Registry-Mapping](../server/crates/ferrumc-registry/data/item_to_block_mapping.json): Torch-Items liefern Wandvarianten. [placement/lib.rs](../server/crates/ferrumc-placement/src/lib.rs) klassifiziert dagegen Bodenvarianten als Torch. Bestehende Torch-Tests verwenden direkt den Boden-Blockstate. Statischer Widerspruch, noch keine Live-Reproduktion. | Normale Torch-, Soul-Torch- und Redstone-Torch-Items auf Boden und Wand, Tragblock entfernen, zwei Betrachter und Neustart prüfen. |
-| Zäune und andere Verbindungen fehlerhaft | [shard.rs](../server/crates/ferrumc-sim/src/shard.rs) aktualisiert Nachbarn nur nach FenceLike-Platzierung und nur desselben Zaunnamens, nicht allgemein nach Abbau oder anderen Edits. Recompute in [placement/lib.rs](../server/crates/ferrumc-placement/src/lib.rs) verliert Waterlogging. [Registry-Build](../server/crates/ferrumc-registry/build.rs) setzt grobe `boundingBox=block`-Metadaten mit Vollwürfeln gleich. Statisch belegte Lücken; ein genereller Ausfall gleicher Zäune wurde nicht live reproduziert. | Tatsächliche Items nacheinander setzen/entfernen, Verbindungen beider Seiten, verschiedene Holz-/Nether-Zäune, Torachsen, Tragflächen, Waterlogging, Chunk-Grenzen und mehrere Spieler prüfen. |
+| Fackeln immer an der Wand | Der reale Item-Pfad führt über [item_id.rs](../server/crates/ferrumc-items/src/item_id.rs) zum [Registry-Mapping](../server/crates/ferrumc-registry/data/item_to_block_mapping.json): Torch-Items liefern Wandvarianten. [placement/lib.rs](../server/crates/ferrumc-placement/src/lib.rs) klassifiziert dagegen Bodenvarianten als Torch. Bestehende Torch-Tests verwenden direkt den Boden-Blockstate. Über echte Inventaritems reproduziert und durch generierte Normalisierung der drei Familien behoben; Boden-/Vier-Wandmatrix und Restart bestanden. Support-/Fallback-/Abbauphysik bleibt offen. | Normale Torch-, Soul-Torch- und Redstone-Torch-Items auf Boden und Wand, Tragblock entfernen, zwei Betrachter und Neustart prüfen. |
+| Zäune und andere Verbindungen fehlerhaft | [shard.rs](../server/crates/ferrumc-sim/src/shard.rs) aktualisiert Nachbarn nur nach FenceLike-Platzierung und nur desselben Zaunnamens, nicht allgemein nach Abbau oder anderen Edits. Recompute in [placement/lib.rs](../server/crates/ferrumc-placement/src/lib.rs) verliert Waterlogging. [Registry-Build](../server/crates/ferrumc-registry/build.rs) setzt grobe `boundingBox=block`-Metadaten mit Vollwürfeln gleich. Begrenzter Refresh nach regulärem Place/Break und Erhalt bestehender Properties implementiert und über echte Clients/Restart geprüft; genaue Material-/Tor-/Shape-Regeln, übrige Mutationseinstiege und andere Blockfamilien bleiben offen. | Tatsächliche Items nacheinander setzen/entfernen, Verbindungen beider Seiten, verschiedene Holz-/Nether-Zäune, Torachsen, Tragflächen, Waterlogging, Chunk-Grenzen und mehrere Spieler prüfen. |
 | Redstone verbindet/schaltet nicht | Kein vollständiges Wire-, Power- oder Redstone-Ticksystem im produktiven Simulationspfad. Darstellung und Signalverhalten sind separate Lücken. | Staubformen und Signalstärke, Schalter, Repeater, Comparator, Observer und Kolben anhand festgelegter Schaltungen vergleichen. |
 | Wasser fließt nicht | Waterlogging beim Platzieren ist teilweise vorhanden; es gibt keinen produktiven Fluid-Tick-Pfad. | Quellen, Gefälle, Ausbreitung, Entfernen, Eimer, Wasser/Lava-Reaktionen, Chunk-Grenzen und Fortsetzung nach Restart. |
 | TNT funktioniert nicht | Kein produktiver Primed-TNT-/Fuse-/Explosionspfad. | Zündung, Fuse, Bewegung, Explosion, Block-/Entityschaden, Kettenreaktion, Drops und Neustart. |
@@ -156,6 +158,6 @@ solche versionsübergreifende Zusage. Bukkit/Paper-Verträge werden systematisch
 erweitert, NMS-/Reflection-/Packet-Abhängigkeiten ausdrücklich geführt.
 Fehlende Methoden und bewusste Verhaltensabweichungen bleiben sichtbar.
 
-Alle Pakete D0–D10 sind in dieser Planung **offen**. Der aktuelle Auftrag
-liefert den Plan und die Aufwandsschätzung; keine der gemeldeten Gameplay-
-Lücken wurde durch diesen Dokumentationsschritt behoben.
+Alle Pakete D0–D10 bleiben **offen**. D0 hat erste einzeln abgenommene
+Placement-Korrekturen; das gesamte Paket und der Survival-Umfang sind damit
+noch nicht abgeschlossen.
