@@ -141,7 +141,7 @@ enthält keine Uhrzeit, Rechnerpfade oder aus dem Arbeitsstand erfundene Status.
 | NET-03 | O | app | NET-02 | Mojang-Session/Auth/Profile mit absoluten Fristen; echte Online-UUID/Skin übernehmen, Fehler/Replay/Disconnect und Auth-Ausfall prüfen (A03/A04). |
 | NET-04 | O | net | – | Bounded IP-Versuchsrate und vollständige Byte-/Dekompressionsbudgets; Expiry, Burst, langsame/floodende Clients und faire Kapazität (N04). |
 | NET-05 | O | app | NET-04 | Produktions-Ingress-/Bytebudget-Wiring und mutierende Handlerfristen; Lost-Reply/Timeout verliert keine Transaktion (N05/N06). |
-| NET-06 | O | app | bestehende Teleport-Pakete | Autoritative pending Teleport-ID/Bestätigung, fremde/veraltete IDs, Replay und superseding `/tp`; Movement erst nach passendem Ack freigeben (N03). Papers deaktivierter >20-Tick-Resend ist keine neue Ackdeadline; bestehende Connection-Liveness/Stop müssen trotz offener Bestätigung begrenzt/fair bleiben. |
+| NET-06 | T | app | bestehende Teleport-Pakete | NET-06.1 (N03) liefert verbindungseigene pending Teleport-ID/Bestätigung, stale IDs, Replay, superseding `/tp` und einen endlichen Fence für bereits eingereihte Syncs. NET-06.2 bleibt offen: globale Bewegungszulassung für externe Teleports, die erst nach dem Queue-Snapshot eingereiht werden. Papers deaktivierter >20-Tick-Resend ist keine neue Ackdeadline; Connection-Liveness/Stop bleiben begrenzt/fair. |
 | NET-07 | O | session | SIM-03, SIM-10 | Vollständige Player-/Entity-/Use-/Interact-/Inventory-/Respawn-Inputs und Stateoutputs routen; GameMode/Reichweite nur serverseitig, nie Socket-Weltmutation. |
 | NET-08 | O | app | NET-01, NET-03 | Signed Chat/Sessions, Secure Profile, Acknowledgements und signed command arguments; Login-/Key-Lifetime/Replay/Filter/Systemmessage-Fälle mit Originalclient. |
 | NET-09 | T | app | CAT-02 | Configuration mit vollständigen dynamischen Registries/Tags/Featureflags und Reconfiguration; falsche Reihenfolge/Registry-IDs abweisen, Client bestätigt alle Dimensionen. |
@@ -191,7 +191,7 @@ enthält keine Uhrzeit, Rechnerpfade oder aus dem Arbeitsstand erfundene Status.
 
 | Ticket | Status | Owner | Voraussetzung | Umfang und konkrete Abnahme |
 | --- | --- | --- | --- | --- |
-| GEN-01 | O | world | bestehender Flat-Generator | Seed-/Generator-/Version-/Dimensionvertrag und deterministische Basischunks; Ladefolge, paralleler Abruf, negative Koordinaten und Restart gleich. Flat bleibt explizites Preset (W07). |
+| GEN-01 | T | world | bestehender Flat-Generator | GEN-01.1 (WG-001) liefert numerischen Seed, geschlossene/versionierte Generatoridentität, strikten Codec und reinen Flat-v1-ChunkGenerator. Persistenz, produktive Seedkonfiguration und neue Generatoren bleiben Folgetickets; Ladefolge, paralleler Abruf, negative Koordinaten und Restart müssen auch dort gleich bleiben. Flat bleibt explizites Preset (W07). |
 | GEN-02 | O | world | GEN-01 | Versionierter spielbarer eigener Overworld-Generator mit Höhe/Land/Wasser/Bedrock; Chunkgrenzen und erreichbare Ressourcen; noch keine Vanilla-Seed-Zusage. |
 | GEN-03 | O | registry | CAT-02 | Versionierte Worldgen-/Biome-/Dimension-/Feature-Daten und Tags vollständig generieren; keine fehlenden Ressourcen hinter Defaults verstecken. |
 | GEN-04 | O | world | GEN-01, GEN-03 | Vanilla-kompatible RNG/Seedhash/Noise/Density-Arithemetik; unabhängige Original-Goldens bei mehreren Seeds und numerischen Grenzen. |
@@ -420,6 +420,23 @@ unsupported Methoden müssen konkrete Fehler liefern.
 | QA-09 | O | tools | CAT-08, QA-05–08, PERF-09 | Gesamtkatalogreview mit Registry/API/Consumerdiff, vollständigem CI und exact-head Artefakten; jede bewusste Abweichung/unerfasste Zeile offen benennen. |
 | QA-10 | O | tools | QA-09, OPS-13 | Endgültige vollständige Spiel-/Betriebsfreigabe für deklarierte Version/Konfiguration/Pluginmatrix; Spielerfortschritt, Durability und Ressourcen gemeinsam nachgewiesen. |
 
+## Abgenommene Teilverträge und nächste Untertickets
+
+Die 214 Haupttickets bleiben der Gesamtumfang. Die erste Welle schließt nur
+die folgenden ausdrücklich begrenzten Teilverträge; lokale kombinierte Prüfungen,
+Artefakte und verbleibende Grenzen stehen im
+[Wellenbericht](AGENT_WAVE_01_VALIDATION.md). CI bewertet den veröffentlichten
+`main`-Commit zusätzlich. Kein lokaler Teilnachweis ersetzt QA-02–10.
+
+| Untervertrag | Status | Konkreter Umfang / Rest |
+| --- | --- | --- |
+| GEN-01.1 (WG-001) | F | `ferrumc-world`: Seed-/Identitäts-/Codec-/ChunkGenerator-Vertrag, Flat-v1; Quellenreview und 137 Tests. GEN-01 bleibt T bis Consumer und Persistenz aktiviert sind. |
+| BLK-01.1 (PLACE-DOOR-HINGE) | F | `ferrumc-placement`: originale Cursor-/Nachbartür-/Hindernisentscheidung, 21 Materialien und beide Hälften; 56 Tests. Shapes, Support, Power und Türphysik bleiben offen. |
+| BLK-01.2 (PLACE-DOOR-HINGE-CLIENT) | F | Unabhängiger Client: 14 echte Itemplatzierungen, 28 Half-States bei zwei Clients und erneut nach Prozessneustart; keine Live-Paperparität. |
+| NET-06.1 (N03) | F | App-eigene IDs/ACK-Gate und endlicher FIFO-Fence für captured Syncs, Replay/KeepAlive/Stop/Persistenz und sofortiger Antwortflush; 357 App-Tests, davon sechs Teleport-Sockettests. |
+| NET-06.2 (Folgeticket) | O | Gemeinsamer Epoch-/Move-Admission-Vertrag für parallel später eingereihte externe Teleports. Vor Vergabe in Producer-, Consumer- und Wiringtickets mit je einer Crate aufteilen; echter Race-/Ticktest nötig. |
+| GEN-11.1 (WG-002) | O | [Vorbereitete Storage-Spezifikation](agent-tasks/WG-002_GENERATION_METADATA.md): eigene Tabelle, explizites Format 4, atomare Freshness/Saves; Migration und Wiring getrennt. Keine Produktionsimplementierung. |
+
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
 
 Es gibt derzeit **vier gleichzeitige Slots: einen Orchestrator und drei
@@ -467,10 +484,9 @@ Gitcommits, keine Branches, kein Reformat fremder offener Änderungen.
 
 Die Rollenliste oben ist der Initialsnapshot. Laufende Zuordnung/Dateibesitz
 werden ausschließlich im [Implementierungsboard](IMPLEMENTATION_BOARD.md)
-nachgeführt; hier bleibt der Gesamtumfang bestehen. Im aktuellen Katalog sind
-Ticketstatus O/T der Ausgangsstand vor dieser Welle. A/V/F werden nach Integration
-an den konkreten Unterticketumfang und seinen Nachweis gebunden, nicht bloß an
-eine Vergabe. Root schreibt langfristig keinen Gameplaycode und nimmt neue
+nachgeführt; hier bleibt der Gesamtumfang bestehen. Haupttickets erhalten nach
+Teilfortschritt höchstens T; F ist an den konkreten Unterticketumfang und seinen
+Nachweis gebunden, nicht bloß an eine Vergabe. Root schreibt langfristig keinen Gameplaycode und nimmt neue
 Betreiberrequests/Befehle für Priorisierung und Agentenvergabe weiter entgegen.
 
 ### Ablauf je Ticket und Integration

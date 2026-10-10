@@ -9,7 +9,7 @@ Dieser Umfang ist der Auftrag, keine Fertigmeldung. Der bestehende
 [Survival-Lieferplan](SURVIVAL_DELIVERY_PLAN.md) beschreibt die tatsächlichen
 Lücken und Aufwandsschätzung; der [technische Plan](V2_IMPLEMENTATION_PLAN.md)
 enthält bestehende Verträge. Der [ausführliche Featurekatalog](MINECRAFT_FEATURE_CATALOG.md)
-enthält 214 Tickets mit Status, Crate-Owner, Abhängigkeiten und Abnahmen.
+enthält 214 Haupttickets mit Status, Crate-Owner, Abhängigkeiten und Abnahmen.
 Inhaltsabnahme verwendet versionsfeste Matrizen,
 damit zusätzliche Block-, Item- und Entityvarianten nicht vergessen werden.
 
@@ -39,15 +39,40 @@ damit zusätzliche Block-, Item- und Entityvarianten nicht vergessen werden.
 | Ticket | Besitzer | Bereich | Status | Konkrete Abnahme |
 | --- | --- | --- | --- | --- |
 | CATALOG-001 | `feature_catalog` | Featurekatalog und versionsfester Inhaltsbestand | Erstbestand geprüft | 214 eindeutige Tickets ohne fehlende Abhängigkeits-IDs oder Zyklen; fünf Inventory-Selftests und `--check` bestanden. Fehlende Inhaltskategorien bleiben eigene CAT-Tickets. |
-| WG-001 / GEN-01.1 | `select_world_ticket` | `ferrumc-world` | In Umsetzung/Contracttests | Numerischer Seed, versionierter Generatorvertrag, fester begrenzter Codec und reproduzierbarer Flat-v1-Pfad; unbekannte Identitäten abweisen. Noch keine natürliche Welt und keine persistierte Weltidentität. |
-| PLACE-DOOR-HINGE / BLK-01.1 | `select_survival_ticket` | `ferrumc-placement` | In Umsetzung | Originale Cursor-/Nachbartür-/Hindernisentscheidung mit Testmatrix für alle Richtungen und beide Hälften; bestehende Shape-Grenzen sichtbar lassen. |
-| N03 / NET-06 | `teleport_confirmation` | `ferrumc-app` | In Umsetzung | Aktuelle Teleport-ID autorisiert Positionsbewegung erst nach passender Bestätigung; alte IDs, Replay, superseding Teleports, pipelinierte Eingaben und KeepAlive-/Stop-Fairness prüfen. |
+| WG-001 / GEN-01.1 | `select_world_ticket`, Review `feature_catalog` | `ferrumc-world` | Lokal geprüft und integriert, `e69bfc71` | 137 Tests, striktes Clippy und Formatprüfung bestanden; unabhängiges Review CLEAN. Numerischer Seed, geschlossene Generatoridentität, strikter 27-Byte-Codec und reproduzierbarer Flat-v1-Pfad. Keine natürliche Welt und keine persistierte Weltidentität. [Ticket](agent-tasks/WG-001_GENERATION_CONTRACT.md). |
+| PLACE-DOOR-HINGE / BLK-01.1 | `select_survival_ticket`, Review `feature_catalog` | `ferrumc-placement` | Lokal geprüft und integriert, `676a357e` | Sechs Regressionen vor Fix; danach 56 Tests, striktes Clippy und Formatprüfung bestanden. Unabhängiges Review CLEAN. Cursorentscheidung, alle 21 Türmaterialien und beide Hälften; Shape-/Support-/Powergrenzen bleiben offen. [Ticket](agent-tasks/PLACE-DOOR-HINGE.md). |
+| N03 / NET-06.1 | `teleport_confirmation`, Review `feature_catalog` | `ferrumc-app` | Lokal geprüft und integriert, `dff6c824` | Verbindungs-IDs/ACK-Gate, endlicher FIFO-Präfix und Persistenz; Review fand einen fehlenden Antwortflush, echte RED-Regression und Fix, anschließendes Review CLEAN. 357 App-Tests, davon sechs Teleport-Sockettests; Java-Test im App-Gesamtlauf ignoriert, anschließend separat erfolgreich ausgeführt (Wellenbericht). [Ticket](agent-tasks/N03_TELEPORT_CONFIRMATION.md). |
+| PLACE-DOOR-HINGE-CLIENT / BLK-01.2 | `door_client_acceptance`, Review `select_world_ticket` | `tools` | Live geprüft und integriert, `090165bd` | 14 echte Itemplatzierungen, 28 Half-States bei Actor/Observer vor und nach SIGINT-Prozessneustart; zwei saubere Prozessläufe mit identischem Binary-SHA. Review CLEAN, CI-Gate ergänzt. [Bericht](agent-tasks/PLACE-DOOR-HINGE_CLIENT.md). |
+| SIM-DOOR-GOLDEN | `select_world_ticket`, Review Root | `ferrumc-sim` (nur Test) | Lokal geprüft und integriert, `d9cac2c7` | Bestehender Consumertest erwartete die frühere Mittelpunkt-Scharnierseite; vier State-Goldens und Kommentar originalgetreu korrigiert. Keine Produktionslogik geändert. [Ticket](agent-tasks/SIM-DOOR-GOLDEN.md). |
+| WG-002 / GEN-11.1 | Vorbereitung `select_world_ticket`; Umsetzung noch nicht vergeben | `ferrumc-storage` | Spezifiziert, offen | Eigene Generatoridentitätstabelle in explizitem Format 4, atomarer Freshness-/Savevertrag; Format 3 unverändert. Migration ist ein eigenes Ticket. [Spezifikation](agent-tasks/WG-002_GENERATION_METADATA.md). |
+| NET-06.2 | Noch nicht vergeben | Producer/Consumer getrennt vor Vergabe | Offen | Gemeinsame Epoch-/Move-Admission-Autorität für externe Teleports nach dem endlichen Queue-Snapshot. NET-06 bleibt insgesamt T; bestehendes App-ACK-Gate ist keine globale atomare Tickreihenfolge. |
 
 WG-001 wird anschließend durch getrennte Storage-, Sim- und App-Tickets
 aktiviert; erst danach wird natürliche Generierung eingeführt. Mining und
 Survival bauen auf autoritativen Inventaren, Entity-Ownership, Blockfakten,
 Shapes und atomarer Speicherung auf. Die Türkorrektur ist ein einzelner
 Placement-Vertrag; sie schließt keine Survival-Etappe ab.
+
+Der [Prüfbericht dieser Welle](AGENT_WAVE_01_VALIDATION.md) hält kombinierte
+lokale Ergebnisse, unabhängige Clientartefakte und die verbleibenden Grenzen
+fest. GitHub-CI prüft den veröffentlichten Commit auf `main`; ein älterer
+Workflowlauf ist kein Nachweis für diesen neuen Stand.
+
+## Nächste abhängigkeitstreue Vergaben
+
+Nach Integration und CI dieser Welle werden freie Slots anhand dieser Reihenfolge
+vergeben. Diese Tabelle ist Planung, keine Behauptung laufender Agents.
+
+| Spur | Nächster begrenzter Schritt | Danach |
+| --- | --- | --- |
+| Welt | WG-002 / GEN-11.1: Metadaten in einer Storage-Crate; vor produktivem Wechsel separate explizite Format-3→4-Migration mit deklarierter Legacybasis | WG-003: Sim verlangt Descriptor vor Regeneration/Overlay; WG-004: App aktiviert Seed/Preset erst nach Migration. Danach GEN-02 Terrain und GEN-04 Original-RNG/Noise. |
+| Originalinhalte und Shapes | CAT-02-Unterticket: gepinnte Entity-/Recipe-/Loot-/Worldgen-Exporte samt reproduzierbaren Pins; anschließend SIM-04-Unterticket für konkrete Shape-/Supportfamilien | SIM-06 Placement, SIM-02 persistente Block-/Fluidticks und SIM-08 Neighborconsumer; darauf Wasser, Wachstum und Redstone. |
+| Survival | DUR-03-Unterticket: atomarer Inventory↔Entity-Transfer mit Transfer-ID und Recovery; allgemeine Entitygrundlage separat als SIM-03-Unterticket | DUR-04 Simconsumer, DUR-05 App-Wiring, SRV-02 Drop/Pickup; danach Mining/Loot. Recipe-Matcher SRV-05 kann mit vorhandenem Rezeptbestand separat folgen. |
+| Teleportautorität | NET-06.2 zuerst in konkrete Producer-/Consumer-/Wiringtickets zerlegen; deterministische Race-Reproduktion für einen nach Snapshot angenommenen Fremdteleport | Gemeinsame Epochprüfung bei tatsächlicher Sim-Move-Admission; Command-, Plugin-, Korrektur- und Disconnectpfade prüfen. |
+
+Die jeweils nächste konkrete Vergabe erhält einen eigenen Dateibesitz und
+Akzeptanzvertrag. Fehlende aktive Verbraucher werden nicht durch ungeprüfte
+Mehr-Crate-Sammeländerungen ersetzt.
 
 ## Orchestrierung
 
