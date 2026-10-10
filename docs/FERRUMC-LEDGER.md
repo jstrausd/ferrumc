@@ -118,9 +118,15 @@ Source of truth: `app/src/config.rs`.
 | `spawn_chunk_radius` | int (u8) | `2` | resident spawn area radius `(2r+1)²` |
 | `ticks_per_second` | int (>0) | `20` | sim tick rate |
 | `plugins_dir` | string path | none | dir scanned for cdylib plugins (omit = no dynamic plugins) |
-| `spawn_protect_radius` | int | `0` | spawn-protect block radius (Chebyshev; 0 = off) |
+| `builtin_plugins` | bool | `false` | explicit opt-in for the compiled-in spawn-protect, block-rules, and greeter demos |
+| `spawn_protect_radius` | int | `0` | active spawn-protect sample's block radius (Chebyshev; 0 = off); radius alone does not activate the sample |
 | `spawn_protect_bypass` | `[string]` | `[]` | players granted the bypass permission |
 | `keep_alive_interval_ms` | int | `10000` | play-phase Keep Alive interval (client times out at 20 s) |
+
+An explicit `builtin_plugins = true` retains all three demo plugins, including
+block-rules' glass-to-tinted-glass replacement. Omitted or commented settings
+use the new `false` default. Native bundles configured through `plugins_dir`
+load independently of this toggle.
 
 ### Quality gates (must pass before commit/push)
 

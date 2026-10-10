@@ -18,7 +18,7 @@ additional gameplay/presentation commands have been implemented. Read
 
 1. From `core/server`: `RUST_LOG=info cargo run -p ferrumc-app` (binds `127.0.0.1:25565`, creative, view-distance 10, spawn `(8, 64, 8)`). A real CLI is wired up — `--config <path>`, `--port`, `--bind`, `--version`, `--help`. First run with no config writes a commented `config.template.toml` and starts on defaults (it never dies for lack of a config); a startup banner prints the name/version, protocol 772, bind + dashboard address, and a `RUST_LOG` hint.
 2. A real **1.21.8** vanilla client in **offline mode** (the server does no auth/encryption). Add `localhost` to the server list — it should read **COMPATIBLE / FerrumC 1.21.8**.
-3. Defaults that affect tests: every player is forced into **Creative**; permission level is **0** unless the player's name is in the config `ops` list (so `/gamemode` needs config — see below); spawn-protect is **off** (radius 0) by default. The read-only observability dashboard is **on** by default at `127.0.0.1:9090` (loopback-only).
+3. Defaults that affect tests: every player is forced into **Creative**; permission level is **0** unless the player's name is in the config `ops` list (so `/gamemode` needs config — see below); built-in demo plugins are **off** (`builtin_plugins = false`), and spawn-protect has radius 0 by default. The read-only observability dashboard is **on** by default at `127.0.0.1:9090` (loopback-only).
 
 ---
 
@@ -141,16 +141,22 @@ additional gameplay/presentation commands have been implemented. Read
 
 ## Plugins (in-process)
 
+The compiled-in spawn-protect, block-rules, and greeter samples now require
+`builtin_plugins = true`; the default is `false`. This opt-in enables all three,
+including block-rules' demonstration of glass becoming tinted glass. Setting a
+spawn-protection radius alone does not activate the sample. Native bundles
+configured through `plugins_dir` load independently of this toggle.
+
 - **Live block before/after events.** `before_block_break` / `before_block_place` run on the real packet path before the world is touched; `after_*` fire on accepted edits. Plugin host is shared across all connections.
-  - *Test:* Enable spawn-protect (`spawn_protect_radius = 16`), restart, try to break a block near spawn as a non-bypass player — it's denied and reverts.
+  - *Test:* Set `builtin_plugins = true` and `spawn_protect_radius = 16`, restart, try to break a block near spawn as a non-bypass player — it's denied and reverts.
 - **Decision model: Deny / Replace / EmitIntents.** Folded by the host (first Deny wins and is absorbing; Replace is last-writer; intents capped at 64) and applied back through the sim (Deny → routed through the single reject funnel: mandatory ack + authoritative resync to the actor, no ghost block; Replace → the substitute state is placed verbatim via the exact-state path, bypassing the placement engine; SetBlock/Message intents routed). `after_block_place` fires with the final computed state.
-  - *Test:* The block-rules sample denies placing **bedrock** in creative — put bedrock in a slot and try to place it; it's rejected and the ghost block heals (no leftover ghost).
+  - *Test:* With `builtin_plugins = true`, the block-rules sample denies placing **bedrock** in creative — put bedrock in a slot and try to place it; it's rejected and the ghost block heals (no leftover ghost).
 - **Replace works end-to-end (glass → tinted glass).** block-rules now watches the real 1.21.8 block-states (glass `562` → tinted_glass `23377`), pinned in tests against the registry so a demo-id regression fails the build.
-  - *Test:* Place glass with block-rules active — it comes out as **tinted glass**, for you and for any nearby player.
+  - *Test:* Set `builtin_plugins = true` and place glass with block-rules active — it comes out as **tinted glass**, for you and for any nearby player.
 - **Panic isolation.** A panicking plugin hook is caught, the plugin is disabled, and the edit fails safe (Deny).
   - *Test:* (sample-level) A faulty plugin can't crash the server; its block ops just get denied.
-- **Spawn-protect sample plugin.** Vetoes edits inside a configurable spawn radius unless the actor holds the bypass permission; welcomes joiners with a message. **Off by default (radius 0).**
-  - *Test:* Set `spawn_protect_radius = 16` and add yourself to `spawn_protect_bypass`; you can edit inside spawn, an unlisted player can't and sees a denial message.
+- **Spawn-protect sample plugin.** Vetoes edits inside a configurable spawn radius unless the actor holds the bypass permission; welcomes joiners with a message. **Off by default (`builtin_plugins = false`, radius 0).**
+  - *Test:* Set `builtin_plugins = true` and `spawn_protect_radius = 16`, then add yourself to `spawn_protect_bypass`; you can edit inside spawn, an unlisted player can't and sees a denial message.
 - **Permission levels + bypass.** Players default to level 0; names in `ops` get level 4; `spawn_protect_bypass` grants the bypass node. Levels gate commands and autocomplete.
   - *Test:* Non-op can't `/gamemode`; add to `ops`, restart — now they can.
 

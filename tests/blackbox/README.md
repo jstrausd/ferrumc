@@ -67,8 +67,20 @@ items on real stone supports (floor and four walls), and edits beside an
 existing oak fence. Fence cases cover other wood including crimson, nether
 brick, both gate axes, leaves/pumpkin exceptions and glass. A later World-FIFO
 marker proves unchanged secondary states without relying on ACK priority or
-timeouts. Rejoin and restart read the final pattern through Prismarine chunks.
+timeouts. Actual glass, tinted-glass and black-stained-glass items must retain
+their distinct block identities. Rejoin and restart read the final pattern
+through Prismarine chunks.
 Support loss, general collision/support shapes, fluids and redstone remain open.
+
+Managed mode intentionally omits `builtin_plugins` from its generated config:
+it tests the server default, where built-in demonstration plugins are disabled.
+The ordinary glass placement must produce `glass`, including after reconnect
+and restart. The demos are explicitly enabled with `builtin_plugins = true`;
+their block-rules plugin intentionally replaces glass with tinted glass, so an
+external server with those demos enabled does not satisfy this default-placement
+gate. Demo replacement behavior has separate plugin contract tests. Custom native
+or Java plugins can likewise change placement; this smoke does not establish
+full plugin compatibility or Paper behavior.
 
 It exits `0` on success and non-zero with a clear diagnostic dump on failure.
 Along the way it does the housekeeping a real client must do to stay connected:

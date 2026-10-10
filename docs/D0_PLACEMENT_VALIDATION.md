@@ -142,9 +142,48 @@ No-op-/Ablehnungsregeln und der begrenzte residente Refresh bleiben erhalten.
 | Strict All-target-Clippy dieser drei Crates | Bestanden mit `--locked -- -D warnings`. |
 | Unabhängiger verwalteter Node-Smoke | Echte Oak/Nether-Brick/Crimson-Items, beide Gate-Achsen, Leaves/Pumpkin-Ausnahmen und Glass-Support; Refresh, Rejoin und vollständiger Prozessneustart. Unveränderte Fence-States werden mit späterem World-FIFO-Marker abgenommen. |
 
-Der Vanilla-Smoke deaktiviert eingebaute Demo-Plugins ausdrücklich. Das
-standardmäßig aktive `BlockRulesPlugin` wandelt Glas absichtlich in getöntes
-Glas um; der Registry-Glaspfad war korrekt. Die Produktionsdefaults werden
-durch diese Testkonfiguration nicht verändert. Der finale Restart-Vergleich
-umfasst 26 Blöcke. Dies ist eine FerrumC-Abnahme, kein gestarteter Paper-
-Vergleich und keine neue Performance- oder Container-Abnahme.
+Der oben dokumentierte Vanilla-Smoke deaktivierte eingebaute Demo-Plugins
+ausdrücklich. Beim damaligen Abnahmestand war das `BlockRulesPlugin`
+standardmäßig aktiv und wandelte Glas absichtlich in getöntes Glas um; der
+Registry-Glaspfad war korrekt. Diese Testkonfiguration änderte den damaligen
+Produktionsdefault nicht. Der finale Restart-Vergleich umfasste 26 Blöcke.
+Dies war eine FerrumC-Abnahme, kein gestarteter Paper-Vergleich und keine neue
+Performance- oder Container-Abnahme.
+
+## Aktueller Default der Demo-Plugins
+
+Quellenbefund: Die vollständige `Items.java` der oben gepinnten Paper-Referenz
+registriert `GLASS`, `TINTED_GLASS` und `BLACK_STAINED_GLASS` jeweils mit dem
+entsprechenden `Blocks`-Eintrag. FerrumCs bestehendes Mapping ist korrekt:
+Glas-Item `195` wird zum Glas-State `562`. Die Ursache der Umwandlung liegt in
+`BlockPolicy::standard` unter
+`server/plugins/ferrumc-plugin-block-rules/src/policy.rs`: Diese Demo-Policy
+ersetzt `GLASS` durch `TINTED_GLASS` (State `23377`). Dies ist eine
+Quellenprüfung, kein Paper-Laufzeitvergleich.
+
+`builtin_plugins` verwendet jetzt den Default `false`. Ohne ausdrückliche
+Aktivierung lädt die App weder Spawn-Protect noch Block-Rules oder Greeter;
+damit ist auch die Demo-Umschreibung von Glas zu getöntem Glas abgeschaltet.
+Ein vorhandenes ausdrückliches `builtin_plugins = true` aktiviert weiterhin
+alle drei Samples samt dieser Umschreibung. Ein Spawn-Schutz-Radius allein
+aktiviert das Sample nicht. Native Bundles unter `plugins_dir` bleiben von
+diesem Toggle unabhängig.
+
+Die früheren Prüfergebnisse dokumentieren den damaligen Abnahmestand. Für
+die Defaultänderung wurden folgende neue Prüfungen bestanden:
+
+| Prüfung | Ergebnis und Umfang |
+| --- | --- |
+| Regression vor Fix | Config-Test schlug am bisherigen Default `true` fehl. Der unabhängige Client mit ausgelassener Einstellung erhielt für das Glas-Item `tinted_glass` (State `23377`) statt `glass` (`562`); Test-Exit 1, aufgeräumter Server-Exit 0. |
+| App-Verträge | Default-Konfiguration, ausgelassenes Flag und ausdrückliches `false` registrieren keine Demos und lassen Glas unverändert. Ausdrückliches `true` erhält die Demo-Entscheidungen sowie den Socket-Test für Glas-Umschreibung. Inventar- und Username-Abwehrtests bestanden nach gezieltem Demo-Opt-in. |
+| Unabhängiger verwalteter Node-Smoke | Einstellung ausgelassen; echte Glas-, getöntes-Glas- und schwarzes-Glas-Items behalten ihre verschiedenen Identitäten. Rejoin und vollständiger Neustart prüfen alle 28 Musterblöcke. Test und beide Serverprozesse endeten mit Code 0. |
+| Gesamtprüfung | `cargo test --workspace --locked`: 2.156 Tests bestanden, ein Java-Socket-Test ausdrücklich ignoriert. Workspace-Clippy mit allen Targets, Formatprüfung und die zusätzlichen 30 Doc-Tests bestanden. |
+
+Der RED-Lauf verwendete das eingefrorene Debug-Binary mit SHA-256
+`7abc6c02f7e7f37ee169fc7a72c4eac90f0f5bd0939f3e3ab90f3b8418c137c0`.
+Das mit `cargo build --locked -p ferrumc-app` gebaute GREEN-Binary hatte
+SHA-256 `06a28b5cf3b7593d5dd9495f8b2145b43f76eea566af56d8d718b6f41aa8cdf9`.
+Der finale GREEN-Lauf verwendet eine eingefrorene Kopie dieses Artefakts für
+beide Serverstarts; der SHA-256 steht im Laufprotokoll.
+Dies prüft FerrumCs Standardplatzierung und Persistenz; Paper-Differential-,
+Performance- und Container-Abnahmen wurden damit nicht durchgeführt.

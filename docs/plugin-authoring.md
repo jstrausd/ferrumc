@@ -279,11 +279,17 @@ validation, duplicate-ID, host-registration, initialization, or enable failure
 aborts startup before the server accepts connections. A library already mapped
 before a later candidate fails remains resident until process exit.
 
-`builtin_plugins` defaults to `true`, which registers the compiled-in
-spawn-protect, block-rules, and greeter samples. Set it to `false` for a purely
-trusted-native deployment or to avoid an ID collision with a native version of
-one of those samples. A third-party compiled-in plugin still requires explicit
-application wiring; `plugins_dir` installs trusted native bundles only.
+`builtin_plugins` defaults to `false`. Set it to `true` to register the
+compiled-in spawn-protect, block-rules, and greeter samples. These demos change
+gameplay: block-rules replaces placed glass with tinted glass, and spawn-protect
+requires a positive `spawn_protect_radius` to veto edits near spawn. Setting the
+radius alone does not activate the sample.
+
+Loading trusted native bundles through `plugins_dir` is independent of
+`builtin_plugins`. Keep it `false` when loading a native version of a built-in
+sample to avoid a duplicate plugin ID. A third-party compiled-in plugin still
+requires explicit application wiring; `plugins_dir` installs trusted native
+bundles only.
 
 ## Trust, hangs, panics, and crashes
 

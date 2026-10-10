@@ -694,7 +694,7 @@ async function buildAndVerifyEdits(client, state) {
     { item: 'oak_fence_gate', yaw: 90, east: false, props: { open: false }, label: 'gate facing along connection axis' },
     { item: 'oak_leaves', east: false, label: 'leaves connection exception' },
     { item: 'pumpkin', east: false, label: 'pumpkin connection exception' },
-    { item: 'glass', east: true, label: 'full glass support without exception' },
+    { item: 'glass', east: true, label: 'default glass item placement and fence support control' },
   ];
   for (const [index, testCase] of directionalCases.entries()) {
     await placeStateful(client, state, {
@@ -713,6 +713,23 @@ async function buildAndVerifyEdits(client, state) {
     { pos: [7, 64, 10], name: 'air' },
   ];
 
+  // Distinct glass items must retain their own block identity. The ordinary
+  // glass above also guards the default configuration against demo rewrites;
+  // these independent controls persist through both reconnect and restart.
+  const glassPattern = [];
+  for (const [item, position] of [
+    ['tinted_glass', [8, 64, 5]],
+    ['black_stained_glass', [9, 64, 5]],
+  ]) {
+    const [x, y, z] = position;
+    await placeStateful(client, state, {
+      label: `${item} item retains block identity`, slot: 7, item,
+      clickLoc: { x, y: y - 1, z }, dir: 1,
+      expectLoc: position, expectName: item,
+    });
+    glassPattern.push({ pos: position, name: item });
+  }
+
   pass('Set-slot + stateful place + break all verified against the server response.');
 
   // The spawn-chunk portion of the persistence pattern.
@@ -723,6 +740,7 @@ async function buildAndVerifyEdits(client, state) {
     { pos: [10, 64, 9], name: 'air' }, // broken slab stays gone
     ...torchPattern,
     ...fencePattern,
+    ...glassPattern,
   ];
 }
 
@@ -803,7 +821,6 @@ function writeConfig() {
   const toml =
     `bind = "${HOST}:${PORT}"\n` +
     `world_dir = "${WORLD_DIR}"\n` +
-    `builtin_plugins = false\n` + // vanilla cases exclude intentional demo block replacements
     `dashboard_enabled = false\n` + // no dashboard port to collide with
     `keep_alive_interval_ms = 10000\n`;
   fs.writeFileSync(CONFIG_PATH, toml);

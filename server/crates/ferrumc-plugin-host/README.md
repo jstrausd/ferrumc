@@ -18,8 +18,15 @@ At startup, `ferrumc-app` builds one long-lived `PluginHost`. Depending on
 configuration it registers the built-in samples, loads every strict bundle
 under `plugins_dir` through `ferrumc-plugin-loader`, registers each resulting
 `LoadedPlugin`, and enables it before accepting connections. Live connections
-share that same host. `builtin_plugins` defaults to `true` and controls the
-three in-tree built-in samples.
+share that same host. `builtin_plugins` defaults to `false`. Setting it to
+`true` registers the three in-tree demos: spawn-protect, block-rules, and
+greeter. Block-rules replaces placed glass with tinted glass. Spawn-protect
+also needs a positive `spawn_protect_radius` to veto edits near spawn; setting
+the radius alone does not activate the sample.
+
+Trusted native bundle loading through `plugins_dir` is independent of
+`builtin_plugins`. Keep it `false` when loading a native version of a built-in
+sample to avoid a duplicate plugin ID.
 
 Each immediate child directory containing `plugin.toml` is a bundle candidate.
 Candidates are validated and returned in deterministic plugin-ID order. Any
