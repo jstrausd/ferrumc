@@ -520,7 +520,7 @@ fn pinned_minimal_case_resolves_and_applies_a_relocated_slab_merge() {
     assert_eq!(result.requested_state, OAK_SLAB);
     assert_eq!(result.rule, PlacementRule::DoubleSlab);
     assert_eq!(result.place_at, Some(fixture.existing_position));
-    assert!(result.extra_blocks.is_empty());
+    assert_eq!(result.extra_blocks.len(), 0);
 
     let writes = canonical_writes(&context, &result);
     assert_eq!(writes, vec![(fixture.existing_position, 12_056)]);
