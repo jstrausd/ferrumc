@@ -84,6 +84,26 @@ behebt ausschließlich die Item-Basis und die vorhandenen Boden-/Wandfälle;
 Support, Fallback, Nachbarphysik und dieses Java-Event sind damit nicht umgesetzt.
 Die bestandene FerrumC-Abnahme steht im [D0-Prüfbericht](D0_PLACEMENT_VALIDATION.md).
 
+Die Fence-Folgeschritte verwenden die eingebauten `FENCES`/`WOODEN_FENCES`-
+Familien, die expliziten `FenceGateBlock`-Registrierungen und die 33 Ausnahmen
+aus `Block.isExceptionForConnection`. Die reine Connection-Formel und die
+beiden Sim-Consumer sind deterministisch geprüft; tatsächliche FULL-Flächen
+gewöhnlicher Blockstates bleiben offen. Die gepinnten vier Tagfixtures samt
+Hashes liegen in `server/crates/ferrumc-registry/data/connection-tags/`.
+
+Für die native-only Operator-Erweiterung wurden außerdem die vollständigen
+`OpCommand`, `DeOpCommands`, `Commands.hasPermission`,
+`CommandSourceStack.hasPermission`, `PlayerList.op/deop/sendPlayerPermissionLevel`
+und `CraftPlayer.isOp/setOp` mit relevanten Source-/Feature-Patches gelesen.
+Paper verbindet nominal Level 3 mit Bukkit-Checks, sendet Permission-
+EntityEvents und recalculiert Bukkit-Permissions/Commands; Deop überprüft
+Whitelist-Zugang erneut. FerrumCs strengere Offline-Identitätsprüfung,
+eigene Recordform und fehlende Zweige sind im
+[Operator-Prüfbericht](D0_OPERATOR_VALIDATION.md) benannt. Der getrennte
+Java-`player_state`-RPC aktualisiert retained Proxies; seine aktive Rust-
+Mutationseinbindung bleibt gesperrt. Auch diese Quellenlektüre und Tests
+belegen keinen laufenden Paper-Vergleich.
+
 Dies ist eine erste Quellenprüfung, keine vollständige Serverprüfung und keine
 bestandene Paper-Differenzialabnahme. Auch die bestehenden I03-Klicks haben
 noch keine solche Abnahme. Mining/Loot, Rezepte, Kampf, Hunger, Mobs,

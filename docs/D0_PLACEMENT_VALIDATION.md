@@ -71,11 +71,12 @@ Die gepinnte vollständige `FenceBlock.updateShape`-Quelle belegt den Erhalt
 aller übrigen Properties beim Ändern eines Arms. `FenceBlock.connectsTo`,
 `FenceGateBlock.connectsToDirection`, `Block.isExceptionForConnection`,
 `SupportType.FULL` und die Fence-Tags wurden ebenfalls gelesen. Ihr vollständiges
-Verbindungsprädikat ist noch offen: Die Live-Query verwendet weiterhin die
-grobe `boundingBox == "block"`-Metadatenquelle. Materialfamilien, Torachsen,
-Ausnahmen und zustandsabhängige volle Anschlussflächen benötigen weitere
-separate Änderungen. Das aktuelle Paket belegt keine allgemeine Vanilla-
-Shape-Parität, Fluid-Ticks oder Java-Event-Parität.
+Verbindungsprädikat war im ersten Refresh-Schritt noch grob. Die unten
+beschriebene separate Registry-/Placement-/Sim-Migration ergänzt inzwischen
+Materialfamilien, Torachsen und Ausnahmen. Für gewöhnliche Blöcke bleibt die
+grobe `boundingBox == "block"`-Metadatenquelle ausdrücklich ein Fallback;
+zustandsabhängige volle Anschlussflächen fehlen weiterhin. Das Paket belegt
+keine allgemeine Vanilla-Shape-Parität, Fluid-Ticks oder Java-Event-Parität.
 
 Exact-write und Region-/Undo-Operationen behalten ihren bisherigen Vertrag
 ohne Nachbarphysik. Es gibt keine Force-loads, keine shardübergreifende
@@ -100,3 +101,50 @@ striktem Workspace-Clippy, Formatprüfung und Generatorprüfung. Nach dem
 zusätzlichen Integer-Randfix wurde die gesamte Sim-Suite erneut erfolgreich
 geprüft. Bestehende Java-, Container- und Performanceergebnisse werden durch
 diese Placement-Fälle nicht erweitert.
+
+## Fence-Familien, Gate-Achsen und Ausnahmen
+
+Ein weiterer unabhängiger Node-Lauf reproduzierte die falsche Verbindung eines
+echten Nether-Brick-Fence-Items mit Oak: dessen Westarm war `true` (State 8087).
+Die sechs neuen Sim-Regressionen scheiterten vor der Consumer-Migration sowohl
+bei frischer Platzierung als auch beim Refresh. Als Quelle dient dieselbe
+vollständige Paper-Version, einschließlich `FenceBlock.isSameFence/connectsTo`,
+`FenceGateBlock.connectsToDirection`, `Block.isExceptionForConnection`,
+Blockregistrierungen und der eingebauten Fence-/Leaves-/Shulker-Tags.
+
+Registry enthält jetzt gepinnte Familien und 33 Ausnahmen. Die vier Original-
+Tagfixtures sind bytegenau gespeichert und über Manifest/Hashes zugeordnet.
+Alle zwölf Holzarten einschließlich Crimson/Warped teilen eine Familie;
+Nether-Brick ist separat. Unbekannte Namen bleiben unbekannt, statt als
+Nichtausnahme oder neue Familie durchzugehen.
+
+Placement implementiert die reine Formel
+`(!exception && caller_full_face) || same_family || perpendicular_gate`.
+Sie akzeptiert nur bekannte Fence-Quellen, bekannte States und horizontale
+Faces. Die zwölf echten Gate-Klassen sind explizit klassifiziert. Ihre Achse,
+aber nicht `open/in_wall/powered`, entscheidet über den Gate-Zweig.
+Der Aufrufer muss die tatsächliche FULL-Supportfläche nachweisen; ein grober
+Bounding-Box-Flag reicht nicht. Eine additive Face-Query erhält bisherige
+Implementierungen und liefert die Nachbarfläche in Richtung des Zauns.
+
+Die Sim-Consumer nutzen diese Richtung bei frischer Platzierung und beim
+sekundären Refresh. Fences/Gates/Exceptions werden mit `full_face=false`
+ausgewertet; die grobe Metadatenquelle überschreibt deren Ergebnis nicht.
+Gewöhnliche Blöcke behalten den ausdrücklich noch ungenauen bisherigen
+Fallback. Waterlogging, andere Arme, Journal/Persist, checked Koordinaten,
+No-op-/Ablehnungsregeln und der begrenzte residente Refresh bleiben erhalten.
+
+| Prüfung | Tatsächlich bestanden |
+| --- | --- |
+| Registry `cargo test --locked -p ferrumc-registry` | 37 Unit- und sechs Doc-Tests; Raw-Snapshot-/Tag-Driftprüfungen. |
+| Placement `cargo test --locked -p ferrumc-placement` | 46 Unit-, drei Integrations- und ein Doc-Test. Alle Fence-Familienpaare und Neighbor-States, sämtliche Gate-States/Faces, 33 Ausnahmen, Caller-FULL-Randfälle und Legacy-/Face-Queries. |
+| Sim `cargo test --locked -p ferrumc-sim` | 158 Unit-, 23 Integrations- und ein Doc-Test. Sechs neue RED→GREEN-Regressionen für beide Consumer, alle 33 Ausnahmen und Ablehnung ungültiger/unverfügbarer Nachbarn. |
+| Strict All-target-Clippy dieser drei Crates | Bestanden mit `--locked -- -D warnings`. |
+| Unabhängiger verwalteter Node-Smoke | Echte Oak/Nether-Brick/Crimson-Items, beide Gate-Achsen, Leaves/Pumpkin-Ausnahmen und Glass-Support; Refresh, Rejoin und vollständiger Prozessneustart. Unveränderte Fence-States werden mit späterem World-FIFO-Marker abgenommen. |
+
+Der Vanilla-Smoke deaktiviert eingebaute Demo-Plugins ausdrücklich. Das
+standardmäßig aktive `BlockRulesPlugin` wandelt Glas absichtlich in getöntes
+Glas um; der Registry-Glaspfad war korrekt. Die Produktionsdefaults werden
+durch diese Testkonfiguration nicht verändert. Der finale Restart-Vergleich
+umfasst 26 Blöcke. Dies ist eine FerrumC-Abnahme, kein gestarteter Paper-
+Vergleich und keine neue Performance- oder Container-Abnahme.

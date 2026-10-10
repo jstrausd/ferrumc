@@ -10,9 +10,11 @@ wurde integriert; vor dem Entfernen der übrigen 19 Fork-Branches wurde ein
 vollständiges Git-Bundle samt Branchliste außerhalb des Checkouts gesichert.
 Die Upstream-Branches wurden nicht verändert.
 
-Die lokale Vollabnahme der N02/I03/S02-Erweiterung verwendet den
+Die archivierte lokale Vollabnahme der N02/I03/S02-Erweiterung verwendet den
 Produktionscode bis `a213a491`; spätere Dokumentations-/Harness-Commits ändern
-diesen Servercode nicht. Aktuelle Code- und Client-Ergebnisse stehen unten.
+diesen damaligen Stand nicht. Die aktuelle D0-Erweiterung umfasst die
+Produktionsänderungen bis `3837f21e`; ihre eigenen Code-/Client-Ergebnisse
+stehen unten.
 Die getrennt eingefrorene Release-Ressourcenmessung verwendet weiterhin
 `7333f404`; sie misst die neueren Funktionen nicht. GitHub-CI und lokale
 Containerartefakte werden separat ausgewiesen.
@@ -26,7 +28,12 @@ Boden und vier Wandrichtungen aller drei Familien bestehen echte
 Verbindungs-/Beobachter-/Restart-Tests. Umfang und offene Support-/Physikregeln
 stehen im [D0-Prüfbericht](D0_PLACEMENT_VALIDATION.md). Auch begrenzter
 Fence-Refresh nach regulärem Place/Break samt Erhalt von Wasser/anderen Armen
-ist dort abgenommen; vollständige Anschlussflächen bleiben offen. Die
+ist dort abgenommen. Die ergänzte Live-Query berücksichtigt Holz-/Nether-
+Familien, Gate-Achsen und 33 Verbindungsausnahmen; volle Anschlussflächen
+gewöhnlicher Blockstates bleiben offen. Native-only `/op`-/`/deop`-Einzelziele
+haben persistente Grants/Widerrufe, Live-Commandgraphs und lokale CLI-Recovery.
+Grenzen und Fehlerpfade stehen im [Operator-Prüfbericht](D0_OPERATOR_VALIDATION.md).
+Bei aktiver Java-Brücke bleiben Operator-Mutationen deaktiviert. Die
 folgenden Bestandsergebnisse bleiben auf ihren jeweiligen Testumfang begrenzt.
 
 - Play-Keep-alive mit exakten IDs, absoluten Fristen, fairer Bearbeitung und
@@ -79,11 +86,11 @@ verwendet den offiziell zugeordneten Paper-1.21.8-Build-60-Commit und das
 bereits gepinnte API-Sources-JAR. Gelesen wurden Serverpatches für Items und
 Container sowie CraftBukkit-Scheduler-/Lifecycle-Quellen. Vollständige
 Minecraft-Basisquellen samt beiden Patchschichten wurden inzwischen mit
-`applyPatches` erzeugt und für Torch/Fence gelesen. Vergleichsläufe gegen
+`applyPatches` erzeugt und für Torch/Fence sowie Op/Deop gelesen. Vergleichsläufe gegen
 einen laufenden Paper-Server bleiben offen. Diese reine Referenzprüfung ergänzt die untenstehenden
 FerrumC-Tests und belegt keine weitere Gameplay- oder Plugin-Kompatibilität.
 
-Aktuelle lokale Vollabnahme der N02/I03/S02-Erweiterung; CI führt zusätzlich
+Archivierte lokale Vollabnahme der N02/I03/S02-Erweiterung; CI führt zusätzlich
 `cargo nextest run --workspace --all-targets --locked` aus. Ein erfolgreicher
 lokaler Cargo-Testlauf ist kein vorweggenommenes GitHub-Ergebnis.
 
@@ -97,6 +104,29 @@ lokaler Cargo-Testlauf ist kein vorweggenommenes GitHub-Ergebnis.
 | `cargo xtask generate --check` | Bestanden; eingecheckter Protokollcode aktuell. |
 | `cargo metadata --no-deps --locked --format-version 1` | Bestanden. |
 | Java `mvn --batch-mode --no-transfer-progress verify` | 11 Parser-/Archiv-Unit-Tests und sieben echte Prozessintegrationstests bestanden; keine übersprungenen Tests. |
+
+Aktuelle gemeinsame D0-Abnahme nach Registry-, Placement-, Sim-, App- und
+Java-Schritten, Produktionscode bis `3837f21e`:
+
+| Prüfung | Ergebnis und Grenze |
+| --- | --- |
+| `cargo test --workspace --locked` | **2.156 bestanden**, 153 Ergebnisgruppen einschließlich Doc-Tests, ein standardmäßig ignorierter Java-Artefakttest. |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings`, Format, Metadaten und Generator | Bestanden; keine Lint-Ausschlüsse und keine manuell geänderten generierten Dateien. |
+| App-All-target-Abnahme | 271 Library-Tests, zwei Binary-Tests und sämtliche normalen Integrationsgruppen bestanden; darunter Operator-/Client-/Restart- und bestehende Torch-/Fence-Fälle. |
+| Rust/JAR-Socket mit expliziten Java-/JAR-Pfaden | Der ignorierte `java_compat`-Test separat bestanden; bestehender API-Umfang bleibt aktiv. |
+| Java Maven `verify` | 11 Unit- und **acht Prozessintegrationstests**, keine übersprungenen Tests. Neuer `player_state`-Test aktualisiert bereits gespeicherte Proxies, prüft Identity-/Parserfehler und erzeugt keine zusätzlichen Events. |
+| Unabhängiger Node-Smoke | Tatsächliche Torch-/Fence-Items, Familien/Gate-Achsen/Ausnahmen, FIFO-Barrier, Rejoin und ein Prozessneustart; 26 persistierte Blöcke und beide Exits Code 0. Demo-Plugins sind für diese Vanilla-Fälle deaktiviert. |
+| Unabhängiger Operator-Node-Client | Drei Prozesse, zwei Neustarts: Live-Commandgraphs, echte GameMode-Events, abgewiesene Commands nach Deop, Offline-Grant, dauerhafter Seed-Widerruf, echte stdin-Konsole, EOF und gespeicherte CLI-Grants/-Widerrufe. Alle Exits Code 0 ohne Signal. |
+| Unabhängiger Java-Plugin-Node-Client | Bestehender Loader-/Command-/Permission-/Completion-/Lifecycle-Vertrag erneut bestanden. Dynamische Rust-/Java-Operatoränderungen bleiben deaktiviert. |
+| Index-Claim-Prüfung | 94 Selbsttest-Fälle und 119 öffentliche Dateien im Index bestanden. |
+
+Die finalen Node-Läufe verwenden dieselbe nach `cargo build --locked -p
+ferrumc-app` eingefrorene Debug-Binary-Kopie, SHA-256
+`54dac440bdcf5131c7d5dfa5868aee27ebeb4288a656c6a55da9352029c344eb`.
+Diese Prüfungen sind keine Container-, Panel-, Ressourcen- oder gestartete
+Paper-Differenzialabnahme. FULL-Support-Shapes, signed commands,
+Client-Permission-EntityEvents, breite Java-Permissions und Survival bleiben
+offen. Details stehen in den D0-Prüfberichten.
 
 Die Java-/Rust-Brücke wurde unabhängig auf Prozessbesitz, Reaping, begrenzte
 Frames/Queues/Metadaten, IDs, absolute Fristen inklusive Warteschlange,
