@@ -95,7 +95,8 @@ pub struct PlacementContext {
     /// The face of the targeted block the player clicked.
     pub clicked_face: Direction,
     /// The cursor hit point inside the targeted block, each component in
-    /// `0.0..=1.0`. Only the `y` component is read (slab/stair half).
+    /// `0.0..=1.0`. Slab/stair halves read `y`; door hinges read `x` and `z`
+    /// relative to the placement cell after accounting for the clicked face.
     pub cursor_position: Vec3,
     /// The player's yaw in degrees (vanilla convention: `0` faces `+Z`/south).
     pub player_yaw: f32,
@@ -1368,7 +1369,7 @@ fn try_multiblock(
 }
 
 /// A door: `facing` from the player's yaw, `hinge` from neighbouring doors/walls
-/// (default `right`); placed as the `lower` half at `ctx.position` with the `upper`
+/// and the click point; placed as the `lower` half at `ctx.position` with the `upper`
 /// half one cell above (in [`PlacementResult::extra_blocks`]). Both halves share
 /// the same `facing`/`hinge` and inherit `open=false`/`powered=false`.
 fn place_door(
@@ -1378,7 +1379,7 @@ fn place_door(
 ) -> PlacementResult {
     let fallback = ctx.item_block_state;
     let facing = yaw_to_cardinal(ctx.player_yaw);
-    let hinge = door_hinge(name, facing, ctx.position, neighbors);
+    let hinge = door_hinge(facing, ctx, neighbors);
     let lower = door_state(name, facing, "lower", hinge, fallback);
     let upper = door_state(name, facing, "upper", hinge, fallback);
     PlacementResult {
@@ -1403,22 +1404,19 @@ fn door_state(name: &str, facing: Direction, half: &str, hinge: &str, fallback: 
     encode(name, &props, fallback)
 }
 
-/// Derives a door's `hinge` (`left`/`right`) from its neighbours, a simplified port
-/// of vanilla `DoorBlock.getHinge`.
+/// Derives the hinge with the branch order and strict cursor comparisons of
+/// Paper 1.21.8 Build 60's complete `DoorBlock.getHinge` method.
 ///
-/// The hinge defaults to `right`. It flips to `left` when an identical door (lower
-/// half) sits on the right side — so the pair meets as a matching double door — or
-/// when full-cube blocks weigh the placement toward the left. Vanilla's final
-/// cursor-position tie-break is intentionally dropped in favour of that documented
-/// `right` default. "Full cube" uses the registry [`block_metadata`]
-/// `is_solid_cube` flag as a proxy for vanilla's collision-shape test; other doors
-/// never count as full (they are handled by the same-door checks).
+/// Lower halves of any door family participate in pairing. The existing full
+/// obstacle observation still uses [`block_metadata`]'s coarse `is_solid_cube`
+/// proxy rather than the reference's state-specific collision shape; doors never
+/// count as full. That shape seam does not change the hinge decision algorithm.
 fn door_hinge(
-    name: &str,
     facing: Direction,
-    position: BlockPos,
+    ctx: &PlacementContext,
     neighbors: &dyn NeighborQuery,
 ) -> &'static str {
+    let position = ctx.position;
     let left = rotate_counterclockwise(facing);
     let right = rotate_clockwise(facing);
     let above = position.offset(Direction::Up);
@@ -1429,14 +1427,15 @@ fn door_hinge(
             .and_then(state_id_to_block_name)
             .is_some_and(|n| !is_door(n) && block_metadata(n).is_some_and(|m| m.is_solid_cube))
     };
-    let is_same_lower_door = |p: BlockPos| {
+    let is_lower_door = |p: BlockPos| {
         neighbors.block_state_at(p).is_some_and(|s| {
-            state_id_to_block_name(s) == Some(name) && state_property(s, "half") == Some("lower")
+            state_id_to_block_name(s).is_some_and(is_door)
+                && state_property(s, "half") == Some("lower")
         })
     };
 
-    let left_door = is_same_lower_door(position.offset(left));
-    let right_door = is_same_lower_door(position.offset(right));
+    let left_door = is_lower_door(position.offset(left));
+    let right_door = is_lower_door(position.offset(right));
     // Positive favours the right side, negative the left (matching vanilla's `i`).
     let score = i32::from(is_full(position.offset(right)))
         + i32::from(is_full(above.offset(right)))
@@ -1445,8 +1444,36 @@ fn door_hinge(
 
     let favors_left = (!left_door || right_door) && score <= 0;
     let tie_or_right = (!right_door || left_door) && score >= 0;
-    if favors_left && !tie_or_right {
-        "left"
+    if favors_left {
+        if tie_or_right {
+            // App/session preserve the hit point within the CLICKED block but
+            // have already stepped `position` along the clicked face. Subtract
+            // that step to match getClickLocation() - getClickedPos(), including
+            // side clicks, without world-coordinate subtraction/rounding.
+            let (step_x, step_z) = match ctx.clicked_face {
+                Direction::North => (0.0, -1.0),
+                Direction::South => (0.0, 1.0),
+                Direction::East => (1.0, 0.0),
+                Direction::West => (-1.0, 0.0),
+                Direction::Up | Direction::Down => (0.0, 0.0),
+            };
+            let x = ctx.cursor_position.x - step_x;
+            let z = ctx.cursor_position.z - step_z;
+            let right_of_center = match facing {
+                Direction::West => z < 0.5,
+                Direction::East => z > 0.5,
+                Direction::North => x > 0.5,
+                Direction::South => x < 0.5,
+                Direction::Up | Direction::Down => false,
+            };
+            if right_of_center {
+                "right"
+            } else {
+                "left"
+            }
+        } else {
+            "left"
+        }
     } else {
         "right"
     }
@@ -1481,6 +1508,9 @@ fn bed_state(name: &str, facing: Direction, part: &str, fallback: u32) -> u32 {
 
 #[cfg(test)]
 mod fence_connection_tests;
+
+#[cfg(test)]
+mod door_hinge_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2364,19 +2394,19 @@ mod tests {
 
     #[test]
     fn door_facing_from_yaw_with_lower_and_upper_halves() {
-        // No neighbours -> hinge defaults to right. The lower half lands at the
+        // No neighbours and an exact center click -> hinge left. The lower half lands at the
         // chosen cell; the upper half rides one cell above, both yaw-faced.
         let south =
             compute_placement(&ctx(OAK_DOOR, Direction::Up, 0.5, 0.0), &NoNeighbors).unwrap();
         assert_eq!(south.rule, PlacementRule::Door);
-        assert_eq!(south.state_id, 4717); // facing=south, lower, hinge=right
+        assert_eq!(south.state_id, 4713); // facing=south, lower, hinge=left
         assert_eq!(south.place_at, None);
-        assert_eq!(south.extra_blocks, vec![(BlockPos::new(0, 65, 0), 4709)]); // upper
+        assert_eq!(south.extra_blocks, vec![(BlockPos::new(0, 65, 0), 4705)]); // upper
 
         let north =
             compute_placement(&ctx(OAK_DOOR, Direction::Up, 0.5, 180.0), &NoNeighbors).unwrap();
-        assert_eq!(north.state_id, 4701); // facing=north, lower, hinge=right
-        assert_eq!(north.extra_blocks, vec![(BlockPos::new(0, 65, 0), 4693)]); // upper
+        assert_eq!(north.state_id, 4697); // facing=north, lower, hinge=left
+        assert_eq!(north.extra_blocks, vec![(BlockPos::new(0, 65, 0), 4689)]); // upper
     }
 
     #[test]

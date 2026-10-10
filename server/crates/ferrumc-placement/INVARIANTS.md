@@ -36,5 +36,17 @@
   preserve the rest of the existing state. Water tick scheduling, support and
   full connection/shape rules remain host responsibilities; source review and
   these deterministic tests do not constitute Paper differential acceptance.
+- Door hinge decisions follow the same reference's complete
+  `DoorBlock.getHinge`: the ordered lower/upper left/right obstacle weight,
+  lower-half pairing flags for all 21 pinned door families, then strict
+  orientation-specific cursor comparisons. Exact center ties choose `left`.
+  Both output halves share the resulting hinge and facing. Cursor coordinates
+  remain clicked-cell-local; the hinge calculation subtracts the horizontal
+  clicked-face step because `PlacementContext::position` is already stepped.
+- Door obstacle observations retain the existing `is_solid_cube` proxy and
+  exclude all doors from full obstacles; they do not establish state-specific
+  full collision shapes. This decision correction neither adds support checks,
+  powered placement/opening, neighbor physics nor Paper event parity. The pure
+  helper schedules no work, reads no I/O and emits no events.
 - No unsafe code, production `unwrap`/`expect`, or unbounded input allocation.
   Every public item has rustdoc.
