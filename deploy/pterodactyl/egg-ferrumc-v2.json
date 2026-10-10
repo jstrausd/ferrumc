@@ -1,0 +1,42 @@
+{
+    "_comment": "Development egg for the jstrausd/ferrumc v2 fork, using an image built on the Wings node.",
+    "meta": {
+        "version": "PTDL_v2",
+        "update_url": null
+    },
+    "exported_at": "2026-10-10T00:00:00+00:00",
+    "name": "FerrumC v2 (local image)",
+    "author": "36381849+jstrausd@users.noreply.github.com",
+    "description": "Minecraft Java 1.21.8 / protocol 772 offline alpha. Uses the locally built mchosting/ferrumc:v2-local image. Runtime startup is fixed by the image entrypoint; configure config.toml and the allocated SERVER_PORT.",
+    "features": null,
+    "docker_images": {
+        "FerrumC v2 local (Debian bookworm)": "mchosting/ferrumc:v2-local"
+    },
+    "file_denylist": [],
+    "startup": "/usr/local/bin/ferrumc --bind 0.0.0.0:{{SERVER_PORT}} --config /home/container/config.toml",
+    "config": {
+        "files": "{}",
+        "startup": "{\"done\":\"listening for Minecraft clients\"}",
+        "logs": "{}",
+        "stop": "^C"
+    },
+    "scripts": {
+        "installation": {
+            "script": "#!/bin/sh\nset -eu\n\nserver_dir=/mnt/server\ntemplate=/usr/local/share/ferrumc/config.template.toml\nmkdir -p \"$server_dir/world\" \"$server_dir/plugins\"\nif [ ! -e \"$server_dir/config.toml\" ] && [ ! -L \"$server_dir/config.toml\" ]; then\n    cp \"$template\" \"$server_dir/config.toml\"\nfi\n# Change only top-level ownership, preserving all existing data and plugin files.\nchown -h 1000:1000 \"$server_dir\" \"$server_dir/world\" \"$server_dir/plugins\" \"$server_dir/config.toml\"\nprintf '%s\\n' 'FerrumC v2 data directory ready; the executable is supplied by the image.'\n",
+            "container": "mchosting/ferrumc-installer:v2-local",
+            "entrypoint": "/bin/sh"
+        }
+    },
+    "variables": [
+        {
+            "name": "Log filter",
+            "description": "Rust tracing filter, for example info or ferrumc_app=debug. Restart after changing it.",
+            "env_variable": "RUST_LOG",
+            "default_value": "info",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|max:256",
+            "field_type": "text"
+        }
+    ]
+}
