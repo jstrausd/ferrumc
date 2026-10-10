@@ -9,7 +9,8 @@ dependencies, active generator/configuration changes or Git/board writes.
 
 `biome` now supplies every one of the 65 original Minecraft 1.21.8 biome
 resources, both multinoise preset resources, and all 7593 Overworld/five Nether
-ordered parameter entries. The prior `PLAINS` string remains compatible.
+ordered parameter entries. The prior `PLAINS` constant retains its public
+string type and exact `minecraft:plains` value.
 Full definition JSON includes climate, effects, generation and spawn data;
 all 67 definitions retain the exact original export RawValue slices and measured
 byte/node/depth statistics. The original export and its manifests are unchanged.
