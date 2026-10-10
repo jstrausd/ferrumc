@@ -1,11 +1,11 @@
 # WG-002 / GEN-11.1 — Dauerhafte Generatoridentität
 
-Stand: 10.10.2026. **Status: geplant; keine Produktionsimplementierung.**
-Diese Spezifikation ist eine Vorbereitung auf die nächste Umsetzungswelle.
-Produktions-Crate: `ferrumc-storage`. WG-001 liefert bereits den numerischen
-Seed, die geschlossene `GenerationIdentity` und deren festen 27-Byte-Codec;
-dieser Schritt soll den Vertrag dauerhaft und atomar speichern. Natürliche
-Weltgenerierung ist damit weiterhin nicht umgesetzt.
+Stand: 10.10.2026. **Status: lokal implementiert, geprüft; unabhängiges Review/Integration ausstehend.**
+Produktions-Crate: `ferrumc-storage`. WG-001 liefert den numerischen Seed, die
+geschlossene `GenerationIdentity` und deren festen 27-Byte-Codec. WG-002 speichert
+diesen Vertrag dauerhaft und atomar im ausdrücklich gewählten Metadatamodus.
+Der produktive Format-3-Pfad bleibt aktiv. Migration, App-/Sim-Wiring und
+natürliche Weltgenerierung sind weiterhin nicht umgesetzt.
 
 ## Ausgangslage und Ziel
 
@@ -23,7 +23,7 @@ einer Defaultkonfiguration darf kein historischer Seed geraten werden.
 
 ## Öffentliche API
 
-Vorgeschlagene Form; öffentliche Felder bleiben privat und öffentliche Items
+Implementierte Form; öffentliche Felder bleiben privat und öffentliche Items
 erhalten Rustdoc:
 
 ```rust
@@ -93,7 +93,7 @@ Unterstützung darf nicht durch `Ok(None)` als Storage-Miss erscheinen.
 | Identität fehlt und Weltzustand existiert | Ausdrückliche Ablehnung; keine automatische Legacybindung. |
 
 Die zunächst **globale** Leerheitsprüfung umfasst Chunks, Overlays, Entities,
-Spieler, Journal und Journalreceipts. Auch ein leeres gespeichertes Overlay
+Spieler, Journal, Journalreceipts und den Journalwatermark. Auch ein leeres gespeichertes Overlay
 oder ein Receipt eines leeren Batches ist vorhandener Weltzustand. Plugin-KV-
 Daten allein belegen dagegen keine Terrainbasis.
 
@@ -152,7 +152,7 @@ Konvertierung in den bestehenden `ServerError`-Vertrag darf Ablehnungen nicht
 als erfolgreiche Misses verschleiern. Unknown-/Malformed-Fälle werden vor
 Einsetzen einer neuen Basis beendet.
 
-## One-Crate-Dateibesitz für die spätere Umsetzung
+## One-Crate-Dateibesitz der Umsetzung
 
 | Datei | Aufgabe |
 | --- | --- |
@@ -172,7 +172,7 @@ Diese Tasknotiz darf den Umsetzungsbefund aufnehmen. Cargo-/Dependency- und
 Fremdcrate-Änderungen sind für diesen Umfang nicht vorgesehen. Board und
 Featurekatalog verwaltet der Orchestrator.
 
-## Geplante Abnahmetests
+## Implementierte Abnahmetests
 
 1. Fresh initialize, dauerhaft speichern, schließen, Format-4-Wiederöffnung und
    identischen Compare prüfen. Numerische Seedgrenzen aus WG-001 erhalten.
@@ -205,8 +205,12 @@ Featurekatalog verwaltet der Orchestrator.
 
 Diese Cutpoints prüfen Transaktions-/Retryverhalten. Sie sind kein Nachweis
 gegen Prozessabbruch oder Stromausfall; solche externen Recoverytests folgen
-getrennt. Alle hier genannten Tests sind geplant und wurden für WG-002 noch
-nicht ausgeführt.
+getrennt. Die Abnahme liegt in `tests/generation_metadata.rs` sowie den privaten
+`memory/generation_tests.rs` und `redb_store/generation_tests.rs`. Parallelitäts-
+prüfungen verwenden Barrieren ohne Sleeps. Die Save-/Init-Grenztests halten
+den tatsächlichen Memory-Mutationsguard beziehungsweise eine redb-Write-
+Transaction und modellieren einen bereits zugelassenen In-flight-Save vor der
+wartenden Initialisierung; sie behaupten keine vollständige Schedule-Exploration.
 
 ## Separates Ticket WG-002-MIG — Explizite Offline-Migration
 
@@ -274,7 +278,39 @@ Plugin-Worldgen-Events oder neuen Terrainalgorithmen implementiert.
    folgen nach Persistenz und Consumeraktivierung über GEN-02 und weitere
    Generatorfeaturetickets.
 
-Grober Aufwand für WG-002 allein: **3–5 Personentage** einschließlich
-Parallelitäts-/Cutpointtests und Review. Migration sowie Sim-/App-Wiring werden
-separat umgesetzt und geschätzt. Diese Vorbereitung hat keine Produktionsdatei
-verändert und keine Builds oder Tests durchgeführt.
+## Umsetzungsbefund und Nachweis
+
+- Neues öffentliches `GenerationKey` (private Felder, typisierte Getter),
+  `GenerationInitialization` und Limit `MAX_GENERATION_IDENTITIES = 4096`.
+- Traitdefaults und Legacyinstanzen liefern `GenerationMetadataUnsupported`.
+  Neuer InMemory-Constructor: `with_generation_metadata`; neuer redb-Opener:
+  `open_with_generation_metadata`. Der alte Opener ist weiterhin Format 3.
+- Admission umfasst `save_chunk`, `save_chunks`, `save_chunk_overlays`,
+  `save_entity`, `save_entities`, `save_player`, `append_block_mutations` und
+  `append_block_mutation_batch`, einschließlich leerer Journalanfragen/Receipts.
+  Memory koordiniert auch `delete_chunk`, `delete_entity`, `delete_player`.
+  redb Deletes bleiben durch die gemeinsamen Write-Transactions serialisiert.
+- Generationstabelle prüft Typ/Katalog, exakt acht Schlüsselbytes und exakt
+  27 Wertbytes, Decoderfehler jeder WG-001-Familie und den Descriptorcap. Kein
+  Record wird beim Öffnen normalisiert oder zur Rekonstruktion eines Seeds benutzt.
+- Fehlende Identität/Mismatch/Migration -> `ServerError::InvalidState`;
+  Metadatencap -> `Capacity`; alter Modus -> `Unsupported`; malformed Key und
+  Decoderfehler -> `Internal` mit genauer `StorageError`-Ursache/Key im Diagnostic.
+  Falscher Versionmarker/Katalog/Tabellentyp behält die vorhandene
+  `IncompatiblePreAlphaData`-/`InvalidState`-Klassifikation. Operative Fehler
+  bleiben Backendfehler. Der vorhandene `ServerError`-Vertrag transportiert
+  Diagnostik, keinen neuen typisierten Storage-Source-Downcast.
+- RED: der zuerst hinzugefügte öffentliche Test konnte ohne neue API nicht
+  kompilieren. Dies ist Compile-RED, kein behaupteter Laufzeit-Verhaltens-RED.
+- `/home/jstrauss/.cargo/bin/cargo test -p ferrumc-storage`: **146 grün**
+  (116 Unit, 7 Metadatenintegration, 13 redb-Roundtrip, 9 Memory-Roundtrip,
+  1 Rustdoc; keine ignorierten Tests).
+- `/home/jstrauss/.cargo/bin/cargo clippy -p ferrumc-storage --all-targets -- -D warnings`:
+  bestanden. Owned-file-Rustfmt mit Edition 2021 und `skip_children=true`:
+  bestanden. Keine Dependencies/Cargo-, Fremdcrate- oder generierten Änderungen.
+
+Diese Umsetzung aktiviert keine neue produktive Weltbasis. Separate Migration
+und Verbraucheraktivierung bleiben zwingende Folgetickets. Source-Referenzprüfung
+und Transaktions-/Retrytests sind kein Vanilla-/Paper-Runtimeabnahmebeleg.
+Die ursprüngliche Schätzung für WG-002 allein war 3–5 Personentage einschließlich
+Review; Migration und Sim-/App-Wiring werden weiterhin separat geschätzt.

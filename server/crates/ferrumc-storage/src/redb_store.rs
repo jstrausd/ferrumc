@@ -15,6 +15,8 @@
 //! - `ferrumc:chunk`, `ferrumc:entity`, `ferrumc:player`, `ferrumc:plugin` —
 //!   raw `&[u8] -> &[u8]`, with typed keys and versioned records encoded by the
 //!   private [`crate::codec`] module.
+//! - Format 4 additionally stores immutable WG-001 descriptors in
+//!   `ferrumc:generation`; the legacy opener still uses format 3.
 //!
 //! # Async strategy
 //!
@@ -34,10 +36,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ferrumc_core::{PlayerId, PluginId, Result, ServerError};
-use redb::{Database, ReadableTable, TableDefinition, TableHandle};
+use ferrumc_world::GenerationIdentity;
+use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition, TableHandle};
 
 use crate::codec;
 use crate::error::StorageError;
+use crate::generation::{compare_identity, decode_identity, GenerationMode};
 use crate::key::{ChunkKey, EntityKey, StorageKey};
 use crate::record::{
     BlockMutationLogRecord, ChunkOverlayRecord, ChunkRecord, EntityRecord, PlayerRecord,
@@ -45,7 +49,10 @@ use crate::record::{
 use crate::store::{
     journal_id_range, PlayerStore, PluginStore, WorldStore, MAX_PLUGIN_VALUE_LEN, MAX_SAVE_BATCH,
 };
-use crate::{JournalAppendReceipt, JournalBatchId};
+use crate::{
+    GenerationInitialization, GenerationKey, JournalAppendReceipt, JournalBatchId,
+    MAX_GENERATION_IDENTITIES,
+};
 
 /// On-disk layout version recorded in the metadata table.
 ///
@@ -53,6 +60,12 @@ use crate::{JournalAppendReceipt, JournalBatchId};
 /// table/byte layout of the database file. Opening a file written under a
 /// different value fails rather than risking a misread.
 const STORE_FORMAT_VERSION: u64 = 3;
+
+/// Explicitly opted-in layout; independent of record/identity envelope schemas.
+const GENERATION_STORE_FORMAT_VERSION: u64 = 4;
+
+const GENERATION_TABLE: TableDefinition<'_, &[u8], &[u8]> =
+    TableDefinition::new("ferrumc:generation");
 
 /// Metadata key under which [`STORE_FORMAT_VERSION`] is stored.
 const META_FORMAT_KEY: &str = "format_version";
@@ -147,7 +160,10 @@ fn schema_table_err(err: redb::TableError) -> ServerError {
 ///
 /// Adding or removing a durable table requires a format-version change, so an
 /// existing current-version file cannot silently grow a missing table.
-fn validate_existing_table_catalog(txn: &redb::WriteTransaction) -> Result<()> {
+fn validate_existing_table_catalog(
+    txn: &redb::WriteTransaction,
+    mode: GenerationMode,
+) -> Result<()> {
     let expected = [
         META_TABLE.name(),
         CHUNK_TABLE.name(),
@@ -158,9 +174,12 @@ fn validate_existing_table_catalog(txn: &redb::WriteTransaction) -> Result<()> {
         MUTATION_LOG_TABLE.name(),
         MUTATION_BATCH_TABLE.name(),
     ];
+    let expected_count = expected.len() + usize::from(mode == GenerationMode::Metadata);
     let mut found = 0;
     for table in txn.list_tables().map_err(backend_err)? {
-        if !expected.contains(&table.name()) {
+        if !(expected.contains(&table.name())
+            || mode == GenerationMode::Metadata && table.name() == GENERATION_TABLE.name())
+        {
             return Err(incompatible_data_err());
         }
         found += 1;
@@ -171,8 +190,119 @@ fn validate_existing_table_catalog(txn: &redb::WriteTransaction) -> Result<()> {
         .map_err(backend_err)?
         .next()
         .is_some();
-    if has_multimap_tables || found != expected.len() {
+    if has_multimap_tables || found != expected_count {
         return Err(incompatible_data_err());
+    }
+    Ok(())
+}
+
+/// Streams and validates the bounded descriptor table without copying raw rows.
+fn validate_generation_table(
+    table: &impl ReadableTable<&'static [u8], &'static [u8]>,
+) -> Result<usize> {
+    let mut count = 0;
+    for entry in table.iter().map_err(backend_err)? {
+        let (key, value) = entry.map_err(backend_err)?;
+        let key = GenerationKey::decode(key.value())?;
+        decode_identity(key, value.value())?;
+        count += 1;
+        if count > MAX_GENERATION_IDENTITIES {
+            return Err(StorageError::GenerationIdentityLimit {
+                max: MAX_GENERATION_IDENTITIES,
+            }
+            .into());
+        }
+    }
+    Ok(count)
+}
+
+/// All six categories are checked under the same exclusive redb transaction.
+fn world_state_is_empty(txn: &redb::WriteTransaction) -> Result<bool> {
+    let meta = txn.open_table(META_TABLE).map_err(backend_err)?;
+    if meta
+        .get(META_LAST_MUTATION_ID_KEY)
+        .map_err(backend_err)?
+        .is_some()
+    {
+        return Ok(false);
+    }
+    drop(meta);
+    for definition in [
+        CHUNK_TABLE,
+        CHUNK_OVERLAY_TABLE,
+        ENTITY_TABLE,
+        PLAYER_TABLE,
+        MUTATION_LOG_TABLE,
+        MUTATION_BATCH_TABLE,
+    ] {
+        if !txn
+            .open_table(definition)
+            .map_err(backend_err)?
+            .is_empty()
+            .map_err(backend_err)?
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The production helper also exposes the insert-before-commit cutpoint to tests.
+fn ensure_generation_in_transaction(
+    txn: &redb::WriteTransaction,
+    key: GenerationKey,
+    requested: GenerationIdentity,
+) -> Result<GenerationInitialization> {
+    let mut table = txn.open_table(GENERATION_TABLE).map_err(backend_err)?;
+    let encoded_key = key.encode();
+    if let Some(stored) = table.get(encoded_key.as_slice()).map_err(backend_err)? {
+        return Ok(compare_identity(
+            key,
+            decode_identity(key, stored.value())?,
+            requested,
+        )?);
+    }
+    let count = validate_generation_table(&table)?;
+    if !world_state_is_empty(txn)? {
+        return Err(StorageError::MissingGenerationIdentity { key: Some(key) }.into());
+    }
+    if count >= MAX_GENERATION_IDENTITIES {
+        return Err(StorageError::GenerationIdentityLimit {
+            max: MAX_GENERATION_IDENTITIES,
+        }
+        .into());
+    }
+    let value = requested.encode();
+    table
+        .insert(encoded_key.as_slice(), value.as_slice())
+        .map_err(backend_err)?;
+    Ok(GenerationInitialization::Initialized)
+}
+
+/// Checks save admission inside the same transaction as the payload write.
+fn require_generation(
+    txn: &redb::WriteTransaction,
+    mode: GenerationMode,
+    key: Option<GenerationKey>,
+) -> Result<()> {
+    if mode == GenerationMode::Legacy {
+        return Ok(());
+    }
+    let table = txn.open_table(GENERATION_TABLE).map_err(backend_err)?;
+    if let Some(key) = key {
+        let encoded = key.encode();
+        let stored = table
+            .get(encoded.as_slice())
+            .map_err(backend_err)?
+            .ok_or(StorageError::MissingGenerationIdentity { key: Some(key) })?;
+        decode_identity(key, stored.value())?;
+    } else {
+        let mut entries = table.iter().map_err(backend_err)?;
+        let (key, value) = entries
+            .next()
+            .ok_or(StorageError::MissingGenerationIdentity { key: None })?
+            .map_err(backend_err)?;
+        decode_identity(GenerationKey::decode(key.value())?, value.value())?;
     }
     Ok(())
 }
@@ -275,13 +405,15 @@ fn decode_journal_receipt(
 /// A durable, redb-backed store implementing [`WorldStore`], [`PlayerStore`],
 /// and [`PluginStore`].
 ///
-/// Construct one with [`RedbStore::open`] and share it with `Arc` to hand the
+/// Construct one with [`RedbStore::open`] (legacy format 3) or explicitly opt in
+/// through [`RedbStore::open_with_generation_metadata`] (format 4). Share it with `Arc` to hand the
 /// simulation and plugin layers `Arc<dyn WorldStore>` (and friends). The
 /// underlying database handle is private and never exposed.
 pub struct RedbStore {
     /// The redb handle. Private and `Arc`-shared so it can be cloned into each
     /// `spawn_blocking` closure; it never leaves this crate.
     db: Arc<Database>,
+    generation_mode: GenerationMode,
 }
 
 impl fmt::Debug for RedbStore {
@@ -304,7 +436,21 @@ impl RedbStore {
     /// This is synchronous I/O and must be called outside the async hot path
     /// (for example during startup), not from inside a running tick.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
+        Self::open_mode(path.as_ref(), GenerationMode::Legacy)
+    }
+
+    /// Opens or creates only the explicitly enabled format-4 metadata layout.
+    ///
+    /// Format 3 returns `GenerationMigrationRequired` without changing records
+    /// or tables. This does not perform migration or infer any historical seed.
+    /// Scoped world saves require their exact baseline; player/journal writes
+    /// require at least one identity because those records lack scope handles.
+    /// Synchronous startup I/O must be kept outside the async hot path.
+    pub fn open_with_generation_metadata(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_mode(path.as_ref(), GenerationMode::Metadata)
+    }
+
+    fn open_mode(path: &Path, mode: GenerationMode) -> Result<Self> {
         let (db, origin) = match OpenOptions::new()
             .read(true)
             .write(true)
@@ -321,14 +467,21 @@ impl RedbStore {
             ),
             Err(err) => return Err(backend_err(err)),
         };
-        Self::initialize(&db, origin)?;
-        Ok(Self { db: Arc::new(db) })
+        Self::initialize(&db, origin, mode)?;
+        Ok(Self {
+            db: Arc::new(db),
+            generation_mode: mode,
+        })
     }
 
     /// Ensures every table exists and the format version is present and
     /// compatible, in a single write transaction.
-    fn initialize(db: &Database, origin: StoreOrigin) -> Result<()> {
+    fn initialize(db: &Database, origin: StoreOrigin, mode: GenerationMode) -> Result<()> {
         let txn = db.begin_write().map_err(backend_err)?;
+        let version = match mode {
+            GenerationMode::Legacy => STORE_FORMAT_VERSION,
+            GenerationMode::Metadata => GENERATION_STORE_FORMAT_VERSION,
+        };
         {
             // The format marker is the gate for every table and record below.
             // Checking it first prevents corrupt or legacy data from being
@@ -339,10 +492,12 @@ impl RedbStore {
                 .map_err(backend_err)?
                 .map(|guard| guard.value());
             match (origin, existing) {
-                (_, Some(STORE_FORMAT_VERSION)) => {}
+                (_, Some(stored)) if stored == version => {}
+                (_, Some(STORE_FORMAT_VERSION)) if mode == GenerationMode::Metadata => {
+                    return Err(StorageError::GenerationMigrationRequired.into());
+                }
                 (StoreOrigin::Fresh, None) => {
-                    meta.insert(META_FORMAT_KEY, STORE_FORMAT_VERSION)
-                        .map_err(backend_err)?;
+                    meta.insert(META_FORMAT_KEY, version).map_err(backend_err)?;
                 }
                 (_, Some(_)) | (StoreOrigin::Existing, None) => {
                     return Err(incompatible_data_err());
@@ -350,7 +505,7 @@ impl RedbStore {
             }
         }
         if matches!(origin, StoreOrigin::Existing) {
-            validate_existing_table_catalog(&txn)?;
+            validate_existing_table_catalog(&txn, mode)?;
         }
 
         // Create the data tables up front so later read transactions never fail
@@ -359,6 +514,10 @@ impl RedbStore {
         txn.open_table(ENTITY_TABLE).map_err(schema_table_err)?;
         txn.open_table(PLAYER_TABLE).map_err(schema_table_err)?;
         txn.open_table(PLUGIN_TABLE).map_err(schema_table_err)?;
+        if mode == GenerationMode::Metadata {
+            let table = txn.open_table(GENERATION_TABLE).map_err(schema_table_err)?;
+            validate_generation_table(&table)?;
+        }
         // Keep every current table under the same initialization transaction.
         // If validation of current-format data fails, dropping this transaction
         // abandons initialization without modifying existing data.
@@ -411,6 +570,48 @@ impl RedbStore {
 
 #[async_trait]
 impl WorldStore for RedbStore {
+    async fn load_generation_identity(
+        &self,
+        key: GenerationKey,
+    ) -> Result<Option<GenerationIdentity>> {
+        if self.generation_mode == GenerationMode::Legacy {
+            return Err(StorageError::GenerationMetadataUnsupported.into());
+        }
+        let db = Arc::clone(&self.db);
+        tokio::task::spawn_blocking(move || -> Result<Option<GenerationIdentity>> {
+            let txn = db.begin_read().map_err(backend_err)?;
+            let table = txn.open_table(GENERATION_TABLE).map_err(backend_err)?;
+            let encoded = key.encode();
+            table
+                .get(encoded.as_slice())
+                .map_err(backend_err)?
+                .map(|guard| decode_identity(key, guard.value()))
+                .transpose()
+                .map_err(Into::into)
+        })
+        .await
+        .map_err(join_err)?
+    }
+
+    async fn ensure_generation_identity(
+        &self,
+        key: GenerationKey,
+        requested: GenerationIdentity,
+    ) -> Result<GenerationInitialization> {
+        if self.generation_mode == GenerationMode::Legacy {
+            return Err(StorageError::GenerationMetadataUnsupported.into());
+        }
+        let db = Arc::clone(&self.db);
+        tokio::task::spawn_blocking(move || -> Result<GenerationInitialization> {
+            let txn = db.begin_write().map_err(backend_err)?;
+            let initialized = ensure_generation_in_transaction(&txn, key, requested)?;
+            txn.commit().map_err(backend_err)?;
+            Ok(initialized)
+        })
+        .await
+        .map_err(join_err)?
+    }
+
     async fn load_chunk(&self, key: ChunkKey) -> Result<Option<ChunkRecord>> {
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Option<ChunkRecord>> {
@@ -441,9 +642,15 @@ impl WorldStore for RedbStore {
             }
             .into());
         }
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            require_generation(
+                &txn,
+                mode,
+                Some(GenerationKey::new(key.world(), key.dimension())),
+            )?;
             {
                 let mut table = txn.open_table(CHUNK_TABLE).map_err(backend_err)?;
                 let key_bytes = codec::chunk_key_bytes(key);
@@ -466,9 +673,17 @@ impl WorldStore for RedbStore {
             }
             .into());
         }
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            for (key, _) in &chunks {
+                require_generation(
+                    &txn,
+                    mode,
+                    Some(GenerationKey::new(key.world(), key.dimension())),
+                )?;
+            }
             {
                 // The whole batch commits in one transaction: a single atomic
                 // flush rather than one commit per chunk.
@@ -543,9 +758,17 @@ impl WorldStore for RedbStore {
             }
             .into());
         }
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            for (key, _) in &overlays {
+                require_generation(
+                    &txn,
+                    mode,
+                    Some(GenerationKey::new(key.world(), key.dimension())),
+                )?;
+            }
             {
                 // One atomic commit for the whole overlay batch, mirroring
                 // `save_chunks`.
@@ -579,12 +802,14 @@ impl WorldStore for RedbStore {
             }
             .into());
         }
-        if mutations.is_empty() {
+        if mutations.is_empty() && self.generation_mode == GenerationMode::Legacy {
             return Ok(());
         }
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            require_generation(&txn, mode, None)?;
             let previous_last_id = {
                 let meta = txn.open_table(META_TABLE).map_err(backend_err)?;
                 let last_id = meta
@@ -648,11 +873,13 @@ impl WorldStore for RedbStore {
             }
             .into());
         }
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<JournalAppendReceipt> {
             // A write transaction serializes same-token races and makes the
             // receipt, sequence metadata, and journal records one durable fact.
             let txn = db.begin_write().map_err(backend_err)?;
+            require_generation(&txn, mode, None)?;
             let existing_receipt = {
                 let receipts = txn.open_table(MUTATION_BATCH_TABLE).map_err(backend_err)?;
                 let persisted = receipts
@@ -759,9 +986,15 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            require_generation(
+                &txn,
+                mode,
+                Some(GenerationKey::new(key.world(), key.dimension())),
+            )?;
             {
                 let mut table = txn.open_table(ENTITY_TABLE).map_err(backend_err)?;
                 let key_bytes = codec::entity_key_bytes(key);
@@ -784,9 +1017,17 @@ impl WorldStore for RedbStore {
             }
             .into());
         }
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            for (key, _) in &entities {
+                require_generation(
+                    &txn,
+                    mode,
+                    Some(GenerationKey::new(key.world(), key.dimension())),
+                )?;
+            }
             {
                 let mut table = txn.open_table(ENTITY_TABLE).map_err(backend_err)?;
                 for (key, record) in &entities {
@@ -837,9 +1078,11 @@ impl PlayerStore for RedbStore {
     }
 
     async fn save_player(&self, id: PlayerId, record: PlayerRecord) -> Result<()> {
+        let mode = self.generation_mode;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<()> {
             let txn = db.begin_write().map_err(backend_err)?;
+            require_generation(&txn, mode, None)?;
             {
                 let mut table = txn.open_table(PLAYER_TABLE).map_err(backend_err)?;
                 let key_bytes = codec::player_key_bytes(id);
@@ -950,6 +1193,9 @@ impl PluginStore for RedbStore {
         join.await.map_err(join_err)?
     }
 }
+
+#[cfg(test)]
+mod generation_tests;
 
 #[cfg(test)]
 mod tests {

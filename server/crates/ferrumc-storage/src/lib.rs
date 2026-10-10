@@ -4,6 +4,7 @@
 
 mod codec;
 mod error;
+mod generation;
 mod journal;
 mod key;
 mod memory;
@@ -13,6 +14,7 @@ mod schema;
 mod store;
 
 pub use error::StorageError;
+pub use generation::{GenerationInitialization, GenerationKey, MAX_GENERATION_IDENTITIES};
 pub use journal::{JournalAppendReceipt, JournalBatchId};
 pub use key::{ChunkKey, EntityKey, StorageKey, MAX_PLUGIN_KEY_LEN};
 pub use memory::InMemoryStore;

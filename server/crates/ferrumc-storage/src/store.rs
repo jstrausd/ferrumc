@@ -22,12 +22,15 @@
 
 use async_trait::async_trait;
 use ferrumc_core::{PlayerId, PluginId, Result, ServerError};
+use ferrumc_world::GenerationIdentity;
 
 use crate::key::{ChunkKey, EntityKey, StorageKey};
 use crate::record::{
     BlockMutationLogRecord, ChunkOverlayRecord, ChunkRecord, EntityRecord, PlayerRecord,
 };
-use crate::{JournalAppendReceipt, JournalBatchId};
+use crate::{
+    GenerationInitialization, GenerationKey, JournalAppendReceipt, JournalBatchId, StorageError,
+};
 
 /// Maximum number of items accepted in a single batched save call.
 ///
@@ -50,6 +53,35 @@ pub const MAX_PLUGIN_VALUE_LEN: usize = 1024 * 1024;
 #[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait WorldStore: Send + Sync {
+    /// Loads the immutable baseline identity for this world/dimension scope.
+    ///
+    /// Only explicitly enabled metadata backends support this contract. Legacy
+    /// instances and implementations using this default return `Unsupported`;
+    /// they never disguise absent support as an empty metadata record.
+    async fn load_generation_identity(
+        &self,
+        _key: GenerationKey,
+    ) -> Result<Option<GenerationIdentity>> {
+        Err(StorageError::GenerationMetadataUnsupported.into())
+    }
+
+    /// Atomically initializes or confirms the exact generation baseline.
+    ///
+    /// Existing identities cannot be changed. A missing identity can be created
+    /// only while all world-bearing store state is empty, including player and
+    /// journal records/receipts. Plugin KV alone does not prevent initialization.
+    /// No historical seed is inferred. Explicit metadata mode admits scoped
+    /// chunk/overlay/entity saves only after confirmation, and player/journal
+    /// saves only after at least one identity exists. The latter records have
+    /// no world/dimension handles, so this is not precise scope attribution.
+    async fn ensure_generation_identity(
+        &self,
+        _key: GenerationKey,
+        _requested: GenerationIdentity,
+    ) -> Result<GenerationInitialization> {
+        Err(StorageError::GenerationMetadataUnsupported.into())
+    }
+
     /// Loads the chunk at `key`, or `Ok(None)` if no chunk is stored there.
     async fn load_chunk(&self, key: ChunkKey) -> Result<Option<ChunkRecord>>;
 

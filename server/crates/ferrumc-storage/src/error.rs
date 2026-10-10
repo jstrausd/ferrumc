@@ -2,9 +2,9 @@
 
 use ferrumc_core::ServerError;
 use ferrumc_math::{BlockPos, ChunkPos};
-use ferrumc_world::BlockEntityCodecError;
+use ferrumc_world::{BlockEntityCodecError, GenerationError, GenerationIdentity};
 
-use crate::JournalBatchId;
+use crate::{GenerationKey, JournalBatchId};
 
 /// A classified storage failure.
 ///
@@ -21,6 +21,57 @@ use crate::JournalBatchId;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StorageError {
+    /// This instance deliberately uses the legacy metadata-free contract.
+    #[error("generation metadata is not supported by this storage mode")]
+    GenerationMetadataUnsupported,
+
+    /// The explicit format-4 opener cannot bind or migrate existing format 3.
+    #[error("generation metadata requires explicit offline migration from database format 3 to 4")]
+    GenerationMigrationRequired,
+
+    /// A save or initialization lacks the required immutable baseline.
+    #[error("missing generation identity for {key:?}; world state cannot be saved or rebound")]
+    MissingGenerationIdentity {
+        /// Requested scope, or `None` for an unscoped player/journal admission.
+        key: Option<GenerationKey>,
+    },
+
+    /// A requested baseline disagrees with the immutable stored identity.
+    #[error(
+        "generation identity mismatch for {key:?}: stored {stored:?}, requested {requested:?}"
+    )]
+    GenerationIdentityMismatch {
+        /// Scope whose baseline must remain unchanged.
+        key: GenerationKey,
+        /// Previously committed baseline.
+        stored: GenerationIdentity,
+        /// Incompatible caller proposal.
+        requested: GenerationIdentity,
+    },
+
+    /// A durable metadata key is not exactly eight bytes.
+    #[error("malformed generation key: {len} bytes (expected 8)")]
+    MalformedGenerationKey {
+        /// Actual durable key length.
+        len: usize,
+    },
+
+    /// A durable identity is malformed or selects unsupported generation rules.
+    #[error("cannot decode generation identity for {key:?}: {source}")]
+    GenerationIdentityDecode {
+        /// Scope whose persisted descriptor failed validation.
+        key: GenerationKey,
+        /// Exact WG-001 decoder failure.
+        #[source]
+        source: GenerationError,
+    },
+
+    /// Adding a new identity would exceed the store's metadata bound.
+    #[error("generation identity limit reached (maximum {max})")]
+    GenerationIdentityLimit {
+        /// Maximum permitted descriptor count.
+        max: usize,
+    },
     /// A plugin storage key exceeded the maximum accepted byte length and was
     /// rejected before being stored, to bound work done on untrusted input.
     #[error("storage key too long: {len} bytes (maximum {max})")]
@@ -235,6 +286,7 @@ impl From<StorageError> for ServerError {
             | StorageError::RecordTooLarge { .. }
             | StorageError::ChunkBlockEntityTooLarge { .. }
             | StorageError::BatchTooLarge { .. }
+            | StorageError::GenerationIdentityLimit { .. }
             | StorageError::JournalSequenceExhausted { .. } => Self::capacity(message),
             // A backend failure is an internal invariant violation.
             StorageError::JournalIdCollision { .. }
@@ -242,6 +294,8 @@ impl From<StorageError> for ServerError {
             | StorageError::InvalidJournalReceiptRange { .. }
             | StorageError::JournalReceiptMissingRecord { .. }
             | StorageError::MalformedJournalKey { .. }
+            | StorageError::MalformedGenerationKey { .. }
+            | StorageError::GenerationIdentityDecode { .. }
             | StorageError::ChunkBlockEntityNotRepresentable { .. }
             | StorageError::ChunkPositionOutsideDomain { .. }
             | StorageError::ChunkPositionMismatch { .. }
@@ -249,9 +303,12 @@ impl From<StorageError> for ServerError {
             | StorageError::DuplicateBlockEntity { .. }
             | StorageError::TrailingChunkRecordBytes { .. }
             | StorageError::Backend(_) => Self::internal(message),
-            StorageError::JournalBatchConflict { .. } | StorageError::IncompatiblePreAlphaData => {
-                Self::invalid_state(message)
-            }
+            StorageError::JournalBatchConflict { .. }
+            | StorageError::IncompatiblePreAlphaData
+            | StorageError::GenerationMigrationRequired
+            | StorageError::MissingGenerationIdentity { .. }
+            | StorageError::GenerationIdentityMismatch { .. } => Self::invalid_state(message),
+            StorageError::GenerationMetadataUnsupported => Self::unsupported(message),
             StorageError::BlockEntityCodec { source, .. } => {
                 if matches!(
                     source,
@@ -271,6 +328,53 @@ impl From<StorageError> for ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generation_causes_keep_distinct_server_error_classes() {
+        let key = GenerationKey::new(
+            ferrumc_core::WorldId::new(1),
+            ferrumc_core::DimensionId::new(2),
+        );
+        let stored = GenerationIdentity::flat_overworld(ferrumc_world::WorldSeed::new(0));
+        let requested = GenerationIdentity::flat_overworld(ferrumc_world::WorldSeed::new(1));
+        assert!(matches!(
+            ServerError::from(StorageError::GenerationMetadataUnsupported),
+            ServerError::Unsupported(_)
+        ));
+        for error in [
+            StorageError::GenerationMigrationRequired,
+            StorageError::MissingGenerationIdentity { key: Some(key) },
+            StorageError::MissingGenerationIdentity { key: None },
+            StorageError::GenerationIdentityMismatch {
+                key,
+                stored,
+                requested,
+            },
+        ] {
+            assert!(matches!(
+                ServerError::from(error),
+                ServerError::InvalidState(_)
+            ));
+        }
+        assert!(matches!(
+            ServerError::from(StorageError::GenerationIdentityLimit { max: 4096 }),
+            ServerError::Capacity(_)
+        ));
+        let decode = StorageError::GenerationIdentityDecode {
+            key,
+            source: GenerationError::InvalidLength {
+                actual: 26,
+                expected: 27,
+            },
+        };
+        assert!(std::error::Error::source(&decode).is_some());
+        for error in [StorageError::MalformedGenerationKey { len: 7 }, decode] {
+            assert!(matches!(
+                ServerError::from(error),
+                ServerError::Internal { .. }
+            ));
+        }
+    }
 
     #[test]
     fn bound_errors_map_to_capacity() {

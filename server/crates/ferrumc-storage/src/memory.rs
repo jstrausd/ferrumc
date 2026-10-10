@@ -8,12 +8,14 @@
 //! worker-thread backend lands in a later milestone.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockReadGuard};
 
 use async_trait::async_trait;
 use ferrumc_core::{PlayerId, PluginId, Result};
+use ferrumc_world::GenerationIdentity;
 
 use crate::error::StorageError;
+use crate::generation::{compare_identity, GenerationMode};
 use crate::key::{ChunkKey, EntityKey, StorageKey};
 use crate::record::{
     BlockMutationLogRecord, ChunkOverlayRecord, ChunkRecord, EntityRecord, PlayerRecord,
@@ -21,7 +23,10 @@ use crate::record::{
 use crate::store::{
     journal_id_range, PlayerStore, PluginStore, WorldStore, MAX_PLUGIN_VALUE_LEN, MAX_SAVE_BATCH,
 };
-use crate::{JournalAppendReceipt, JournalBatchId};
+use crate::{
+    GenerationInitialization, GenerationKey, JournalAppendReceipt, JournalBatchId,
+    MAX_GENERATION_IDENTITIES,
+};
 
 /// One committed idempotent batch, retained for exact normalized-payload replay.
 #[derive(Debug)]
@@ -46,6 +51,10 @@ struct MutationJournalState {
 /// simulation and plugin layers `Arc<dyn WorldStore>` (and friends).
 #[derive(Debug, Default)]
 pub struct InMemoryStore {
+    generation_mode: GenerationMode,
+    generations: RwLock<HashMap<GenerationKey, GenerationIdentity>>,
+    /// Exclusive initialization sees all world maps at one mutation boundary.
+    mutation_boundary: RwLock<()>,
     chunks: RwLock<HashMap<ChunkKey, ChunkRecord>>,
     /// Per-chunk overlays (only player-modified sections), keyed independently of
     /// the full-chunk map above.
@@ -65,6 +74,79 @@ impl InMemoryStore {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Creates an empty store with immutable generation metadata and save admission.
+    ///
+    /// Existing `new`/`default` instances retain their metadata-free contract.
+    #[must_use]
+    pub fn with_generation_metadata() -> Self {
+        Self {
+            generation_mode: GenerationMode::Metadata,
+            ..Self::default()
+        }
+    }
+
+    fn mutation_guard(&self) -> std::result::Result<Option<RwLockReadGuard<'_, ()>>, StorageError> {
+        if self.generation_mode == GenerationMode::Legacy {
+            return Ok(None);
+        }
+        self.mutation_boundary
+            .read()
+            .map(Some)
+            .map_err(|_| poisoned("mutation boundary"))
+    }
+
+    fn require_generation(
+        &self,
+        key: Option<GenerationKey>,
+    ) -> std::result::Result<(), StorageError> {
+        if self.generation_mode == GenerationMode::Legacy {
+            return Ok(());
+        }
+        let generations = self
+            .generations
+            .read()
+            .map_err(|_| poisoned("generation"))?;
+        let present = key.map_or(!generations.is_empty(), |key| {
+            generations.contains_key(&key)
+        });
+        if !present {
+            return Err(StorageError::MissingGenerationIdentity { key });
+        }
+        Ok(())
+    }
+
+    /// Caller holds the exclusive mutation boundary before checking these maps.
+    fn world_state_is_empty(&self) -> std::result::Result<bool, StorageError> {
+        if !self
+            .chunks
+            .read()
+            .map_err(|_| poisoned("chunk"))?
+            .is_empty()
+            || !self
+                .overlays
+                .read()
+                .map_err(|_| poisoned("overlay"))?
+                .is_empty()
+            || !self
+                .entities
+                .read()
+                .map_err(|_| poisoned("entity"))?
+                .is_empty()
+            || !self
+                .players
+                .read()
+                .map_err(|_| poisoned("player"))?
+                .is_empty()
+        {
+            return Ok(false);
+        }
+        let journal = self
+            .mutation_log
+            .read()
+            .map_err(|_| poisoned("mutation log"))?;
+        Ok(journal.records.is_empty() && journal.receipts.is_empty() && journal.last_id.is_none())
+    }
 }
 
 /// Builds the backend error used when a lock is poisoned.
@@ -78,6 +160,52 @@ fn poisoned(what: &str) -> StorageError {
 
 #[async_trait]
 impl WorldStore for InMemoryStore {
+    async fn load_generation_identity(
+        &self,
+        key: GenerationKey,
+    ) -> Result<Option<GenerationIdentity>> {
+        if self.generation_mode == GenerationMode::Legacy {
+            return Err(StorageError::GenerationMetadataUnsupported.into());
+        }
+        let generations = self
+            .generations
+            .read()
+            .map_err(|_| poisoned("generation"))?;
+        Ok(generations.get(&key).copied())
+    }
+
+    async fn ensure_generation_identity(
+        &self,
+        key: GenerationKey,
+        requested: GenerationIdentity,
+    ) -> Result<GenerationInitialization> {
+        if self.generation_mode == GenerationMode::Legacy {
+            return Err(StorageError::GenerationMetadataUnsupported.into());
+        }
+        let _boundary = self
+            .mutation_boundary
+            .write()
+            .map_err(|_| poisoned("mutation boundary"))?;
+        let mut generations = self
+            .generations
+            .write()
+            .map_err(|_| poisoned("generation"))?;
+        if let Some(stored) = generations.get(&key) {
+            return Ok(compare_identity(key, *stored, requested)?);
+        }
+        if !self.world_state_is_empty()? {
+            return Err(StorageError::MissingGenerationIdentity { key: Some(key) }.into());
+        }
+        if generations.len() >= MAX_GENERATION_IDENTITIES {
+            return Err(StorageError::GenerationIdentityLimit {
+                max: MAX_GENERATION_IDENTITIES,
+            }
+            .into());
+        }
+        generations.insert(key, requested);
+        Ok(GenerationInitialization::Initialized)
+    }
+
     async fn load_chunk(&self, key: ChunkKey) -> Result<Option<ChunkRecord>> {
         let map = self.chunks.read().map_err(|_| poisoned("chunk"))?;
         Ok(map.get(&key).cloned())
@@ -92,6 +220,8 @@ impl WorldStore for InMemoryStore {
             .into());
         }
         record.validate()?;
+        let _boundary = self.mutation_guard()?;
+        self.require_generation(Some(GenerationKey::new(key.world(), key.dimension())))?;
         let mut map = self.chunks.write().map_err(|_| poisoned("chunk"))?;
         map.insert(key, record);
         Ok(())
@@ -115,6 +245,10 @@ impl WorldStore for InMemoryStore {
             }
             record.validate()?;
         }
+        let _boundary = self.mutation_guard()?;
+        for (key, _) in &chunks {
+            self.require_generation(Some(GenerationKey::new(key.world(), key.dimension())))?;
+        }
         let mut map = self.chunks.write().map_err(|_| poisoned("chunk"))?;
         for (key, record) in chunks {
             map.insert(key, record);
@@ -123,6 +257,8 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn delete_chunk(&self, key: ChunkKey) -> Result<bool> {
+        let _boundary = self.mutation_guard()?;
+
         let mut map = self.chunks.write().map_err(|_| poisoned("chunk"))?;
         Ok(map.remove(&key).is_some())
     }
@@ -153,6 +289,10 @@ impl WorldStore for InMemoryStore {
             }
             record.validate()?;
         }
+        let _boundary = self.mutation_guard()?;
+        for (key, _) in &overlays {
+            self.require_generation(Some(GenerationKey::new(key.world(), key.dimension())))?;
+        }
         let mut map = self.overlays.write().map_err(|_| poisoned("overlay"))?;
         for (key, record) in overlays {
             map.insert(key, record);
@@ -168,6 +308,8 @@ impl WorldStore for InMemoryStore {
             }
             .into());
         }
+        let _boundary = self.mutation_guard()?;
+        self.require_generation(None)?;
         let mut log = self
             .mutation_log
             .write()
@@ -197,6 +339,8 @@ impl WorldStore for InMemoryStore {
             }
             .into());
         }
+        let _boundary = self.mutation_guard()?;
+        self.require_generation(None)?;
         let mut log = self
             .mutation_log
             .write()
@@ -249,6 +393,8 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
+        let _boundary = self.mutation_guard()?;
+        self.require_generation(Some(GenerationKey::new(key.world(), key.dimension())))?;
         let mut map = self.entities.write().map_err(|_| poisoned("entity"))?;
         map.insert(key, record);
         Ok(())
@@ -262,6 +408,10 @@ impl WorldStore for InMemoryStore {
             }
             .into());
         }
+        let _boundary = self.mutation_guard()?;
+        for (key, _) in &entities {
+            self.require_generation(Some(GenerationKey::new(key.world(), key.dimension())))?;
+        }
         let mut map = self.entities.write().map_err(|_| poisoned("entity"))?;
         for (key, record) in entities {
             map.insert(key, record);
@@ -270,6 +420,8 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
+        let _boundary = self.mutation_guard()?;
+
         let mut map = self.entities.write().map_err(|_| poisoned("entity"))?;
         Ok(map.remove(&key).is_some())
     }
@@ -283,12 +435,16 @@ impl PlayerStore for InMemoryStore {
     }
 
     async fn save_player(&self, id: PlayerId, record: PlayerRecord) -> Result<()> {
+        let _boundary = self.mutation_guard()?;
+        self.require_generation(None)?;
         let mut map = self.players.write().map_err(|_| poisoned("player"))?;
         map.insert(id, record);
         Ok(())
     }
 
     async fn delete_player(&self, id: PlayerId) -> Result<bool> {
+        let _boundary = self.mutation_guard()?;
+
         let mut map = self.players.write().map_err(|_| poisoned("player"))?;
         Ok(map.remove(&id).is_some())
     }
@@ -330,6 +486,9 @@ impl PluginStore for InMemoryStore {
             .unwrap_or_default())
     }
 }
+
+#[cfg(test)]
+mod generation_tests;
 
 #[cfg(test)]
 mod tests {
