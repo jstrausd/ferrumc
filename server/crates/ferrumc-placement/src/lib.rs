@@ -673,13 +673,82 @@ fn fence_gate_in_wall(
     has_wall(neighbors, position.offset(left)) || has_wall(neighbors, position.offset(right))
 }
 
+/// Updates one horizontal connection of an existing fence state.
+///
+/// Sets that direction to `connected`, preserving every other property,
+/// including `waterlogged` and the three unrelated connections. This does not
+/// query neighbours, schedule fluid ticks, or mutate the world. The caller owns
+/// connectivity evaluation and the eventual neighbour-update write.
+///
+/// Returns `None` for an unknown state, a non-fence block (including fence
+/// gates), or a vertical direction.
+#[must_use]
+pub fn update_fence_connection_state(
+    existing_state: u32,
+    direction: Direction,
+    connected: bool,
+) -> Option<u32> {
+    let name = state_id_to_block_name(existing_state)?;
+    if !matches!(classify(name), Class::Fence) || !is_horizontal(direction) {
+        return None;
+    }
+    set_state_property(
+        existing_state,
+        facing_string(direction),
+        if connected { "true" } else { "false" },
+    )
+}
+
+/// Recomputes all four connections while preserving a fence's other properties.
+///
+/// Each horizontal direction is explicitly set `true` or `false` using
+/// [`NeighborQuery::is_fence_connectable`]; `waterlogged` and any other properties
+/// keep their existing values. Returns `None` for an unknown or non-fence state.
+///
+/// Use this only when all four neighbour observations are available. A normal
+/// one-direction neighbour notification should use
+/// [`update_fence_connection_state`] so an unavailable unrelated neighbour
+/// cannot clear a connection. Neither function schedules fluid ticks.
+#[must_use]
+pub fn recompute_fence_connection_state(
+    existing_state: u32,
+    position: BlockPos,
+    neighbors: &dyn NeighborQuery,
+) -> Option<u32> {
+    let name = state_id_to_block_name(existing_state)?;
+    if !matches!(classify(name), Class::Fence) {
+        return None;
+    }
+    let mut state = existing_state;
+    for (direction, connected) in fence_connections(name, position, neighbors) {
+        state = update_fence_connection_state(state, direction, connected)?;
+    }
+    Some(state)
+}
+
+/// Evaluates the existing neighbour predicate in the shared cardinal order.
+fn fence_connections(
+    fence_name: &str,
+    position: BlockPos,
+    neighbors: &dyn NeighborQuery,
+) -> [(Direction, bool); 4] {
+    CARDINALS.map(|direction| {
+        (
+            direction,
+            neighbors.is_fence_connectable(position.offset(direction), fence_name),
+        )
+    })
+}
+
 /// Resolves a fence's cardinal connectivity into a concrete state id.
 ///
 /// For each cardinal neighbour the [`NeighborQuery`] reports as connectable, the
 /// matching boolean property is set `true`; unset directions and `waterlogged`
-/// inherit the (all-false) default. Shared by [`compute_placement`]'s fence rule
-/// and the simulation's neighbour-update loop. Returns `None` only if
-/// `fence_name` is not a registry block.
+/// inherit the (all-false) default. [`compute_placement`]'s fence rule and
+/// [`recompute_fence_connection_state`] share the same connectivity evaluation.
+/// For an existing world fence, use [`update_fence_connection_state`] to retain
+/// unrelated properties. Returns `None` when the name or requested connection
+/// property cannot be resolved in the registry.
 #[must_use]
 pub fn compute_fence_connection_state(
     fence_name: &str,
@@ -687,13 +756,8 @@ pub fn compute_fence_connection_state(
     neighbors: &dyn NeighborQuery,
 ) -> Option<u32> {
     let mut props: BTreeMap<&str, &str> = BTreeMap::new();
-    for dir in [
-        Direction::North,
-        Direction::South,
-        Direction::East,
-        Direction::West,
-    ] {
-        if neighbors.is_fence_connectable(position.offset(dir), fence_name) {
+    for (dir, connected) in fence_connections(fence_name, position, neighbors) {
+        if connected {
             props.insert(facing_string(dir), "true");
         }
     }
@@ -1510,6 +1574,134 @@ mod tests {
         };
         let two = compute_placement(&ctx(OAK_FENCE, Direction::Up, 0.5, 0.0), &north_east).unwrap();
         assert_eq!(two.state_id, 6003);
+    }
+
+    #[test]
+    fn existing_waterlogged_fence_retains_water_on_connection_changes() {
+        let mut properties = BTreeMap::new();
+        properties.insert("waterlogged", "true");
+        let existing = compute_state_id("oak_fence", &properties).expect("wet fence state");
+        let position = BlockPos::new(15, 64, 15);
+        let connected_neighbors = MockNeighbors {
+            connectable: vec![position.offset(Direction::North)],
+            ..Default::default()
+        };
+        let connected = recompute_fence_connection_state(existing, position, &connected_neighbors)
+            .expect("connected fence");
+        assert_eq!(state_property(connected, "north"), Some("true"));
+        assert_eq!(state_property(connected, "waterlogged"), Some("true"));
+        let disconnected = recompute_fence_connection_state(connected, position, &NoNeighbors)
+            .expect("disconnected fence");
+        assert_eq!(state_property(disconnected, "north"), Some("false"));
+        assert_eq!(state_property(disconnected, "waterlogged"), Some("true"));
+    }
+
+    #[test]
+    fn one_fence_connection_update_preserves_every_unrelated_property() {
+        // Cover every existing state of both wooden and non-wooden fence
+        // families, including wet/dry and all combinations of other arms.
+        for name in [
+            "oak_fence",
+            "nether_brick_fence",
+            "spruce_fence",
+            "birch_fence",
+            "jungle_fence",
+            "acacia_fence",
+            "cherry_fence",
+            "dark_oak_fence",
+            "pale_oak_fence",
+            "mangrove_fence",
+            "bamboo_fence",
+            "crimson_fence",
+            "warped_fence",
+        ] {
+            let metadata = block_metadata(name).expect("pinned fence family");
+            for existing in metadata.min_state..=metadata.max_state {
+                for direction in CARDINALS {
+                    for connected in [false, true] {
+                        let updated = update_fence_connection_state(existing, direction, connected)
+                            .expect("valid horizontal fence update");
+                        assert_eq!(state_id_to_block_name(updated), Some(name));
+                        for property in metadata.properties {
+                            let expected = if property.name == facing_string(direction) {
+                                Some(if connected { "true" } else { "false" })
+                            } else {
+                                state_property(existing, property.name)
+                            };
+                            assert_eq!(
+                                state_property(updated, property.name),
+                                expected,
+                                "{name} {existing} {direction:?} {connected}: {}",
+                                property.name
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn recompute_disconnects_stale_fence_arms_without_changing_water() {
+        let mut properties = BTreeMap::new();
+        for direction in CARDINALS {
+            properties.insert(facing_string(direction), "true");
+        }
+        let position = BlockPos::new(-16, 64, 15);
+        for waterlogged in ["false", "true"] {
+            properties.insert("waterlogged", waterlogged);
+            let existing = compute_state_id("nether_brick_fence", &properties)
+                .expect("fully connected nether fence");
+            let neighbors = MockNeighbors {
+                connectable: vec![position.offset(Direction::West)],
+                ..Default::default()
+            };
+            let updated = recompute_fence_connection_state(existing, position, &neighbors)
+                .expect("recomputed fence");
+            for direction in CARDINALS {
+                assert_eq!(
+                    state_property(updated, facing_string(direction)),
+                    Some(if direction == Direction::West {
+                        "true"
+                    } else {
+                        "false"
+                    })
+                );
+            }
+            assert_eq!(state_property(updated, "waterlogged"), Some(waterlogged));
+        }
+    }
+
+    #[test]
+    fn existing_fence_updates_reject_unknown_nonfence_and_vertical_inputs() {
+        let position = BlockPos::new(0, 64, 0);
+        for existing in [
+            u32::MAX,
+            0,
+            STONE,
+            OAK_FENCE_GATE,
+            COBBLESTONE_WALL,
+            IRON_BARS,
+        ] {
+            assert_eq!(
+                update_fence_connection_state(existing, Direction::North, true),
+                None
+            );
+            assert_eq!(
+                recompute_fence_connection_state(existing, position, &NoNeighbors),
+                None
+            );
+        }
+        for direction in [Direction::Up, Direction::Down] {
+            assert_eq!(
+                update_fence_connection_state(OAK_FENCE, direction, true),
+                None
+            );
+            assert_eq!(
+                update_fence_connection_state(OAK_FENCE, direction, false),
+                None
+            );
+        }
     }
 
     #[test]
