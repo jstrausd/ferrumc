@@ -1,0 +1,11 @@
+# Independently declared schema-1 GenerationIdentity golden bytes.
+# FCGI | schema 1 | Minecraft 1.21.8 | FerrumC flat 1 | revision 1
+# | seed -0x0102030405060708 (signed i64) | Overworld 0.
+# This fixture is not emitted by the Rust encoder and is not a Paper save.
+46 43 47 49
+00 01
+00 01 00 15 00 08
+00 01
+00 00 00 01
+fe fd fc fb fa f9 f8 f8
+00

@@ -41,6 +41,40 @@
   every chunk. Layer layout: `y = -64` bedrock, `-63..=59` stone, `60..=62`
   dirt, `63` grass, `64..=319` air.
 
+## Generator identity contract
+
+- `WorldSeed` preserves the entire signed `i64` domain. This crate never
+  chooses a random seed, hashes a textual seed, or persists world metadata.
+- `GenerationIdentity` is a closed supported value: Minecraft 1.21.8,
+  `FerrumcFlat` revision 1, Overworld geometry, and an explicit numeric seed.
+  Unknown releases, algorithms, revisions, and dimensions fail decoding and
+  are never treated as the current generator. No additional terrain algorithm
+  is available through this contract.
+- Its schema-1 `FCGI` envelope is exactly 27 bytes: magic (4), big-endian schema
+  (u16), Minecraft major/minor/patch (three u16), algorithm (u16), algorithm
+  revision (u32), signed seed (i64), dimension (u8). Algorithm 1 is FerrumC flat;
+  dimension 0 is Overworld. Length is checked before any field access. Encoding
+  returns a fixed array and decoding performs no allocations.
+- Envelope schema describes metadata layout. Generator revision describes the
+  generated baseline. Changing flat layers, registry baseline, dimension
+  geometry, palette generation order or generated dirty-mask semantics needs an
+  explicit identity/version decision; changing envelope layout is independent.
+- Compatibility requires full identity equality, including seed. With the
+  current closed set, only seed changes can compare as two known incompatible
+  values; other unsupported metadata is rejected before comparison.
+- `ChunkGenerator` implementations are pure, synchronous and request-order
+  independent. A given identity and `ChunkPos` must yield the same blocks,
+  palette representation and dirty masks. The identity stays constant for the
+  lifetime of the generator. No storage/network handles or I/O enter this lane.
+- The legacy `FlatWorldGenerator::new/default` selects numeric seed 0;
+  `with_seed` selects another identity without changing seed-independent flat
+  blocks. Existing `generate` calls use the same implementation as
+  `ChunkGenerator::generate_chunk`. Generation marks network dirty sections
+  0..7 and does not mark gameplay-persist dirty/edited sections.
+- Storage metadata, overlay compatibility gates, configured seed selection,
+  multiple dimensions and natural terrain are separate consumer work. This
+  contract alone does not protect restart or migrate existing worlds.
+
 ## Block-entity persistence
 
 - `try_encode_block_entity` is the checked, versioned storage writer. Its

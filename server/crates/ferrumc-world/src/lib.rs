@@ -22,6 +22,9 @@
 //!   ([`ChunkLight`]).
 //! - [`FlatWorldGenerator`] — deterministically fills a [`Chunk`] with a flat
 //!   overworld profile (bedrock floor, stone fill, dirt, grass surface, air).
+//! - [`ChunkGenerator`] and [`GenerationIdentity`] — a pure versioned baseline
+//!   contract with an explicit numeric [`WorldSeed`]. Storage adoption and
+//!   natural terrain are separate implementation steps.
 //!
 //! The network encoder turns a [`Chunk`] into the wire bytes a 1.21.8 client
 //! expects: [`encode_chunk_section_data`] for the paletted section blob,
@@ -35,6 +38,7 @@ mod chunk;
 mod chunk_section;
 mod dirty;
 mod error;
+mod generation;
 mod generator;
 mod heightmap;
 mod network;
@@ -54,6 +58,10 @@ pub use chunk::{Chunk, ChunkLight, MAX_BLOCK_ENTITIES, SECTION_COUNT};
 pub use chunk_section::{ChunkSection, SECTION_VOLUME};
 pub use dirty::DirtySections;
 pub use error::WorldError;
+pub use generation::{
+    ChunkGenerator, GenerationDimension, GenerationError, GenerationIdentity,
+    GenerationMinecraftVersion, GeneratorKind, WorldSeed, GENERATION_IDENTITY_LEN,
+};
 pub use generator::FlatWorldGenerator;
 pub use heightmap::{Heightmap, HeightmapKind};
 pub use network::{

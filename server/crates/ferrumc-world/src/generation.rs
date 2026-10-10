@@ -1,0 +1,325 @@
+//! Versioned identities for the pure, deterministic chunk-generation contract.
+
+use ferrumc_math::ChunkPos;
+
+use crate::Chunk;
+
+/// Exact encoded length of a schema-1 [`GenerationIdentity`], in bytes.
+///
+/// The decoder accepts precisely this length before inspecting any fields and
+/// never allocates from input. The envelope schema and generator revision are
+/// independent version numbers.
+pub const GENERATION_IDENTITY_LEN: usize = 27;
+
+const IDENTITY_MAGIC: [u8; 4] = *b"FCGI";
+const IDENTITY_SCHEMA: u16 = 1;
+const FLAT_REVISION: u32 = 1;
+
+/// A numeric world seed with the signed 64-bit range used by Minecraft.
+///
+/// This value does not choose a random seed or parse a textual seed. Those are
+/// configuration decisions; generation receives the already selected number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct WorldSeed(i64);
+
+impl WorldSeed {
+    /// Wraps an explicitly chosen numeric seed without changing its bits.
+    #[must_use]
+    pub const fn new(value: i64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the selected signed 64-bit numeric seed.
+    #[must_use]
+    pub const fn value(self) -> i64 {
+        self.0
+    }
+}
+
+/// Minecraft release whose registry and generation rules an identity uses.
+///
+/// This is a closed supported set, not a claim that newer releases can run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum GenerationMinecraftVersion {
+    /// Java Edition 1.21.8, the currently pinned `FerrumC` release.
+    V1_21_8,
+}
+
+impl GenerationMinecraftVersion {
+    /// Returns the major, minor and patch release numbers.
+    #[must_use]
+    pub const fn components(self) -> [u16; 3] {
+        match self {
+            Self::V1_21_8 => [1, 21, 8],
+        }
+    }
+}
+
+/// Generator algorithm identified independently of its envelope schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum GeneratorKind {
+    /// `FerrumC`'s existing fixed-layer flat profile, not Vanilla flat settings.
+    FerrumcFlat,
+}
+
+impl GeneratorKind {
+    const fn code(self) -> u16 {
+        match self {
+            Self::FerrumcFlat => 1,
+        }
+    }
+}
+
+/// Dimension geometry and rules supported by a generation identity.
+///
+/// A dimension kind does not replace the world's runtime/storage dimension ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum GenerationDimension {
+    /// Overworld geometry: minimum Y -64, height 384.
+    Overworld,
+}
+
+impl GenerationDimension {
+    const fn code(self) -> u8 {
+        match self {
+            Self::Overworld => 0,
+        }
+    }
+}
+
+/// Complete supported identity of a reproducible generated chunk baseline.
+///
+/// Only Minecraft 1.21.8 / `FerrumC` flat revision 1 / Overworld is currently
+/// representable. Decode rejects other metadata explicitly. Seeds are retained
+/// even though the flat algorithm's blocks are seed-independent, so a seed
+/// change is still an identity change.
+///
+/// This is a value contract. It does not persist the identity or guard the
+/// existing storage/load path; those consumers must adopt it separately before
+/// a configurable or different terrain generator can safely be enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GenerationIdentity {
+    minecraft_version: GenerationMinecraftVersion,
+    generator_kind: GeneratorKind,
+    generator_revision: u32,
+    seed: WorldSeed,
+    dimension: GenerationDimension,
+}
+
+impl GenerationIdentity {
+    /// Selects the existing `FerrumC` flat revision-1 Overworld baseline.
+    #[must_use]
+    pub const fn flat_overworld(seed: WorldSeed) -> Self {
+        Self {
+            minecraft_version: GenerationMinecraftVersion::V1_21_8,
+            generator_kind: GeneratorKind::FerrumcFlat,
+            generator_revision: FLAT_REVISION,
+            seed,
+            dimension: GenerationDimension::Overworld,
+        }
+    }
+
+    /// Returns the Minecraft release whose rules this baseline uses.
+    #[must_use]
+    pub const fn minecraft_version(self) -> GenerationMinecraftVersion {
+        self.minecraft_version
+    }
+
+    /// Returns the generator algorithm, independently of its revision.
+    #[must_use]
+    pub const fn generator_kind(self) -> GeneratorKind {
+        self.generator_kind
+    }
+
+    /// Returns the algorithm revision, independently of the envelope schema.
+    #[must_use]
+    pub const fn generator_revision(self) -> u32 {
+        self.generator_revision
+    }
+
+    /// Returns the selected numeric world seed.
+    #[must_use]
+    pub const fn seed(self) -> WorldSeed {
+        self.seed
+    }
+
+    /// Returns the supported dimension geometry and rules.
+    #[must_use]
+    pub const fn dimension(self) -> GenerationDimension {
+        self.dimension
+    }
+
+    /// Encodes this identity into the fixed, allocation-free schema-1 envelope.
+    ///
+    /// Layout: `FCGI`, big-endian `u16` schema, three big-endian `u16` Minecraft
+    /// release components, `u16` algorithm, `u32` generator revision, `i64` seed,
+    /// and `u8` dimension. Every multibyte number is big-endian. Algorithm 1 is
+    /// `FerrumC` flat; dimension 0 is Overworld. This is `FerrumC` metadata, not a
+    /// Minecraft packet or Vanilla save record.
+    #[must_use]
+    pub fn encode(self) -> [u8; GENERATION_IDENTITY_LEN] {
+        let mut bytes = [0; GENERATION_IDENTITY_LEN];
+        bytes[..4].copy_from_slice(&IDENTITY_MAGIC);
+        bytes[4..6].copy_from_slice(&IDENTITY_SCHEMA.to_be_bytes());
+        let [major, minor, patch] = self.minecraft_version.components();
+        bytes[6..8].copy_from_slice(&major.to_be_bytes());
+        bytes[8..10].copy_from_slice(&minor.to_be_bytes());
+        bytes[10..12].copy_from_slice(&patch.to_be_bytes());
+        bytes[12..14].copy_from_slice(&self.generator_kind.code().to_be_bytes());
+        bytes[14..18].copy_from_slice(&self.generator_revision.to_be_bytes());
+        bytes[18..26].copy_from_slice(&self.seed.value().to_be_bytes());
+        bytes[26] = self.dimension.code();
+        bytes
+    }
+
+    /// Decodes exactly one supported identity, rejecting all trailing bytes.
+    ///
+    /// Length is checked before reading any field. Unknown schemas, releases,
+    /// algorithms, algorithm revisions and dimensions have distinct errors;
+    /// none fall back to the current flat generator.
+    pub fn decode(bytes: &[u8]) -> Result<Self, GenerationError> {
+        let bytes: &[u8; GENERATION_IDENTITY_LEN] =
+            bytes
+                .try_into()
+                .map_err(|_| GenerationError::InvalidLength {
+                    actual: bytes.len(),
+                    expected: GENERATION_IDENTITY_LEN,
+                })?;
+        let magic = [bytes[0], bytes[1], bytes[2], bytes[3]];
+        if magic != IDENTITY_MAGIC {
+            return Err(GenerationError::InvalidMagic { actual: magic });
+        }
+        let schema = u16::from_be_bytes([bytes[4], bytes[5]]);
+        if schema != IDENTITY_SCHEMA {
+            return Err(GenerationError::UnsupportedSchema { schema });
+        }
+        let major = u16::from_be_bytes([bytes[6], bytes[7]]);
+        let minor = u16::from_be_bytes([bytes[8], bytes[9]]);
+        let patch = u16::from_be_bytes([bytes[10], bytes[11]]);
+        if [major, minor, patch] != GenerationMinecraftVersion::V1_21_8.components() {
+            return Err(GenerationError::UnsupportedMinecraftVersion {
+                major,
+                minor,
+                patch,
+            });
+        }
+        let kind = u16::from_be_bytes([bytes[12], bytes[13]]);
+        if kind != GeneratorKind::FerrumcFlat.code() {
+            return Err(GenerationError::UnknownGenerator { kind });
+        }
+        let revision = u32::from_be_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]);
+        if revision != FLAT_REVISION {
+            return Err(GenerationError::UnsupportedGeneratorRevision {
+                kind: GeneratorKind::FerrumcFlat,
+                revision,
+            });
+        }
+        let seed = i64::from_be_bytes([
+            bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23], bytes[24], bytes[25],
+        ]);
+        if bytes[26] != GenerationDimension::Overworld.code() {
+            return Err(GenerationError::UnsupportedDimension {
+                dimension: bytes[26],
+            });
+        }
+        Ok(Self::flat_overworld(WorldSeed::new(seed)))
+    }
+
+    /// Requires an exact match with a stored or requested supported identity.
+    ///
+    /// The full identity participates in equality. Currently only different
+    /// seeds can produce two representable, incompatible values; other unknown
+    /// components are rejected earlier by [`Self::decode`].
+    pub fn ensure_compatible(self, actual: Self) -> Result<(), GenerationError> {
+        if self == actual {
+            Ok(())
+        } else {
+            Err(GenerationError::IncompatibleIdentity {
+                expected: self,
+                actual,
+            })
+        }
+    }
+}
+
+/// Pure, synchronous generation of a versioned deterministic chunk baseline.
+///
+/// Implementations must return the same identity throughout their lifetime and
+/// produce the same blocks, palette layout and dirty masks for a given identity
+/// and [`ChunkPos`], independent of request order or previous calls. The trait
+/// performs no I/O and owns no storage or network handles. CPU work remains
+/// synchronous so wiring can put it on the appropriate bounded worker lane.
+pub trait ChunkGenerator: Send + Sync {
+    /// Returns the algorithm, revision, release, seed and dimension contract.
+    fn identity(&self) -> GenerationIdentity;
+
+    /// Produces the deterministic baseline for the requested chunk column.
+    fn generate_chunk(&self, pos: ChunkPos) -> Chunk;
+}
+
+/// Classified failures of identity decoding or baseline compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum GenerationError {
+    /// The input was truncated or contained trailing/oversized data.
+    #[error("generation identity length {actual} does not equal {expected}")]
+    InvalidLength {
+        /// Actual input byte length.
+        actual: usize,
+        /// Required fixed envelope length.
+        expected: usize,
+    },
+    /// The fixed-length input had a different record discriminator.
+    #[error("invalid generation identity magic {actual:?}")]
+    InvalidMagic {
+        /// The input's first four bytes.
+        actual: [u8; 4],
+    },
+    /// The metadata envelope schema is not supported.
+    #[error("unsupported generation identity envelope schema {schema}")]
+    UnsupportedSchema {
+        /// Rejected schema, independently of generator revision.
+        schema: u16,
+    },
+    /// The identity belongs to a different Minecraft release.
+    #[error("unsupported generation Minecraft version {major}.{minor}.{patch}")]
+    UnsupportedMinecraftVersion {
+        /// Rejected major release number.
+        major: u16,
+        /// Rejected minor release number.
+        minor: u16,
+        /// Rejected patch release number.
+        patch: u16,
+    },
+    /// The identity selects an algorithm that `FerrumC` does not implement.
+    #[error("unknown generation algorithm {kind}")]
+    UnknownGenerator {
+        /// Rejected algorithm discriminator.
+        kind: u16,
+    },
+    /// A known algorithm's revision is not supported.
+    #[error("unsupported generation algorithm {kind:?} revision {revision}")]
+    UnsupportedGeneratorRevision {
+        /// Known algorithm whose revision was rejected.
+        kind: GeneratorKind,
+        /// Rejected algorithm revision.
+        revision: u32,
+    },
+    /// The identity selects unsupported dimension geometry or rules.
+    #[error("unsupported generation dimension {dimension}")]
+    UnsupportedDimension {
+        /// Rejected dimension discriminator.
+        dimension: u8,
+    },
+    /// Two supported identities select different generated baselines.
+    #[error("incompatible generation identity: expected {expected:?}, actual {actual:?}")]
+    IncompatibleIdentity {
+        /// Required identity, typically read from durable world metadata.
+        expected: GenerationIdentity,
+        /// Identity proposed by the caller.
+        actual: GenerationIdentity,
+    },
+}

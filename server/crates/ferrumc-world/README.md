@@ -18,6 +18,34 @@ generator:
   (`BlockEntity`).
 - `FlatWorldGenerator` — deterministically fills a `Chunk` with a flat overworld
   profile: bedrock floor, stone fill, dirt, grass surface, then air.
+- `WorldSeed`, `GenerationIdentity` and `ChunkGenerator` — explicit numeric seed
+  and versioned identity for pure, reproducible chunk generation. The current
+  executable identity is Minecraft 1.21.8 / `FerrumC` flat revision 1 / Overworld.
+
+## Generator contract
+
+`FlatWorldGenerator::new()` and `default()` select numeric seed 0 and preserve
+the existing fixed layers. `with_seed(WorldSeed::new(value))` retains another
+signed 64-bit seed in its identity. Flat blocks remain seed-independent; these
+seeds still identify different baselines. Both the existing `generate` method
+and object-safe `ChunkGenerator::generate_chunk` use the same production path.
+
+`GenerationIdentity::encode` returns a fixed 27-byte `FCGI` schema-1 envelope.
+Its big-endian fields are magic, `u16` envelope schema, three `u16` Minecraft
+release components, `u16` algorithm, `u32` generator revision, `i64` seed and
+`u8` dimension. Algorithm 1 names `FerrumC` flat; dimension 0 names Overworld.
+Envelope schema and generator revision are independent. `decode` requires the
+exact length, allocates nothing, and classifies unsupported metadata without
+falling back. `ensure_compatible` requires exact supported identity equality.
+This envelope is `FerrumC` metadata, not Vanilla NBT or protocol data.
+
+The storage/load path does not yet persist or compare this identity. A separate
+storage contract and Sim/App adoption must guard regeneration and overlay
+application before different/configurable terrain is activated. The existing
+server still serves fixed-layer flat terrain. Natural Overworld generation,
+Nether/End, textual/random seed selection and restart migration remain later
+tickets. See [WG-001 notes](../../../docs/agent-tasks/WG-001_GENERATION_CONTRACT.md)
+for pinned reference behavior and consumer dependencies.
 
 ## Block-entity storage codec
 

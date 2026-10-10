@@ -5,6 +5,7 @@ use ferrumc_registry::{block_state, dimension};
 
 use crate::block_state::BlockStateId;
 use crate::chunk::{self, Chunk, SECTION_COUNT, SECTION_EDGE};
+use crate::generation::{ChunkGenerator, GenerationIdentity, WorldSeed};
 
 /// World `y` of the bedrock floor: the very bottom of the buildable range
 /// (`dimension::MIN_Y`, `-64`).
@@ -37,12 +38,18 @@ const DEFAULT_DIRT_LAYERS: i32 = 3;
 /// chunk has every section that received a non-air block marked dirty (a freshly
 /// generated chunk has not yet been persisted or sent), so the surface and lower
 /// sections are dirty while the all-air sections above stay clean.
+///
+/// The profile is `FerrumC` flat revision 1, not Vanilla flat-generator settings.
+/// Its blocks are seed-independent; its [`GenerationIdentity`] still retains
+/// the selected seed so future consumers can detect configuration changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlatWorldGenerator {
     /// World `y` of the grass surface layer.
     surface_y: i32,
     /// Number of dirt layers directly beneath the surface.
     dirt_layers: i32,
+    /// Selected numeric seed retained in the versioned baseline identity.
+    seed: WorldSeed,
 }
 
 impl FlatWorldGenerator {
@@ -50,15 +57,36 @@ impl FlatWorldGenerator {
     /// [`FlatWorldGenerator`] (grass surface at `y = 63`, three dirt layers).
     #[must_use]
     pub const fn new() -> Self {
+        Self::with_seed(WorldSeed::new(0))
+    }
+
+    /// Selects a numeric seed for the unchanged `FerrumC` flat revision-1 profile.
+    ///
+    /// Flat terrain does not use randomness. Different seeds produce identical
+    /// blocks but different identities. This does not persist the seed.
+    #[must_use]
+    pub const fn with_seed(seed: WorldSeed) -> Self {
         Self {
             surface_y: DEFAULT_SURFACE_Y,
             dirt_layers: DEFAULT_DIRT_LAYERS,
+            seed,
         }
+    }
+
+    /// Returns this generator's complete supported baseline identity.
+    #[must_use]
+    pub const fn identity(&self) -> GenerationIdentity {
+        GenerationIdentity::flat_overworld(self.seed)
     }
 
     /// Generates the chunk at `pos`, filling it with the flat profile.
     #[must_use]
     pub fn generate(&self, pos: ChunkPos) -> Chunk {
+        ChunkGenerator::generate_chunk(self, pos)
+    }
+
+    /// Fills the existing profile; both public generation entry points use it.
+    fn generate_profile(&self, pos: ChunkPos) -> Chunk {
         let mut chunk = Chunk::new(pos);
         for section_index in 0..SECTION_COUNT {
             let Some(base_y) = chunk::section_base_y(section_index) else {
@@ -99,6 +127,16 @@ impl FlatWorldGenerator {
         } else {
             BlockStateId::new(block_state::STONE)
         }
+    }
+}
+
+impl ChunkGenerator for FlatWorldGenerator {
+    fn identity(&self) -> GenerationIdentity {
+        self.identity()
+    }
+
+    fn generate_chunk(&self, pos: ChunkPos) -> Chunk {
+        self.generate_profile(pos)
     }
 }
 
