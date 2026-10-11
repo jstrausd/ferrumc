@@ -95,6 +95,19 @@ identities are checked local resources, with no wire/persisted-ID assignment.
 Source/session scheduling, custom parameter/source producers, surface rules,
 carvers, features, structures and active natural worlds remain separate work.
 
+The immutable `biome_zoom` producer now implements original seed obfuscation
+and block-to-quart biome zoom for every signed32 block axis. `BiomeZoomSeed`
+is distinct from `WorldSeed`, and its output-only `BiomeQuartPos` is distinct
+from checked density coordinates. Explicit Vanilla/Paper contracts preserve
+wrapping coordinates, LCG steps, distance arithmetic and first-minimum ties.
+Selection evaluates exactly eight corners without allocation or source calls.
+The [biome-zoom oracle](tests/reference/biome_zoom.md) compares actual original
+hashes, all1024 fiddle buckets,49 LCG controls,6815 selections and54520 separate
+distance probes in each mode. Four genuine equal-minimum cases select the
+first corner; both original modes have identical value bytes in this corpus.
+This computes coordinates only; eventual source resolution and original
+surface rules remain separate consumers.
+
 This crate owns the world's block-storage value types and a flat-world
 generator:
 

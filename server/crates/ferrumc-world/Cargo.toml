@@ -16,6 +16,9 @@ ferrumc-registry = { workspace = true }
 ferrumc-items = { workspace = true }
 # Original Xoroshiro positional names use MD5-128, already pinned in the workspace lock.
 md5 = { package = "md-5", version = "0.10" }
+# BiomeManager's seed obfuscation hashes eight little-endian bytes with SHA-256.
+# Version is already pinned in the workspace lock; this producer uses no I/O.
+sha2 = "=0.10.9"
 # Bounded builtin JSON string/escape decoding and structural oracle JSON.
 # Number tokens are retained by World's own checked lexer and independently
 # decoded as original FLOAT/DOUBLE/INT. No runtime I/O or sampling API is added.

@@ -1,0 +1,37 @@
+{
+  "all_residue_combinations": 64,
+  "counts": {
+    "D": 54520,
+    "F": 2048,
+    "G": 6815,
+    "H": 11,
+    "L": 49
+  },
+  "exploration": {
+    "initial_candidates": 513216,
+    "original_getBiome_invoked_in_exploration": false,
+    "random_candidates": 23887872,
+    "structured_candidates": 8192000,
+    "structured_equal_minimum_candidates": 1
+  },
+  "independent_hashlib_used_only_for_distance_probe_seed_inputs": true,
+  "request_sha256": "9f044930afd9ad3ab4f2d4091c109483d8e9ab6ba184e4897b86d80ff6ea5cfa",
+  "rows": 63443,
+  "scope": "Explicit probe inputs only; no original expected output computed here",
+  "selection_groups": {
+    "axis-seam": 819,
+    "tie-candidate": 4,
+    "world-residue": 3584,
+    "wrap-corner": 1512,
+    "zoom-residue": 896
+  },
+  "world_seeds": [
+    0,
+    1,
+    -1,
+    -9223372036854775808,
+    9223372036854775807,
+    81985529216486895,
+    -81985529216486895
+  ]
+}

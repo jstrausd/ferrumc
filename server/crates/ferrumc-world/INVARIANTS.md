@@ -2,6 +2,26 @@
 
 > Rules that must hold for all code in this crate. Violating these is a bug.
 
+## Original biome zoom coordinate selection
+
+- `BiomeZoomSeed` preserves original Guava SHA-256 seed obfuscation: eight
+  little-endian world-seed bytes, first eight digest bytes read little-endian.
+  Already-obfuscated bits require their own explicit constructor; a
+  `WorldSeed` never converts implicitly or hashes again inside selection.
+- `BiomeZoom` selects explicit Vanilla1.21.8 or Paper1.21.8-build60 semantics.
+  All signed32 `BlockPos` axes apply Java wrapping subtraction before signed
+  shifts. Every query evaluates exactly eight corners in X/Y/Z bit4/2/1 order
+  and64 wrapping signed64 LCG steps. SquareZ + squareY + squareX and strict
+  first-minimum comparison preserve the actual original arithmetic order.
+- Selection is immutable and allocation-free, with no source callback, cache,
+  budget, poison state, I/O or mutable global. Its output-only `BiomeQuartPos`
+  is distinct from density's checked `ClimateQuartPos`; eventual consumers
+  must explicitly admit density coordinates or choose an actual source.
+- This module produces coordinates only. It adds no implicit Plains resource,
+  height clamp, wire/storage ID, biome resolver, surface/carver rule or live
+  generator activation. Original source delegation is evidence in the oracle,
+  not behavior implemented by this producer.
+
 ## Original biome selection and complete biome arrays
 
 - `BiomeTree` consumes only checked builtin ordered parameter resources. It

@@ -1,0 +1,212 @@
+{
+  "counts": {
+    "D": 54520,
+    "F": 2048,
+    "G": 6815,
+    "H": 11,
+    "L": 49
+  },
+  "input_pins_sha256": "6ff3b436cec31abb010ce5fe0fb051a2bd2358ceecb11380e58d25541bd610e6",
+  "original_normal_manifest_sha256": "66031f764ca13912260b50cd820a470dc0db77c9cc9d9226d4249d8d68eee21b",
+  "original_optimized_manifest_sha256": "accf7b2686009c5e6a095e7be0ed87590a627e2e14b4d29bcadeb6bfd2c6cf18",
+  "original_values_sha256": "987e0beaea65cd564acc7e9f4a743e2212105f37430a36fe710f64d45c2f30ce",
+  "requests_sha256": "9f044930afd9ad3ab4f2d4091c109483d8e9ab6ba184e4897b86d80ff6ea5cfa",
+  "scope": "Complete actual original method values; Vanilla/Paper outputs byte-identical and stored once; both original provenance manifests retained in review evidence",
+  "tie_cases": {
+    "paper": [
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-0",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      },
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-1",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      },
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-2",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      },
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-3",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      }
+    ],
+    "vanilla": [
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-0",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      },
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-1",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      },
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-2",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      },
+      {
+        "genuine_distance_bits": [
+          "3ff0a40f5c28f5c2",
+          "3ffcfdb1428f5c29",
+          "3fe07d54eb851eb8",
+          "3ff9b21b73333334",
+          "3fe07d54eb851eb8",
+          "3ff4404473333333",
+          "3fe567cfb851eb86",
+          "3feb4f9d75c28f5e"
+        ],
+        "label": "tie-candidate-3",
+        "minimum_corners": [
+          2,
+          4
+        ],
+        "selected_corner": 2,
+        "selected_quart": [
+          33554432,
+          -33554431,
+          33554432
+        ]
+      }
+    ]
+  },
+  "vanilla_paper_differences": {
+    "D": 0,
+    "F": 0,
+    "G": 0,
+    "H": 0,
+    "L": 0
+  }
+}

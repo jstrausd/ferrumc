@@ -780,6 +780,7 @@ dependencies = [
  "ferrumc-registry",
  "md-5",
  "serde_json",
+ "sha2",
  "thiserror",
 ]
 
