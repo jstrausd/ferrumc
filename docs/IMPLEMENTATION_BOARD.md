@@ -212,7 +212,11 @@ allokieren nicht (positive Kontrolle4096 B). A3 war wörtlich unerfüllbar, weil
 GEN-05.6 keine Vanilla/Paper-Differenzen hat; der test-only Ersatz tötet fest
 verdrahtete Modi und falsche Seeds. Offene Auflage R-A1 für das nächste
 Worldticket: ein Test, der die zweiphasige Halo-Refusalreihenfolge festlegt.
-[Runtimeabnahme](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_RUNTIME_REVIEW.md).
+[Runtimeabnahme](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_RUNTIME_REVIEW.md),
+integriert als `251efaf9`. Der freie Worldslot bearbeitet jetzt
+[GEN-05.9 Surface-Regeln](agent-tasks/GEN-05_9_SURFACE_RULES_TASK.md): originaler
+Overworld-Regelbaum und Einzelblockauswertung, zuerst Vertrag und echte
+Originaloracle ohne Productionänderungen. Der Columndriver folgt separat.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
