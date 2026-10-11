@@ -269,10 +269,14 @@ Memory und redb; Root hat Session Debug/Release je206 Tests, Clippy und fmt
 selbst bestätigt. Storage und World sind nur Testabhängigkeiten der Session.
 [Delivery](agent-tasks/NET-04_2e1_NATIVE_ENDPOINT_SESSION_RUNTIME_DELIVERY.md),
 [Review](agent-tasks/NET-04_2e1_NATIVE_ENDPOINT_SESSION_RUNTIME_REVIEW.md);
-die Auflagen A1–A7 gehen an e2/f. Als nächstes ist
-[SIM-03.4b](agent-tasks/SIM-03_4b_DETACHED_PLAYER_RELEASE_TASK.md) (nur
-`ferrumc-sim`) freigegeben; e2, DUR-05a, NET-04.2f und DUR-05b folgen der
-Ticketfolge.
+die Auflagen A1–A7 gehen an e2/f. Auch [SIM-03.4b](agent-tasks/SIM-03_4b_DETACHED_PLAYER_RELEASE_REVIEW.md)
+(nur `ferrumc-sim`) ist unabhängig CLEAN_RUNTIME integriert: Freigabe abgemeldeter
+nativer Spielerzustände nur nach bestätigtem Save, rein lesender Status,
+`owned_stop_ready` mit dem gemeinsamen Stopprädikat, `lifecycle_acked` und der
+Storage-Re-Export für die Session. Sim Debug/Release je394 und Session206 gegen
+das neue Sim grün; fünf eigene Reviewerprobes auf Memory und redb. Ein fremder
+Owner meldet weiter `StaleHandle` (offengelegt; e2 behandelt beides als
+Quarantäne). NET-04.2e2, DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:

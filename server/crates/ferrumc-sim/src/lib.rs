@@ -142,6 +142,11 @@ pub use region::{RegionLimits, RegionOp};
 pub use shard::SimShard;
 pub use time::{WorldTime, DAY_LENGTH_TICKS, TIME_DAY, TIME_MIDNIGHT, TIME_NIGHT, TIME_NOON};
 
+/// Re-exported from [`ferrumc_storage`] so the session layer can name native
+/// operation identities and receipt queries (for example in
+/// [`DetachedOwnedPlayerStatus`] and retention retries) without depending on the
+/// storage crate. These are plain identity values with no backend handle.
+pub use ferrumc_storage::{OwnershipReceiptQuery, OwnershipTransferId};
 /// Re-exported from [`ferrumc_world`] so callers can name the block-state ids
 /// carried by [`GameOutput::BlockChanged`] / produced by block-edit inputs
 /// without taking a direct dependency on the world crate.

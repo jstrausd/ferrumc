@@ -112,6 +112,8 @@ impl SimShard {
     /// Driver must first prove actual Session retirement and zero consumer refs;
     /// this Sim ticket contains no network receipt or Session authority.
     /// Drain permits acknowledgement. Foreign/stale/repeated tickets preserve credits.
+    /// A successful acknowledgement also marks exactly that admission's state as
+    /// lifecycle-acknowledged for the detached release gate.
     pub fn acknowledge_collector_lifecycle(
         &mut self,
         ticket: &CollectorLifecycleTicket,
@@ -126,6 +128,17 @@ impl SimShard {
             .as_mut()
             .ok_or(CollectorLifecycleError::NotInitialized)?
             .acknowledge(ticket)?;
+        // The validated cell belonged to this owner; mark exactly that admission,
+        // never a later rejoin of the same player.
+        if let Some(owned) = self
+            .players
+            .get_mut(&ticket.collector.player())
+            .and_then(|p| p.owned.as_mut())
+        {
+            if owned.admission == ticket.collector.admission() {
+                owned.lifecycle_acked = true;
+            }
+        }
         Ok(())
     }
 

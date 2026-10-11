@@ -576,6 +576,14 @@ impl ItemPublicationState {
     pub(crate) fn peek(&self) -> Option<&ItemPublicationGroup> {
         self.queue.front()
     }
+    /// Whether a retained Take group names this player as its collector.
+    pub(crate) fn retains_collector(&self, player: PlayerId) -> bool {
+        self.queue.iter().any(|g| {
+            g.take
+                .as_ref()
+                .is_some_and(|t| t.collector.player == player)
+        })
+    }
     pub(crate) fn acknowledge(
         &mut self,
         owner: &Arc<()>,

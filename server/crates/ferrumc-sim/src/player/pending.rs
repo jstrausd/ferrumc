@@ -338,6 +338,16 @@ impl OwnedPlayerInputRefusal {
     pub fn into_parts(self) -> (PlayerOwnershipError, OwnedPlayerInput) {
         (self.reason, *self.input)
     }
+    /// Diagnostic only: the operation identity a refused completion, retry or
+    /// reconcile input named. Other inputs return `None`. Read the pending
+    /// checkpoint for any follow-up decision; this conveys no authority.
+    pub fn query(&self) -> Option<OwnershipReceiptQuery> {
+        match &self.input.0 {
+            InputKind::Completion(completion) => Some(completion.query()),
+            InputKind::Retry(query) | InputKind::Reconcile(query) => Some(*query),
+            _ => None,
+        }
+    }
 }
 
 /// Concrete retained-operation phase, never inferred from wall time or receipt absence.
@@ -383,6 +393,10 @@ pub(crate) struct OwnedPlayerInventory {
     pub(crate) deferred_look: [Option<f32>; 2],
     pub(crate) deferred_mode: Option<GameMode>,
     pub(crate) deferred_selected: Option<u8>,
+    /// Latest genuine autosave confirmed while this admission was detached.
+    pub(crate) saved_after_detach: Option<OwnershipTransferId>,
+    /// This admission's own lifecycle cell was genuinely acknowledged.
+    pub(crate) lifecycle_acked: bool,
 }
 
 #[derive(Debug)]

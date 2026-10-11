@@ -436,6 +436,10 @@ impl CollectorLifecycleState {
             })
             .ok_or(CollectorLifecycleError::AdmissionMismatch)
     }
+    /// Whether any retained cell, of any admission, still names this player.
+    pub(crate) fn binds_player(&self, player: PlayerId) -> bool {
+        self.cells.iter().flatten().any(|c| c.player == player)
+    }
     pub(crate) fn staged_pin(
         &self,
         collector: &ItemCollectorBinding,

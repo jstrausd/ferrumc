@@ -3,6 +3,7 @@
 mod counters;
 mod lifecycle;
 mod publications;
+mod release;
 
 use ferrumc_core::{EntityId, EntityUuid, GameMode, PlayerId};
 use ferrumc_items::{persisted_stack_size, plan_split, ItemStack};
@@ -699,23 +700,29 @@ impl SimShard {
     }
 
     pub(super) fn ownership_quiescent(&self) -> bool {
-        self.player_ownership.as_ref().is_none_or(|s| {
-            !s.snapshot_only
-                && s.publications.as_ref().is_none_or(|p| p.ledger.is_empty())
-                && s.lifecycle.as_ref().is_none_or(|l| l.credits.cells == 0)
-                && s.pending.is_empty()
-                && s.input.is_empty()
-                && s.boundary_remaining == 0
-                && self
-                    .entities
+        self.player_ownership
+            .as_ref()
+            .is_none_or(|s| self.owned_state_quiescent(s))
+    }
+
+    /// The single Stop predicate shared by the Stop apply and `owned_stop_ready`.
+    /// It only borrows and scans actual state; it never allocates.
+    fn owned_state_quiescent(&self, s: &PlayerOwnershipState) -> bool {
+        !s.snapshot_only
+            && s.publications.as_ref().is_none_or(|p| p.ledger.is_empty())
+            && s.lifecycle.as_ref().is_none_or(|l| l.credits.cells == 0)
+            && s.pending.is_empty()
+            && s.input.is_empty()
+            && s.boundary_remaining == 0
+            && self
+                .entities
+                .as_ref()
+                .is_none_or(crate::EntityStore::counter_quiescent)
+            && self.players.values().all(|p| {
+                p.owned
                     .as_ref()
-                    .is_none_or(crate::EntityStore::counter_quiescent)
-                && self.players.values().all(|p| {
-                    p.owned
-                        .as_ref()
-                        .is_none_or(|o| !o.dirty && o.pending.is_none())
-                })
-        })
+                    .is_none_or(|o| !o.dirty && o.pending.is_none())
+            })
     }
 
     fn check_player_admission(
@@ -1301,7 +1308,8 @@ impl SimShard {
         }
         if let Some(player) = player {
             if let Some(owned) = self.players.get_mut(&player).and_then(|p| p.owned.as_mut()) {
-                owned.pending = Some(id);
+                // A newly admitted pending supersedes any earlier detached save proof.
+                (owned.pending, owned.saved_after_detach) = (Some(id), None);
             }
         }
         if matches!(kind, PendingKind::Bootstrap) {
@@ -1687,6 +1695,9 @@ impl SimShard {
         ) {
             let admitted = matches!(pending.kind, PendingKind::Bootstrap);
             self.publish_player(player, snapshot, record, expected, generation, admitted);
+            if matches!(pending.kind, PendingKind::Autosave) {
+                self.record_detached_save(player, id);
+            }
             let handle = self.handle_owned(player)?;
             if admitted {
                 self.seal_lifecycle_cell(pending.lifecycle_cell, &handle);
@@ -1836,6 +1847,8 @@ impl SimShard {
             previous.as_ref().map_or(generation, |o| o.admission)
         };
         let connected = previous.as_ref().is_none_or(|o| o.connected) || admitted;
+        // Only a new admission resets its own lifecycle acknowledgement.
+        let lifecycle_acked = !admitted && previous.as_ref().is_some_and(|o| o.lifecycle_acked);
         let mut owned = OwnedPlayerInventory {
             slots: snapshot.slots,
             carried: snapshot.carried,
@@ -1851,6 +1864,8 @@ impl SimShard {
             deferred_look: [None; 2],
             deferred_mode: None,
             deferred_selected: None,
+            saved_after_detach: None,
+            lifecycle_acked,
         };
         if let Some(previous) = previous {
             owned.deferred_position = previous.deferred_position;
@@ -2021,6 +2036,7 @@ impl SimShard {
             }
             owned.mutation = generation;
             owned.dirty = true;
+            owned.saved_after_detach = None;
             outcome.intents.push(OwnershipIntent::PlayerChanged {
                 player: self.handle_owned(id)?,
                 generation,

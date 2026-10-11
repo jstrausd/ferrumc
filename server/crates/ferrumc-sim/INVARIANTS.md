@@ -500,3 +500,40 @@
   Drain permits publication/lifecycle acknowledgements. Clone/SnapshotOnly has
   no runnable cells, detach facts or pins. Durable checkpoint formats, App and
   Session activation, Java events and live Survival remain separate contracts.
+
+## Detached native player release (SIM-03.4b)
+
+- `saved_after_detach` is private PlayerState data set only by Sim while it
+  applies the genuine `Confirmed{current: Ok}` completion of an Autosave pending
+  of exactly this admission, if the player is then detached. The latest
+  confirmation wins. Every newly admitted pending of the player, every deferred
+  apply/dirty mutation and every (re)admission publication clears it; an
+  uncertain later outcome keeps its pending and therefore blocks release.
+- `lifecycle_acked` is set only by a successful `acknowledge_collector_lifecycle`
+  for the cell of exactly the current admission; acknowledging an older
+  admission's cell never marks a rejoin. Non-admitting publications preserve it,
+  only a new admission resets it. Without lifecycle mode there is no cell and
+  release refuses (`LifecycleNotInitialized`), never treating "no cell" as
+  acknowledged.
+- `detached_owned_player_status` and `owned_stop_ready` borrow actual state only
+  and allocate nothing. `owned_stop_ready` and the Stop apply share one private
+  predicate, so it is true exactly when a Stop enqueued as the only input is
+  accepted by the next normal boundary.
+- `release_detached_owned_player(original)` takes no caller query and runs only
+  between boundaries. Every gate is a borrowed scan before the single mutation:
+  live owner (not SnapshotOnly, not stopped), actual admission, detached,
+  lifecycle mode, no queued input naming the player, no reserved or retained
+  Take pin, no item/chunk (entity owner) reservation, no other pending, this
+  admission acknowledged, no other lifecycle cell of the player, clean state and
+  `saved_after_detach`. Refusals are typed (`DetachedReleaseRefusal`, or
+  `StaleHandle`/`SnapshotOnly`/`Draining`/`NotInitialized`) and change nothing.
+  Success removes the PlayerState and its confirmed bytes from player accounting
+  in the same step; the receipt carries only PlayerId and freed bytes. One call
+  visits at most one player entry, 32 inputs, 32 pendings, 256 retained groups
+  and 384 lifecycle cells and allocates nothing. There is no automatic eviction.
+- A bootstrap pending can only exist for a PlayerId without PlayerState, so it
+  never coexists with a releasable handle; a queued Bootstrap/Restore/Rejoin
+  read of the same PlayerId refuses as a queued input. Chunk tickets carry no
+  PlayerId; the only chunk-bound player reservation is the pair/entity pending.
+- `ferrumc_sim` re-exports `OwnershipTransferId` and `OwnershipReceiptQuery`
+  as plain identity values for consumers without a storage dependency.

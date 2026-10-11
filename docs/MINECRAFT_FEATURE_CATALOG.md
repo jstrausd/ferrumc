@@ -512,7 +512,7 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | T3-Reviewer „SIM-03.4a unabhängige Runtimeprüfung“ | SIM-03.4a | CLEAN_RUNTIME_REVIEW abgeschlossen; Root integrierte `394d4c27` | Vollständiger Code-/Evidenzreview und zwei zusätzliche genuine Memory/redb-Probes; historische Kandidatbytes unverändert. |
 | T3-Driveragent „NET-04.2d actual native driver and endpoint contract“ | NET-04.2d | Nach drei Reviewrunden unabhängig CLEAN_CONTRACT; Auftrag abgeschlossen | Rootentscheidungen R3-A1–A6 binden die Runtimetickets; SIM-03.4b und ein Simticket gegen dauerhaft `Degraded` vorgemerkt. |
 | T3-Sessionagent „NET-04.2e1 native endpoint session runtime“ | NET-04.2e1 | CLEAN_RUNTIME integriert; Auftrag abgeschlossen | Auflagen A1–A7 gehen an NET-04.2e2/f; keine Liveaktivierung. |
-| T3-Simagent „SIM-03.4b detached player release“ | SIM-03.4b | Runtimeimplementierung freigegeben | Exklusiv `server/crates/ferrumc-sim/**`, `.codex-tmp/sim03_4b-runtime/**` und Deliverybrief. |
+| T3-Simagent „SIM-03.4b detached player release“ | SIM-03.4b | CLEAN_RUNTIME integriert; Auftrag abgeschlossen | Doku-Korrektur N1 im nächsten Simticket; H1/H3 an NET-04.2e2/f. |
 | T3-Storageagent „DUR-03.3 Storage Player+Block implementation“ | DUR-03.3 | Vertrag unabhängig CLEAN; Implementierung läuft | Exklusiv Storage und neue Runtimeevidenz; Format7 ohne automatische Migration. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen

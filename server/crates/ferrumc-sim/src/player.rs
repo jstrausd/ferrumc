@@ -6,6 +6,7 @@
 
 mod checkpoint;
 pub(crate) mod codec;
+mod detached;
 pub(crate) mod evidence;
 pub(crate) mod pending;
 pub(crate) mod plan;
@@ -23,6 +24,7 @@ use ferrumc_storage::{OwnershipError, PlayerRecord, SchemaVersion};
 use crate::{EntityStoreError, ItemEntityError};
 
 pub use checkpoint::OwnershipCheckpointResolution;
+pub use detached::{DetachedOwnedPlayerStatus, DetachedReleaseRefusal, ReleasedOwnedPlayer};
 pub use evidence::{
     OwnedEntityRead, OwnedPairRead, OwnedPlayerRead, OwnershipStoreBinding,
     PlayerOwnershipCompletion, PlayerOwnershipStorageWork, PlayerOwnershipWorkRefusal,
@@ -158,6 +160,9 @@ pub enum PlayerOwnershipError {
     /// Absence of a receipt does not establish that an old worker has stopped.
     #[error("receipt absent without proof of the old worker lifetime")]
     UnprovenWorkerLifetime,
+    /// A detached release gate refused before any mutation.
+    #[error("detached player release refused: {0}")]
+    DetachedRelease(#[from] DetachedReleaseRefusal),
 }
 
 /// Explicit positive owner and queue allowances, bounded before allocation.

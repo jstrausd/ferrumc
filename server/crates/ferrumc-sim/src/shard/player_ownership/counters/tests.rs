@@ -11,6 +11,7 @@ use std::path::Path;
 
 mod lifecycle;
 mod publications;
+mod release;
 
 trait Backend: WorldStore + PlayerEntityOwnershipStore {}
 impl<T: WorldStore + PlayerEntityOwnershipStore> Backend for T {}
