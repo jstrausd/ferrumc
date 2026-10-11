@@ -251,8 +251,18 @@ fünf belegte Lücken entschieden: eigene native Endpointart statt
 GameInput-Receiver, 8x8-Regionsgrenze als sichtbare Aktivierungsgrenze,
 Retirement für zugelassene, nie gebundene Joins, Formatgates hinter
 DUR-03.3/03.3a/DUR-05 und das neue Simticket SIM-03.4b zur Freigabe abgemeldeter
-Spielerzustände nach bestätigtem Save. Ein unabhängiger Vertragsreview läuft;
-Produktionsänderungen folgen erst dessen Abnahme.
+Spielerzustände nach bestätigtem Save. Nach drei unabhängigen Reviewrunden
+(FINDINGS B1–B3, dann N1–N3) ist der Vertrag CLEAN_CONTRACT; der dritte Reviewer
+hat alle202 Anker reproduziert und die Stopdurchrechnung für4096 Items
+unabhängig nachgerechnet. Root hat die sechs Auflagen verbindlich entschieden:
+kompilierbare Revalidierungssignatur, Bewegungscoalescing je Session,
+konfigurierbare Stopfrist mit `Unresolved`, periodischer Player-Autosave vor
+Liveaktivierung, eigenes Simticket gegen dauerhaft `Degraded` durch quarantinierte
+Pendings und typisierte Disposition fehlschlagender Recoveryboundaries.
+[Vertrag](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT.md),
+[Rootentscheidungen](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_ROOT_DECISIONS.md).
+Als erstes Runtimeticket ist NET-04.2e1 (nur `ferrumc-session`) freigegeben;
+SIM-03.4b, e2, DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:
