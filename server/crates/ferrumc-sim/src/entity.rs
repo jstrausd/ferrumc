@@ -326,6 +326,12 @@ pub struct EntityHandle {
     generation: u64,
 }
 
+impl EntityHandle {
+    pub(crate) const fn publication_generation(&self) -> u64 {
+        self.generation
+    }
+}
+
 impl fmt::Debug for EntityHandle {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Allocation addresses are not deterministic simulation data.

@@ -9,6 +9,8 @@ use ferrumc_world::{FlatWorldGenerator, GenerationIdentity, WorldSeed};
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::path::Path;
 
+mod publications;
+
 trait Backend: WorldStore + PlayerEntityOwnershipStore {}
 impl<T: WorldStore + PlayerEntityOwnershipStore> Backend for T {}
 fn nz(n: usize) -> NonZeroUsize {

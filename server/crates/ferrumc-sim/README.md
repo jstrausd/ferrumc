@@ -213,3 +213,24 @@ format are its own contract. This stage adds safe generator admission, not
 Vanilla terrain, feature/population stages, playable Survival or Paper runtime
 parity. See `docs/agent-tasks/WG-003_SIM_GENERATION.md` for the consumer contract,
 sources and verification.
+
+An actual empty native ownership owner can separately enable
+`SimShard::initialize_item_publications` with positive group, retained-charge
+and preparation limits. This reserves a retained FIFO before activation and
+reserves each immutable item postimage before its Workrequest. Genuine
+confirmation or checked native restore seals the actual scope/store instance
+and nonwrapping sequence; pending mutations do not expose a publication.
+Spawn/Restore/Changed include the complete unchanged stack and actual scalar
+state after counterconfirmation, before the later counter step. Removed binds
+the original instance even after slot reuse. Optional Take retains original
+animation count, genuinely moved amount and the original validated collector
+admission. Pure timer/no-op autosaves produce no additional publication body.
+
+`peek_item_publication` borrows the whole retained head; after complete Session
+admission the Driver acknowledges its cheap producer-minted ticket with
+`acknowledge_item_publication`. A ticket does not prove socket delivery. Refused
+output, uncertainty and retry retain the body and accounting. Drain permits
+peek/ack, and Stop requires empty pending/retained publications alongside the
+existing durability checks. Encoded charge is not heap/RSS accounting; bounded
+existing Item/NBT clones keep their standard infallible allocator boundary.
+This opt-in producer adds no Session/App activation or live Survival parity.

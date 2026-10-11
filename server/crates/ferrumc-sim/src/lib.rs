@@ -74,6 +74,7 @@ mod error;
 mod generation;
 mod harness;
 mod item_counters;
+mod item_publication;
 mod loaded;
 mod message;
 mod mutation;
@@ -109,6 +110,14 @@ pub use item_counters::{
     OwnedItemCounterHandle, OwnedItemCounterLimits, MAX_CONFIRMED_ITEM_BYTES,
     MAX_OWNED_COUNTER_DEFER, MAX_OWNED_COUNTER_PLAN_BYTES, MAX_OWNED_COUNTER_PLAN_ENTRIES,
     MAX_OWNED_ENTITY_SAVE_CHARGE,
+};
+pub use item_publication::{
+    ItemCollectorBinding, ItemInstanceBinding, ItemPublicationBudget, ItemPublicationError,
+    ItemPublicationGroup, ItemPublicationKind, ItemPublicationLimits, ItemPublicationOrigin,
+    ItemPublicationOriginKind, ItemPublicationPostimage, ItemPublicationSequence,
+    ItemPublicationStatus, ItemPublicationTicket, ItemTakeFact, ITEM_PUBLICATION_SCALAR_CHARGE,
+    MAX_ITEM_PUBLICATION_GROUPS, MAX_ITEM_PUBLICATION_PREPARE_BYTES,
+    MAX_ITEM_PUBLICATION_RETAINED_BYTES,
 };
 pub use loaded::{
     load_or_generate, load_or_generate_bound, load_or_generate_legacy, ChunkAcquired,

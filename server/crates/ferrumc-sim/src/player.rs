@@ -56,6 +56,9 @@ pub const MAX_PLAYER_OWNERSHIP_INPUT_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlayerOwnershipError {
+    /// Bounded immutable publication admission or acknowledgement refused.
+    #[error(transparent)]
+    Publication(#[from] crate::ItemPublicationError),
     /// Counter tick differs from the checked exactly-next logical boundary.
     #[error("owned item counter tick is not exactly next")]
     CounterTickMismatch,

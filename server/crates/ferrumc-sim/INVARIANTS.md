@@ -404,3 +404,54 @@
   regular block/command consumers, physics/activation/merge/contact/tracking,
   Java events/plugins and live Survival/Paper differential acceptance remain
   separate DUR-05 and gameplay contracts.
+
+## Reserved immutable item publications (SIM-03.4)
+
+- Publication mode is separately selected once on an empty actual ownership
+  owner. Snapshot clones receive neither pending authority nor publication
+  outbox and cannot initialize, peek or acknowledge a competing producer.
+- Positive caps cover pending plus retained groups (at most 256), total logical
+  encoded charge (at most 8 MiB), and one preparation (at most 1 MiB). Charge is
+  256 scalar accounting bytes plus exact borrowed FCIS stack size, or 256 for
+  removal; this is neither a wire format nor decoded heap/RSS accounting.
+- The complete outer FIFO is fallibly reserved before activation. Borrowed
+  model/charge/sequence checks precede the additional bounded stack clone and
+  Workrequest. Existing Item/NBT deepclones and existing Arc/BTreeMap allocations
+  retain their infallible allocator boundary; there is no all-OOM Result claim.
+- Pending owns one immutable staged body and a group/byte/sequence credit.
+  Confirm moves the same charge into retained accounting without another body
+  clone or queue allocation. Only definitive abort releases pending credit;
+  Busy, uncertainty, absent receipt, refresh and quarantine retain it.
+- Publication sequence is assigned in actual confirm/restore order, not at
+  admission. Checked `last + reserved + 1` prevents later overflow. Abort consumes
+  no sequence, MAX may publish once, and retries never mint duplicate facts.
+- Whole scope/generation, actual weak store/slot incarnation, slot generation,
+  UUID, wire ID and type bind each immutable instance. Removed instances remain
+  bound after slot reuse. Group/postimage/origin/take have no public constructor,
+  Clone, mutable body access or snapshot-to-publication factory.
+- Confirmed postimage scalars are captured directly after counterconfirmation
+  and before legacy intents/deferred player work/later counter boundary. The
+  staged unchanged stack moves with them. Restore uses genuine checked native
+  Store/Generation admission, with no fabricated receipt. Counter-only and
+  no-op autosaves produce no group or additional publication stack clone.
+- Optional Take precedes Changed/Removed logically and retains original animation
+  count independently from genuinely moved quantity. Collector captures the
+  validated original player owner/admission before Workrequest. Rejoin never
+  refreshes it. `matches_owned_player` compares that original admission only;
+  connectivity/current Session/scope/generation and viewer-specific collector
+  wire IDs require the separate Session admission contract.
+- Peek borrows the retained FIFO head. Ack accepts only its actual-owner,
+  full-instance/sequence ticket and releases exactly that group once. Refused,
+  stale, reordered or foreign output preserves all data/charges. A ticket is
+  not socket delivery evidence: Driver must complete whole Session admission
+  before ack. Peek/ack remain available during Drain; Stop and scheduler
+  quiescence additionally require empty reserved/retained publications.
+- Countershadow uses the same scalar charge/admission predicate and genuine
+  completion prefix: Confirm retains credit, definitive abort frees it, new
+  Restore/Action gates precede further shadow resource mutation. Full outbox
+  refuses due-delete save admission without consuming its supplied SaveID;
+  unload neither invents removal nor drops retained publication data.
+- Ephemeral publications are absent from the unchanged durable checkpoint
+  format. Session/driver activation, metadata refusal policy for present AIR or
+  trusted opaque inner schemas, socket emission, item physics and live Survival
+  remain separate consumer/gameplay tickets.

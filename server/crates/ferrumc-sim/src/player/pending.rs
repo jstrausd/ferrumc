@@ -387,6 +387,7 @@ pub(crate) struct OwnedPlayerInventory {
 
 #[derive(Debug)]
 pub(crate) struct PendingPlayerMutation {
+    pub(crate) publication: Option<crate::item_publication::PreparedItemPublication>,
     pub(crate) buffer: std::sync::Weak<()>,
     pub(crate) kind: PendingKind,
     pub(crate) ticket: CompletionTicket,
@@ -595,6 +596,7 @@ impl PlayerOwnershipTickOutcome {
 
 #[derive(Debug)]
 pub(crate) struct PlayerOwnershipState {
+    pub(crate) publications: Option<crate::item_publication::ItemPublicationState>,
     pub(crate) binding: OwnershipStoreBinding,
     pub(crate) limits: PlayerOwnershipLimits,
     pub(crate) owner: Arc<()>,
@@ -614,6 +616,7 @@ impl PlayerOwnershipState {
     pub(crate) fn new(binding: OwnershipStoreBinding, limits: PlayerOwnershipLimits) -> Self {
         Self {
             binding,
+            publications: None,
             limits,
             owner: Arc::new(()),
             snapshot_only: false,
@@ -643,6 +646,7 @@ impl Clone for PlayerOwnershipState {
         // Copied inventory pending IDs remain descriptive data only.
         Self {
             binding: self.binding.clone(),
+            publications: None,
             limits: self.limits,
             owner: Arc::new(()),
             snapshot_only: true,

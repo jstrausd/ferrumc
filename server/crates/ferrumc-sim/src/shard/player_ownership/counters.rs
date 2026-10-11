@@ -47,6 +47,7 @@ struct ShadowPlayer<'a> {
 }
 
 struct ShadowResources {
+    publications: Option<crate::item_publication::PublicationLedger>,
     pending_count: usize,
     pending_bytes: usize,
     player_bytes: usize,
@@ -504,6 +505,7 @@ impl SimShard {
         let mut handled = [None; crate::MAX_PLAYER_OWNERSHIP_INPUTS];
         let mut handled_len = 0;
         let mut future_retired = 0;
+        let mut publication_ledger = state.publications.as_ref().map(|p| p.ledger);
         for (input, _) in &state.input {
             let InputKind::Completion(c) = &input.0 else {
                 continue;
@@ -535,6 +537,16 @@ impl SimShard {
             };
             self.preflight_counter_completion(c.query().id(), confirmed)?;
             self.preflight_deferred_for(Some(c.query().id()), u64::from(confirmed))?;
+            self.check_pending_publication(pending)?;
+            if let (Some(ledger), Some(publication)) =
+                (&mut publication_ledger, &pending.publication)
+            {
+                if confirmed {
+                    let _ = ledger.publish(publication.charge);
+                } else {
+                    ledger.cancel(publication.charge);
+                }
+            }
             if confirmed {
                 future_generation = future_generation.next()?;
             }
@@ -639,6 +651,7 @@ impl SimShard {
             &overlays[..consumed_len],
             future_generation,
             future_retired,
+            publication_ledger,
         )?;
         if stopped {
             for entry in entries.iter_mut() {
@@ -665,6 +678,7 @@ impl SimShard {
         overlays: &[Option<CompletionOverlay<'a>>],
         future_generation: PlayerLocalGeneration,
         future_retired: usize,
+        publication_ledger: Option<crate::item_publication::PublicationLedger>,
     ) -> Result<bool, PlayerOwnershipError> {
         let state = self.ownership_state()?;
         let entities = self
@@ -687,6 +701,7 @@ impl SimShard {
             .map(|e| e.confirmed_len)
             .sum::<usize>();
         let mut resources = ShadowResources {
+            publications: publication_ledger,
             pending_count: state
                 .pending
                 .values()
@@ -854,6 +869,9 @@ impl SimShard {
                                     .is_ok_and(|p| !p.dirty && p.pending.is_none())
                             });
                     if remaining == 0
+                        && resources
+                            .publications
+                            .is_none_or(crate::item_publication::PublicationLedger::is_empty)
                         && resources.pending_count == 0
                         && players_clean
                         && entries
@@ -896,6 +914,13 @@ impl SimShard {
                     ) {
                         continue;
                     }
+                    let Ok(publication_charge) = shadow_publication_charge(
+                        &resources,
+                        Some(body - crate::NATIVE_ITEM_ENTITY_HEADER_BYTES),
+                    ) else {
+                        continue;
+                    };
+                    reserve_shadow_publication(&mut resources, publication_charge, true);
                     live_bytes += body;
                     confirmed_bytes += body;
                     entries.push(CounterBoundaryEntry {
@@ -949,6 +974,14 @@ impl SimShard {
                     }) {
                         continue;
                     }
+                    let publication_charge = if entry.due {
+                        let Ok(charge) = shadow_publication_charge(&resources, None) else {
+                            continue;
+                        };
+                        charge
+                    } else {
+                        None
+                    };
                     if !self.shadow_candidate_admitted(
                         &mut resources,
                         consumed,
@@ -959,6 +992,7 @@ impl SimShard {
                     )? {
                         continue;
                     }
+                    reserve_shadow_publication(&mut resources, publication_charge, false);
                     entry.original_counters = entry.counters;
                     entry.original_generation = entry.generation;
                     entry.deferred = Some(*id);
@@ -1042,6 +1076,16 @@ impl SimShard {
                     } else {
                         entry.body_len
                     };
+                    let stack_charge = if shape.remainder == 0 {
+                        None
+                    } else {
+                        Some(entry.body_len - crate::NATIVE_ITEM_ENTITY_HEADER_BYTES)
+                    };
+                    let Ok(publication_charge) =
+                        shadow_publication_charge(&resources, stack_charge)
+                    else {
+                        continue;
+                    };
                     if !self.shadow_candidate_admitted(
                         &mut resources,
                         consumed,
@@ -1052,6 +1096,7 @@ impl SimShard {
                     )? {
                         continue;
                     }
+                    reserve_shadow_publication(&mut resources, publication_charge, false);
                     let generation = if shape.remainder == 0 {
                         entry.generation
                     } else {
@@ -1103,6 +1148,11 @@ impl SimShard {
                     {
                         continue;
                     }
+                    let Ok(publication_charge) =
+                        shadow_publication_charge(&resources, Some(stack_len))
+                    else {
+                        continue;
+                    };
                     if self.shadow_candidate_admitted(
                         &mut resources,
                         consumed,
@@ -1111,6 +1161,7 @@ impl SimShard {
                         body,
                         None,
                     )? {
+                        reserve_shadow_publication(&mut resources, publication_charge, false);
                         reserved = true;
                     }
                 }
@@ -1169,6 +1220,11 @@ impl SimShard {
                     ) {
                         continue;
                     }
+                    let Ok(publication_charge) =
+                        shadow_publication_charge(&resources, Some(stack_len))
+                    else {
+                        continue;
+                    };
                     if self.shadow_candidate_admitted(
                         &mut resources,
                         consumed,
@@ -1177,6 +1233,7 @@ impl SimShard {
                         after + body,
                         Some((p.id, p.record.data().len(), after)),
                     )? {
+                        reserve_shadow_publication(&mut resources, publication_charge, false);
                         if let Some(i) = player_index {
                             if let Some(p) = &mut players[i] {
                                 p.pending = Some(*id);
@@ -1724,6 +1781,7 @@ impl SimShard {
         entities.check_confirmed_replacement(before_len, after_len)?;
         let (prepared, after) = entities.prepare_owned_item_save(handle, d.due)?;
         Ok(Candidate {
+            collector: None,
             kind: if d.due {
                 PendingKind::EntityDespawn
             } else {
@@ -1851,6 +1909,33 @@ impl SimShard {
                 item: handle,
                 reason,
             }),
+        }
+    }
+}
+
+// The native header and fixed FCIS count byte make shadow body sizing exact.
+// The actual admission uses the same checked charge and ledger predicate.
+fn shadow_publication_charge(
+    resources: &ShadowResources,
+    stack_len: Option<usize>,
+) -> Result<Option<usize>, crate::ItemPublicationError> {
+    let Some(ledger) = resources.publications else {
+        return Ok(None);
+    };
+    let charge = crate::item_publication::publication_charge(stack_len)?;
+    ledger.check(charge)?;
+    Ok(Some(charge))
+}
+
+fn reserve_shadow_publication(
+    resources: &mut ShadowResources,
+    charge: Option<usize>,
+    restored: bool,
+) {
+    if let (Some(ledger), Some(charge)) = (&mut resources.publications, charge) {
+        ledger.reserve(charge);
+        if restored {
+            let _ = ledger.publish(charge);
         }
     }
 }

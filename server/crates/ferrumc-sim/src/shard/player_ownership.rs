@@ -1,6 +1,7 @@
 //! Actual player authority and receipt-confirmed tick-boundary consumers.
 
 mod counters;
+mod publications;
 
 use ferrumc_core::{EntityId, EntityUuid, GameMode, PlayerId};
 use ferrumc_items::{persisted_stack_size, plan_split, ItemStack};
@@ -34,6 +35,7 @@ use crate::{
 
 #[derive(Debug)]
 struct Candidate {
+    collector: Option<crate::ItemCollectorBinding>,
     kind: PendingKind,
     player_expected: Option<OwnedPlayerExpectation>,
     entity_expected: Option<OwnedEntityExpectation>,
@@ -437,6 +439,7 @@ impl SimShard {
                 let snapshot = NativePlayerSnapshot::empty_survival(*position, *look);
                 let record = snapshot.try_to_record()?;
                 let candidate = Candidate {
+                    collector: None,
                     kind: PendingKind::Bootstrap,
                     player_expected: Some(read.snapshot.expectation().clone()),
                     entity_expected: None,
@@ -475,6 +478,7 @@ impl SimShard {
                     .ok_or(PlayerOwnershipError::NotInitialized)?;
                 let (prepared, record) = entities.prepare_owned_spawn(&self.chunks, proposal)?;
                 let candidate = Candidate {
+                    collector: None,
                     kind: PendingKind::SpawnItem,
                     player_expected: None,
                     entity_expected: Some(read.snapshot.expectation().clone()),
@@ -702,6 +706,7 @@ impl SimShard {
     pub(super) fn ownership_quiescent(&self) -> bool {
         self.player_ownership.as_ref().is_none_or(|s| {
             !s.snapshot_only
+                && s.publications.as_ref().is_none_or(|p| p.ledger.is_empty())
                 && s.pending.is_empty()
                 && s.input.is_empty()
                 && s.boundary_remaining == 0
@@ -860,9 +865,18 @@ impl SimShard {
         }
         // Restore is readonly durable admission, not a new save/delete receipt.
         let id = OwnershipTransferId::from_bytes(key.uuid().to_bytes());
-        entities.reserve_owned(id, &prepared)?;
-        let EntityPublication::Spawned(item) =
-            entities.publish_owned(id, prepared, read.snapshot.expectation().clone())
+        let publication =
+            self.prepare_item_publication(&prepared, crate::ItemPublicationKind::Restore)?;
+        self.entities
+            .as_mut()
+            .ok_or(PlayerOwnershipError::NotInitialized)?
+            .reserve_owned(id, &prepared)?;
+        self.reserve_publication(publication.as_ref());
+        let EntityPublication::Spawned(item) = self
+            .entities
+            .as_mut()
+            .ok_or(PlayerOwnershipError::NotInitialized)?
+            .publish_owned(id, prepared, read.snapshot.expectation().clone())
         else {
             return Err(PlayerOwnershipError::CompletionMismatch);
         };
@@ -877,6 +891,11 @@ impl SimShard {
                 .ok_or(PlayerOwnershipError::NotInitialized)?
                 .install_confirmed(&item, checked, 1, tick);
         }
+        self.publish_item_fact(
+            publication,
+            &EntityPublication::Spawned(item.clone()),
+            crate::ItemPublicationOrigin::restored(read.snapshot.stamp()),
+        );
         outcome.intents.push(OwnershipIntent::ItemRestored { item });
         Ok(())
     }
@@ -1022,6 +1041,7 @@ impl SimShard {
         )?;
         let record = snapshot.try_to_record()?;
         Ok(Candidate {
+            collector: None,
             kind,
             player_expected: Some(owned.expected.clone()),
             entity_expected: None,
@@ -1091,6 +1111,7 @@ impl SimShard {
             .ok_or(PlayerOwnershipError::NotInitialized)?
             .prepare_owned_spawn(&self.chunks, &proposal)?;
         Ok(Candidate {
+            collector: None,
             kind: PendingKind::Drop,
             player_expected: Some(read.snapshot.player().expectation().clone()),
             entity_expected: Some(entity.expectation().clone()),
@@ -1198,6 +1219,7 @@ impl SimShard {
         )?;
         let record = snapshot.try_to_record()?;
         Ok(Candidate {
+            collector: Some(self.capture_item_collector(handle)?),
             kind: PendingKind::Pickup,
             player_expected: Some(read.snapshot.player().expectation().clone()),
             entity_expected: Some(expected.clone()),
@@ -1227,24 +1249,12 @@ impl SimShard {
             return Err(PlayerOwnershipError::Reserved);
         }
         let generation = state.generation.next()?;
-        let actual_charge = self.pending_charge(
-            bytes(
-                candidate.before_player.as_ref(),
-                candidate.before_entity.as_ref(),
-            ),
-            bytes(
-                candidate.after_player_record.as_ref(),
-                candidate.after_entity_record.as_ref(),
-            ),
-        )?;
-        if candidate.charge != actual_charge {
-            return Err(PlayerOwnershipError::Malformed(
-                "planned encoded charge differs",
-            ));
-        }
+        self.validate_candidate_charge(&candidate)?;
+        let publication = self.prepare_candidate_publication(&candidate)?;
         let (item_generation, counters) = self.prepare_counter_candidate(&candidate)?;
         let request = candidate.request(id)?;
         let Candidate {
+            collector: _,
             kind,
             player_expected,
             entity_expected,
@@ -1284,8 +1294,10 @@ impl SimShard {
                 owned.pending = Some(id);
             }
         }
+        self.reserve_publication(publication.as_ref());
         let buffer = Arc::new(());
         let pending = PendingPlayerMutation {
+            publication,
             buffer: Arc::downgrade(&buffer),
             kind,
             ticket: ticket.clone(),
@@ -1319,6 +1331,25 @@ impl SimShard {
             ticket,
             request: Some(request),
         });
+        Ok(())
+    }
+
+    fn validate_candidate_charge(&self, candidate: &Candidate) -> Result<(), PlayerOwnershipError> {
+        let actual = self.pending_charge(
+            bytes(
+                candidate.before_player.as_ref(),
+                candidate.before_entity.as_ref(),
+            ),
+            bytes(
+                candidate.after_player_record.as_ref(),
+                candidate.after_entity_record.as_ref(),
+            ),
+        )?;
+        if candidate.charge != actual {
+            return Err(PlayerOwnershipError::Malformed(
+                "planned encoded charge differs",
+            ));
+        }
         Ok(())
     }
 
@@ -1612,6 +1643,12 @@ impl SimShard {
         let generation = self.ownership_state()?.generation.next()?;
         self.preflight_deferred_for(Some(id), 1)?;
         self.preflight_counter_completion(id, true)?;
+        let retained = self
+            .ownership_state()?
+            .pending
+            .get(&id)
+            .ok_or(PlayerOwnershipError::CompletionMismatch)?;
+        self.check_pending_publication(retained)?;
         let mut pending = self.remove_pending(id)?;
         let take_wire = pending
             .after_entity
@@ -1647,12 +1684,14 @@ impl SimShard {
             });
         }
         if let (Some(prepared), Some(expected)) = (pending.after_entity.take(), entity_expected) {
+            let origin = crate::ItemPublicationOrigin::confirmed(query, expected.stamp());
             let publication = self
                 .entities
                 .as_mut()
                 .ok_or(PlayerOwnershipError::NotInitialized)?
                 .publish_owned(id, prepared, expected);
             self.publish_counter_confirmation(&publication, &mut pending);
+            self.publish_item_fact(pending.publication.take(), &publication, origin);
             Self::publish_entity_intent(query, publication, outcome);
         }
         if let Some(state) = self.player_ownership.as_mut() {
@@ -1733,6 +1772,7 @@ impl SimShard {
         self.preflight_counter_completion(id, false)?;
         let mut pending = self.remove_pending(id)?;
         self.release_counter_projection(&pending);
+        self.cancel_publication(pending.publication.take());
         if matches!(pending.kind, PendingKind::SpawnItem) {
             if let Some(PreparedOwnedEntity::Spawn { base, item, .. }) = pending.after_entity.take()
             {

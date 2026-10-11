@@ -38,6 +38,39 @@ pub(crate) enum EntityPublication {
 }
 
 impl EntityStore {
+    pub(crate) fn publication_instance(
+        &self,
+        handle: &EntityHandle,
+        generation: crate::GenerationBinding,
+    ) -> Result<crate::ItemInstanceBinding, PlayerOwnershipError> {
+        Ok(crate::ItemInstanceBinding::new(
+            handle.clone(),
+            generation,
+            *self.get(handle)?,
+        ))
+    }
+
+    // Only the genuine synchronous publication result can reach this seal point.
+    pub(crate) fn publication_scalars(
+        &self,
+        handle: &EntityHandle,
+        generation: crate::GenerationBinding,
+    ) -> (
+        crate::ItemInstanceBinding,
+        super::EntityTransform,
+        super::ItemEntityProperties,
+    ) {
+        let slot = &self.slots[handle.slot];
+        let (Some(base), Some(item)) = (slot.entity, slot.item.as_ref()) else {
+            panic!("actual item publication disappeared before sealing");
+        };
+        (
+            crate::ItemInstanceBinding::new(handle.clone(), generation, base),
+            base.transform(),
+            item.properties(),
+        )
+    }
+
     pub(super) fn require_legacy_write(&self) -> Result<(), EntityStoreError> {
         if self.ownership_mode || self.snapshot_only || self.reservation.is_some() {
             return Err(EntityStoreError::OwnershipRequired);
