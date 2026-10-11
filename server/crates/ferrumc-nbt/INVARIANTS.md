@@ -20,3 +20,14 @@
 - **Negative lengths are always rejected** (`NegativeLength`); a non-empty list declaring element type `TAG_End` is `MalformedList`.
 - **Big-endian, Modified UTF-8.** All multi-byte integers are big-endian (via the reader). `TAG_String` is encoded and decoded as Java Modified `UTF-8` (the `DataInput.readUTF` scheme a 1.21.8 client requires): `NUL` is `0xC0 0x80` and astral characters are six-byte surrogate pairs. Byte sequences that are not valid Modified `UTF-8` are rejected as `InvalidUtf8`.
 - **Roots are compounds and self-delimiting.** Both root readers require a `TAG_Compound` and reject trailing bytes. The writers emit bytes the matching readers accept and enforce the format's structural caps (`u16` string length, `i32` sequence length).
+- **Checked network output is admitted before mutation.** `network_root_size`
+  checks the exact complete encoded root, all configured output byte/sequence/
+  Modified UTF-8 string bounds and depth `min(configured, 512)` without encoding,
+  allocation or clones. All size arithmetic is checked. Existing owned writers
+  retain their historical structural-only output checks and bytes.
+- **Borrowed output never reserves.** `write_network_root_into` preflights the
+  model before checking the caller Vec's exact free capacity, then reuses the
+  unchanged direct NBT/MUTF8 writer. Success retains prefix/capacity and reports
+  appended length. Any error retains prefix, length and capacity; unexpected
+  writer errors/mismatches roll back the append. The caller separately owns
+  fallible reservation, aggregate bounds and publication authority.

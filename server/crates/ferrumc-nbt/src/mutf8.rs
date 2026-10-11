@@ -36,6 +36,20 @@ pub(crate) fn encoded_len(text: &str) -> usize {
     text.chars().map(encoded_char_len).sum()
 }
 
+/// Counts existing Modified UTF-8 widths, stopping before unbounded traversal.
+pub(crate) fn bounded_encoded_len(text: &str, max: usize) -> Result<usize, NbtError> {
+    let mut len = 0_usize;
+    for ch in text.chars() {
+        len = len
+            .checked_add(encoded_char_len(ch))
+            .ok_or(NbtError::EncodedSizeOverflow)?;
+        if len > max {
+            return Err(NbtError::StringTooLong { len, max });
+        }
+    }
+    Ok(len)
+}
+
 /// The Modified UTF-8 byte length of a single character.
 fn encoded_char_len(ch: char) -> usize {
     match u32::from(ch) {

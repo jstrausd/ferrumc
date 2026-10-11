@@ -61,4 +61,4 @@ pub use read::{
     read_network_root_with_consumed,
 };
 pub use tag::{NbtCompound, NbtTag};
-pub use write::{write_named_root, write_network_root};
+pub use write::{network_root_size, write_named_root, write_network_root, write_network_root_into};

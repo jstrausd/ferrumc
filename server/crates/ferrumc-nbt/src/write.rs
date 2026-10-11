@@ -14,12 +14,18 @@
 //! [`NbtError::HeterogeneousList`], and [`NbtError::DepthExceeded`]. The other
 //! `NbtLimits` caps (`max_bytes`, `max_list_len`, `max_string_bytes`) are
 //! reader-side concerns and are not applied here.
+//!
+//! [`network_root_size`] and [`write_network_root_into`] separately preflight
+//! all output resource bounds and the caller's already reserved capacity.
+//! They reuse the existing writer without changing the owned APIs.
 
 use crate::error::NbtError;
 use crate::limits::NbtLimits;
 use crate::mutf8;
 use crate::tag::{NbtTag, TagType};
 use crate::Result;
+
+mod size;
 
 /// Largest length expressible by a `u16` prefix (NBT string length).
 const U16_LEN_MAX: usize = 65_535;
@@ -53,6 +59,70 @@ pub fn write_network_root(tag: &NbtTag, limits: &NbtLimits) -> Result<Vec<u8>> {
     out.push(TagType::Compound.id());
     write_payload(&mut out, tag, 1, limits)?;
     Ok(out)
+}
+
+/// Returns the complete network-root size without encoding or allocating.
+///
+/// The root must be a compound. The result includes its type and final end byte,
+/// but no root name, caller prefix, slot framing, or decoded heap allowance.
+/// Every configured byte, sequence, and Modified UTF-8 string limit is checked;
+/// strings and sequences must also fit their `u16` and `i32` prefixes. Container
+/// depth is capped at the smaller of the configured limit and
+/// [`NbtLimits::DEFAULT_MAX_DEPTH`] (512), with the root at depth one.
+/// Inputs, ordered duplicate keys, and float representations remain unchanged.
+///
+/// Unlike the existing owned writers, this probe enforces all output resource
+/// limits. It does not change their historical validation or bytes.
+///
+/// # Errors
+///
+/// Returns the corresponding [`NbtError`] for an invalid root, exceeded resource
+/// limit, heterogeneous list, or checked encoded-size arithmetic overflow.
+pub fn network_root_size(tag: &NbtTag, limits: &NbtLimits) -> Result<usize> {
+    require_compound(tag)?;
+    size::network_root_size(tag, limits)
+}
+
+/// Appends one checked network root to a caller's already reserved buffer.
+///
+/// Runs [`network_root_size`] before checking free capacity, then uses the
+/// existing NBT and Modified UTF-8 writer directly. It never allocates,
+/// reserves, clones a tree, or creates a temporary buffer. The caller must
+/// reserve at least the returned root size beyond its current length.
+/// Success returns the number of appended bytes, preserving the original
+/// prefix and capacity. The byte limit counts only this root, not that prefix.
+///
+/// # Errors
+///
+/// Model/resource errors take precedence over insufficient capacity, reported
+/// as [`NbtError::OutputCapacityExceeded`]. Every error preserves the prefix,
+/// length, and capacity; unexpected writer errors or size mismatches roll back
+/// the entire append. The source tag is never changed.
+pub fn write_network_root_into(
+    out: &mut Vec<u8>,
+    tag: &NbtTag,
+    limits: &NbtLimits,
+) -> Result<usize> {
+    let expected = network_root_size(tag, limits)?;
+    let remaining = out.capacity() - out.len();
+    if expected > remaining {
+        return Err(NbtError::OutputCapacityExceeded {
+            needed: expected,
+            remaining,
+        });
+    }
+    let start = out.len();
+    out.push(TagType::Compound.id());
+    if let Err(error) = write_payload(out, tag, 1, limits) {
+        out.truncate(start);
+        return Err(error);
+    }
+    let actual = out.len() - start;
+    if actual != expected {
+        out.truncate(start);
+        return Err(NbtError::OutputSizeMismatch { expected, actual });
+    }
+    Ok(actual)
 }
 
 /// Rejects a root that is not a compound.

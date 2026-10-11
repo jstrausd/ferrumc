@@ -97,6 +97,28 @@ pub enum NbtError {
         id: u8,
     },
 
+    /// Checked output size arithmetic overflowed before any output mutation.
+    #[error("NBT encoded size arithmetic overflowed")]
+    EncodedSizeOverflow,
+
+    /// A checked append's caller buffer had insufficient already-free capacity.
+    #[error("NBT output needs {needed} bytes but only {remaining} are already reserved")]
+    OutputCapacityExceeded {
+        /// The exact complete network-root size.
+        needed: usize,
+        /// Free capacity after the caller's existing prefix.
+        remaining: usize,
+    },
+
+    /// The existing writer unexpectedly disagreed with the checked size probe.
+    #[error("NBT output has {actual} bytes but the preflight expected {expected}")]
+    OutputSizeMismatch {
+        /// The complete root size admitted before the append.
+        expected: usize,
+        /// The number of bytes actually appended before rollback.
+        actual: usize,
+    },
+
     /// An error surfaced from the underlying bounded reader (short read,
     /// trailing bytes, and similar low-level conditions).
     #[error(transparent)]
