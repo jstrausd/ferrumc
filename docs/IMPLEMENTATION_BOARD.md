@@ -160,18 +160,20 @@ atomaren Sourceimport; Appmigration und FCPS-Gameplayadmission bleiben offen.
 Root hat alle fünf Freeze-, 25 Referenz-, 44 Source- und 53 akzeptierten
 Simdateien ohne Drift geprüft und den Vertrag unabhängig CLEAN abgenommen.
 [Vertragsreview](agent-tasks/NET-04_2c_COLLECTOR_SESSION_BINDING_REVIEW.md).
-Der nächste echte Simproducer ist als
-[SIM-03.4a](agent-tasks/SIM-03_4a_COLLECTOR_LIFECYCLE.md) vergeben: borrowed
+Der tatsächliche Simproducer
+[SIM-03.4a](agent-tasks/SIM-03_4a_COLLECTOR_LIFECYCLE.md) implementiert borrowed
 ConnectedPlayerView, bounded Lifecyclezellen, applied Detachfacts und
 reserved/retained Takepins. Session-/App-Wiring und der native Join folgen
 danach; heutiger Appjoin bleibt der Legacyplayerpfad mit eigener JoinGame-ID1.
-Die Autorenlieferung ist fertig und eingefroren. Root hat die Kombination im
-echten `e772564c`-Archiv geprüft: Debug/Release jeweils369, Workspace-Alltarget-
-Clippy, fmt und rustdoc grün;56 Source-/40 Evidence-Dateien sowie1215
-Außendateien unverändert. Die unabhängige Codeprüfung läuft in einer neuen
-Reviewrunde, nachdem die vorherige durch ein Providerlimit abbrach. Bis zu
-deren Ergebnis bleibt SIM-03.4a unintegriert; Sessionretirement und Appaktivierung
-bleiben eigene Verbraucher.
+SIM-03.4a ist unabhängig CLEAN_RUNTIME abgenommen und als `394d4c27` integriert.
+Root hat die Kombination im echten `e772564c`-Archiv geprüft: Debug/Release
+jeweils369, Workspace-Alltarget-Clippy, fmt und rustdoc grün;56 Source-/40
+Evidence-Dateien sowie1215 Außendateien unverändert. Der neue unabhängige
+Reviewer hat alle15 geänderten/neuen Dateien und ihre vollständigen
+Produktionspfade geprüft; zwei eigene Tests mit vier Memory/redb-Szenarien
+bestanden. Die erste unterbrochene Reviewrunde lieferte keine Abnahme.
+[Runtimeabnahme](agent-tasks/SIM-03_4a_COLLECTOR_LIFECYCLE_REVIEW.md).
+Sessionretirement, Consumerreferenzen und Appaktivierung bleiben eigene Verbraucher.
 
 GEN-05.6 ist unabhängig CLEAN als `34c8875e` integriert. Der konkrete
 GEN-05.7-Temperaturvertrag ist CLEAN auf Vertragsumfang. Die finale genuine
@@ -219,14 +221,16 @@ Inventory-/Blockwirkung. Runtimeabnahme steht aus; keine getrennten Legacywrites
 dürfen die gemeinsame Wirkung umgehen. DUR-03.3a, die explizite Offline-Migration
 Format6→7, folgt separat vor DUR-05.
 Die aktiven Aufträge wurden nach Providerabbrüchen mit ihrer bestehenden Arbeit
-wieder aufgenommen: GEN-05.8-Vertrag/Originaloracle, unabhängiger SIM-03.4a-
-Runtimereview und DUR-03.3-Storageimplementierung. Kein abgebrochener Auftrag
+wieder aufgenommen: GEN-05.8-Vertrag/Originaloracle und DUR-03.3-
+Storageimplementierung. Der unabhängige SIM-03.4a-Runtimereview ist abgeschlossen.
+Kein abgebrochener Auftrag
 wurde als abgenommen gewertet.
 Der nächste vorbereitete Anschluss ist der
 [native Driver-/Endpointworkorder NET-04.2d](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_TASK.md):
 tatsächlich konsumierter Receiver/Owner, Nativejoin und originale Detach-/
-Retirementfolge. Noch nicht vergeben; Produktionsänderungen folgen einem
-konkreten Vertragsreview und den tatsächlichen Voraussetzungstickets.
+Retirementfolge. Der nach dem Review frei gewordene Agentenslot erhält diesen
+readonly Vertragsauftrag. Produktionsänderungen folgen einem konkreten
+Vertragsreview und den tatsächlichen Voraussetzungstickets.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:
