@@ -10,8 +10,8 @@ graph metadata. They validate all 35 definitions, including unused graphs.
 `RouterTemplate::bind_seed` now constructs an immutable `SeededRouter` for
 explicit seeds. It samples the fifteen original router fields, all 35 named
 definitions and six climate axes in the original empty-Blender point context.
-The executable server still uses the flat generator described below; biome,
-surface and actual chunk adoption need their own consumers.
+The executable server still uses the flat generator described below; surface
+and actual chunk adoption need their own consumers.
 The separately bounded `SeededRouter::fresh_paper_noise_chunk` now executes
 original Paper interpolation, cache wrappers and one complete material-density
 loop. Its `sample_chunk_materials` alternative follows aquifer, vein and
@@ -78,7 +78,22 @@ actual-Paper arrays (7,077,888 states and flags),499 independent finite endpoint
 cases and42 enabled-aquifer/cache/tie cases, including original request/RNG
 chronology and cache snapshots. Fifteen nonfinite original-Java probes instead
 verify Rust's additional typed refusal policy. All541 finite endpoint cases
-have separate exact shared-budget boundaries. Independent review remains open.
+have separate exact shared-budget boundaries.
+
+The separate `biome_selection` consumer builds the exact original builtin
+`RTree` and owns its ordered selection history explicitly. `BiomeSourceSession`
+supports checked multinoise, fixed resources and the original five-biome End
+source. `sample_chunk_biomes` fills a complete explicit `BiomeQuartGeometry`
+before material execution, including the full 256-block Nether/End accessor
+above their 128-block noise settings. It never infers a biome source from
+settings or publishes a partial array. A rejected executed operation retains
+prior multinoise history and poisons both sessions until explicit reset.
+The [biome-selection oracle](tests/reference/biome_selection.md) compares both
+complete original trees, all3287 retained-history/tie queries,156 actual
+`createBiomes` arrays and27 original End radius/f64-threshold probes. Output
+identities are checked local resources, with no wire/persisted-ID assignment.
+Source/session scheduling, custom parameter/source producers, surface rules,
+carvers, features, structures and active natural worlds remain separate work.
 
 This crate owns the world's block-storage value types and a flat-world
 generator:

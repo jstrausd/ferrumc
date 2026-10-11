@@ -257,6 +257,7 @@ pub struct NoiseChunkSession {
     climate: [usize; 6],
     work: SampleWork,
     surface: SurfaceCache,
+    biome_phase: Lifecycle,
 }
 impl SeededRouter {
     /// Binds a complete fresh 16×16 Paper-noise chunk, without blending,
@@ -291,6 +292,7 @@ impl NoiseChunkSession {
             climate,
             work,
             surface: SurfaceCache::new(),
+            biome_phase: Lifecycle::Fresh,
         })
     }
     /// Full original signed seed bits.
@@ -372,6 +374,44 @@ impl NoiseChunkSession {
         let candidate = Self::new(Arc::clone(&self.data), self.chunk, budget)?;
         *self = candidate;
         Ok(())
+    }
+    pub(crate) fn begin_biome_array(&mut self) -> Result<(), NoiseChunkError> {
+        self.state
+            .require(Lifecycle::Fresh, "sample_chunk_biomes")?;
+        if self.biome_phase != Lifecycle::Fresh {
+            return Err(fail(NoiseChunkErrorKind::Lifecycle {
+                operation: "sample_chunk_biomes",
+                phase: "biomes_already_used",
+            }));
+        }
+        self.biome_phase = Lifecycle::Running;
+        Ok(())
+    }
+    pub(crate) fn finish_biome_array(&mut self, success: bool) {
+        self.biome_phase = if success {
+            Lifecycle::Complete
+        } else {
+            self.state.lifecycle = Lifecycle::Poisoned;
+            Lifecycle::Poisoned
+        };
+    }
+    // End asks the original cached erosion root at a transformed center and
+    // compares f64 directly; a quantized/f32 ClimateSample changes thresholds.
+    pub(crate) fn cached_biome_erosion(&mut self, pos: BlockPos) -> Result<f64, NoiseChunkError> {
+        check_position(pos)?;
+        self.state.require_query("cached_biome_erosion")?;
+        let result = self.state.sample(
+            &self.data,
+            &self.view,
+            self.climate[ClimateAxis::Erosion as usize],
+            pos,
+            false,
+            &mut self.work,
+        );
+        if result.is_err() {
+            self.state.lifecycle = Lifecycle::Poisoned;
+        }
+        result
     }
     fn preliminary(&mut self, pos: BlockPos) -> Result<i32, NoiseChunkError> {
         let x = (pos.x() >> 2) * 4;

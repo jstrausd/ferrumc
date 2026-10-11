@@ -48,6 +48,7 @@ pub(super) fn probe(kinds: Vec<(BoundKind, &'static str)>, root: usize) -> Noise
         climate: [root; 6],
         work,
         surface: SurfaceCache::new(),
+        biome_phase: Lifecycle::Fresh,
     }
 }
 pub(super) fn marker(s: &mut NoiseChunkSession, kind: Marker, input: usize) -> usize {

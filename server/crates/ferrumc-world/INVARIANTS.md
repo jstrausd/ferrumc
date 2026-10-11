@@ -2,6 +2,56 @@
 
 > Rules that must hold for all code in this crate. Violating these is a bug.
 
+## Original biome selection and complete biome arrays
+
+- `BiomeTree` consumes only checked builtin ordered parameter resources. It
+  retains every repeated entry, exact stable seven-axis RTree structure and
+  original leaf ordinal. Original strict comparisons and Java wrapping i64
+  distance arithmetic apply to the entire quantized i64 target domain; there
+  is no linear search or alternate tie resolver. Tree data are immutable Arc-
+  shared, while selection history and cumulative work are exclusively owned.
+- Construction reserves a metered exact count-only original bucket shape
+  before allocation. Separate caps are8192 parameters,10000 nodes,9999 edges,
+  depth8,2MiB retained native capacity and1MiB simultaneous scratch. Fallible
+  reservations and before-growth checks discard every failed candidate. Build
+  allowance is1..=67108864; queries share1..=268435456 until explicit reset.
+- Source identity is explicit multinoise, one checked fixed resource or the
+  original five checked End resources. Noise settings do not choose a source.
+  Moving a scalar session into a source transfers its exact history, status and
+  cumulative meter. Fixed and End never acquire a multinoise leaf history;
+  fixed performs no climate work. Source reset is allocation-free and returns
+  live/cold/zero-work without changing identity or silently resetting noise.
+- `BiomeQuartGeometry` is a full independent height accessor:1..32 complete
+  sections, aligned minimum, checked internal i32 Y. It must contain the entire
+  admitted noise interval; accessors requiring original forChunk height
+  clamping are refused before work/state mutation. Full Nether/End arrays
+  cover0/256 although their original noise settings cover0/128.
+- Execution order is ascending section-Y, local-X, local-Y, local-Z. Storage is
+  ascending quart-Y/X/Z. At most2048 values and8192 simultaneously staged/final
+  native capacity bytes are admitted fallibly before allocation. No per-quart
+  allocation, runtime parser, IO, wire ID or partial output is introduced.
+- A noise session admits one biome phase only while its material/density phase
+  is Fresh. Successful biomes retain Fresh material authority; failed execution
+  poisons noise and source. Multinoise history commits once after complete
+  publication; failure retains caller-visible pre-array history. Admission
+  failure is mutation-free. Each session must reset explicitly; resetting one
+  never heals the other. Source work stays cumulative over different chunks.
+- End preserves the original checked section-center transform and i64 radius
+  test<=4096, then uses cached erosion f64 at the transformed center. Thresholds
+  are>0.25,>=-0.0625,<-0.21875 in that order. Existing noise finite-value refusal
+  applies; no f32 climate substitution or fallback biome is allowed. The local
+  ±30M transform admission rejects qX7500000 (center30000008), admits qX7499999
+  and qX-7500000, and preserves negative arithmetic floors. This is FerrumC
+  admission policy, not a claim to Java's coordinate-wrap/NaN behavior.
+- Complete original tree/scalar evidence is adopted unchanged. New156 whole
+  arrays execute actual original createBiomes, empty blending and the real
+  StructureManager/Beardifier reading only original empty references through a
+  fail-closed LevelAccessor. Instrumentation delegates each original source/
+  root once and verifies24 unwrapped generator baselines.27 original End probes
+  independently establish exact radius/threshold equality. Numerical compute
+  acceptance does not install chunks, client palettes, persistence histories,
+  surface/carvers/features/structures, scheduling, Survival or Java plugins.
+
 ## General
 
 - No `unwrap()` or `expect()` outside `#[cfg(test)]`.

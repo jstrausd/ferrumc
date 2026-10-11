@@ -1,7 +1,8 @@
 # GEN-05.5 — originale Biomeauswahl und vollständige Quartarrays
 
-Status: vorbereitet; Worldproduktion nach unabhängig geprüfter REG-BIOME-01-
-Integration und konkretem Autorentwurf. Ein Autor besitzt ausschließlich
+Status: Worldproduktion und Autorabnahme umgesetzt; unabhängiger Rootreview
+vor Integration ausständig. REG-BIOME-01 ist integriert und der konkrete
+Autorentwurf wurde vor Produktionsbeginn freigegeben. Ein Autor besitzt ausschließlich
 `server/crates/ferrumc-world/**` und diesen Brief. Registry, Sim, Storage,
 App, Protokoll, bestehende Reviews und Rootboards bleiben readonly.
 
@@ -81,3 +82,76 @@ mit N/N-1 prüfen. Vorhandene Material-/Density-/Noise-/RNG-Fixtures bleiben
 bytegleich. WholeWorld Debug/Release, strict Alltargetclippy/Fmt/Rustdoc,
 exakter Filefreeze und unabhängiger Review. Surface, Carvers, Features,
 Strukturen, natürliche Appwelt und Survival S1–S6 bleiben eigene Abnahmen.
+
+## Konkrete Autorproduktion und Evidenz
+
+`biome_selection` liefert den unveränderlichen, exakt ursprünglich geordneten
+RTree aus checked Registryparametern und explizit besessene History. Seine
+quantisierten Targets unterstützen die vollständigen sechs i64-Domänen mit
+original wrapping long-Distanzen. From-builtin ist der einzige Treeproducer;
+keine externen/custom Parameter, Parser oder fallback IDs werden eingeführt.
+Treeaufbau plant die exakte ursprüngliche Bucketshape vor fallible Allocation.
+Caps:8192Parameter/10000Nodes/9999Edges/Depth8,2MiBretained/1MiBscratch,
+67108864Buildwork und268435456 kumulative Sourcework.
+
+`BiomeSourceSession` besitzt Multinoise, checked Fixed oder die fünf originalen
+Endkeys. Der Transfer eines Scalarselectors erhält Tree, History, Meter und
+Poisonstatus exakt. Fixed/End-Konstruktion sowie Source-reset allokieren nicht.
+`BiomeQuartGeometry` trägt den tatsächlichen unabhängigen Heightaccessor;
+1..32 sectionalignedSections, checkedY, vollständigeContainmentprüfung der
+vorhandenen Noisegeometry. Nether/End verwenden echte0/256Biomelayouts neben
+0/128Noise. Sourcebindung wird nie aus NoiseSettings geraten.
+
+Vollständige Arrays sind in originaler SectionY/X/Y/Z-Abfolge erzeugt und
+QuartY/X/Z gespeichert, maximal2048Values und8192 gemeinsam staged/finalnative
+Bytes. Sie enthalten ausschließlich opaque lokale checked Ressourcenidentität,
+keine Wire-/Persistenzpalette. Eine eigene Noise-Biomephase precedes die noch
+Fresh Materialphase. ExecutedFailure dropt die Partialarray, erhält die vor
+Arraystart sichtbare Lastleaf und poisoned beide Sessions; expliziter Reset
+beider Objekte ist erforderlich. Admissionfailure lässt liveWork unangetastet.
+End benutzt den tatsächlichen checkedSectioncenter, i64Radius und cachedf64-
+Erosion. Seine ±30MTransformrefusals sind die dokumentierte FerrumC-Policy.
+
+Originaltrees und sämtliche3287Queries werden unverändert aus der vorhandenen
+Rootfreeze adoptiert. Der neue genuine Helper verwendet actualcreateBiomes,
+originalProtoChunk/Sectiongetter/WorldPreset/DimensionType/RandomState sowie
+realStructureManager/Beardifier mit fail-closedexaktem originalleerem
+STRUCTURE_REFERENCES-Chunk. Er delegates jede tatsächliche Quelle/Root einmal;
+24 uninstrumentierte Originalgeneratorbaselines liefern identische Arrays.
+
+Die finale156erCorpus enthält88MultiNoise,64End,4Fixedfullarrays. Vier echte
+MultiNoisebindings ×4signedSeeds ×4Chunks werden cold geprüft;16normaleWarm-
+Forward/Reversearrays und8zusätzliche warmSource-sharingArrays wechseln echte
+normal/large_biomes/amplifiedSettings. In beiden Sharedfolgen sind tatsächlich
+identische originalParameterList- und RTree-Objekte durch6expliziteJava-`==`-
+Checks festgestellt und im Receipt vermerkt. Alle5Endkeys und27genuine
+Threshold/radiusProbes einschließlichf64Neighborwerten sind abgedeckt.
+Rust prüft jeden kompletten Arraywert, jede actualQuartkoordinate und Lastleaf-
+Ordinalfolge sowie jeden tatsächlichen Endcenter/f64Bitwert. Unabhängige
+Rustsessions auf identischem Tree und alle8synthetischen OriginaltieControls
+prüfen getrennte History. Der vollständige Originaltrace bleibt im Reviewarchiv;
+ein geprüftes, gehashtes9.73MBProjectionfixture erhält alle Array-/Quart-/
+Ordinal-/Endf64Werte und die Boundarydensitytraces.
+
+Fixed50RepoSource-/Evidence-/Helperpins,3JDKpins, inner+119Librariespre/post,
+canonicalSourceguard, Classshadowrefusal und5Envguards gelten. ActualCodeSources
+prüfen45Originalklassen,4Helper und4Libraries. Normal/-OExports sind bytegleich;
+8Negativguards normal/-O unterscheiden echteEnvrefusals von deklarierten
+Hash-/ZIPnamelistFaultinjections ohne Veränderung originaler Artefakte.
+
+Autorchecks: WholeWorldDebug/Release je262Tests grün (216unit+46integration),
+strictalltargetClippy, Worldfmt und Rustdoc-Dwarnings grün. Ein vorübergehender
+fremder SIM-WIPformatdiff wurde vom zuständigen Autor behoben; finales
+SharedWorkspacefmt und isoliertes HEAD+Worldoverlay-Fmt sind grün.
+Nach Ergänzung ausschließlich der8SharedarrayFixtures werden die beiden
+genuineArraytests Debug/Release zusätzlich ausgeführt. Alle40vorhandenen
+.4Fixturedateien bleiben bytegleich. NativeTreegrößen aufx86_64/Rust1.99.0:
+Node128Bytes, Tree96Bytes; Overworld9112×128+7593×2+96=1181618Bytes,
+Nether6×128+5×2+96=874Bytes. PeakBuildscratch47190/20Bytes; Buildwork
+10845171/184. MaximalesQuartoutput2048×(OptionId2+Id1)=6144nativeBytes.
+Diese Größen sind keine Prozess-RSS- oder TPSmessung.
+
+Exakter Autorfreeze und Checkreceipt liegen unter `.codex-tmp/gen05_5-author-*`;
+Root prüft und integriert unabhängig. Appaktivierung, Surface, Carvers,
+Feature-/Strukturproducer, Nachbar-/Biomezoomconsumer, ursprüngliche
+Tick-/Survivallogik und Java/Paperplugins bleiben ausdrücklich Folgearbeit.

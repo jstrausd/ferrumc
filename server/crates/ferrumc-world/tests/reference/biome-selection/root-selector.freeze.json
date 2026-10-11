@@ -1,0 +1,70 @@
+{
+  ".codex-tmp/gen05_5-root-biome-census-normal/parameters.json": {
+    "bytes": 1072932,
+    "sha256": "4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-normal/classes/ferrumc/rootselector/BiomeSelectorOracle.class": {
+    "bytes": 13159,
+    "sha256": "17d2e84bb245c0cba32fb8d0441aa843fe60d33ea60c52f6ade40e6700d76df7"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-normal/logs/latest.log": {
+    "bytes": 133,
+    "sha256": "d44da61cda7a104f2597c987c5d9cf2b9d372171ab799a34d0027b664cc5c4e0"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-normal/manifest.json": {
+    "bytes": 31381,
+    "sha256": "4063ddea1fdaa3b64b3a753345f1215f4368ef12d737b70cfc7e77d05a008b46"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-normal/queries.jsonl": {
+    "bytes": 439408,
+    "sha256": "d27c53a50d59a58b51ba5c81f7c6269da5811bcb664c568384772f320b12edf0"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-normal/selector.log": {
+    "bytes": 126,
+    "sha256": "498f1cdcc377d5e3a14fdf602bd0a6eb2293ef3e42dc2de564a07bc257816110"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-normal/trees.json": {
+    "bytes": 1118379,
+    "sha256": "fc0d880f2a8b45461b7b9ddbb12bf2a05481492d26137a68c07a0cfe248ef861"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-optimized/classes/ferrumc/rootselector/BiomeSelectorOracle.class": {
+    "bytes": 13159,
+    "sha256": "17d2e84bb245c0cba32fb8d0441aa843fe60d33ea60c52f6ade40e6700d76df7"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-optimized/logs/latest.log": {
+    "bytes": 133,
+    "sha256": "e7e8067fa6bc45aa4bc913b3a1a181fb88e32cde169363dd1acb08d01b3ac6ec"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-optimized/manifest.json": {
+    "bytes": 31381,
+    "sha256": "4063ddea1fdaa3b64b3a753345f1215f4368ef12d737b70cfc7e77d05a008b46"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-optimized/queries.jsonl": {
+    "bytes": 439408,
+    "sha256": "d27c53a50d59a58b51ba5c81f7c6269da5811bcb664c568384772f320b12edf0"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-optimized/selector.log": {
+    "bytes": 126,
+    "sha256": "a2959262e06255643a093a7b673acfb23aad1a190248aedb7f643a7f9c90f802"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle-optimized/trees.json": {
+    "bytes": 1118379,
+    "sha256": "fc0d880f2a8b45461b7b9ddbb12bf2a05481492d26137a68c07a0cfe248ef861"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle/BiomeSelectorOracle.java": {
+    "bytes": 10251,
+    "sha256": "c0671ac6f61eed70ab8b39303a39e69c7bc9ed6e302b9dc9f4c2457558419a22"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle/analysis.json": {
+    "bytes": 2330,
+    "sha256": "a2ec122dda01247c1a4f5bd74e571d593bf64069c77d66c4fe43010a0e2898b4"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle/env-guard-results.json": {
+    "bytes": 276,
+    "sha256": "e5ba6936b40224f534b137fae9a1e7aa2301abd06101ee99134b6787092b4fdc"
+  },
+  ".codex-tmp/gen05_5-root-selector-oracle/run_selector.py": {
+    "bytes": 5797,
+    "sha256": "f2b18316268828a3a8a1e52ed32f72e03d95642c9ff101ce64af3e6a5456ddfd"
+  }
+}

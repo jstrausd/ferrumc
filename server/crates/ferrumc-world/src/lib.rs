@@ -33,6 +33,7 @@
 //! [`pack_motion_blocking_heightmap`] for the heightmap long array, and
 //! [`ChunkLightData`] for the light masks and full-bright sky arrays.
 
+pub mod biome_selection;
 mod block_entity;
 mod block_entity_codec;
 mod block_state;
