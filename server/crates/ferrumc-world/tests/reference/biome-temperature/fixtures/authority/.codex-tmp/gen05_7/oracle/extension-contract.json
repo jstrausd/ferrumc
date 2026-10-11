@@ -1,0 +1,30 @@
+{
+  "biomes": [
+    "minecraft:deep_frozen_ocean",
+    "minecraft:frozen_ocean"
+  ],
+  "combined_cap": 150000,
+  "combined_temperature_rows_per_mode": 129588,
+  "direct_noise_observations_per_row": 3,
+  "extension_policy": "Keep every grid row; if inner-false still absent report gap, no further search",
+  "generator_sha256": "8ffdd00502f71df73e21230332e8ae3d454926fdd9cc2a5264fb0baccba92114",
+  "inputs_sha256": "8e5f79b25405651f5d2d3989b159a8dbfcc75e060f0b4d61c29e4c58ed3ce5c0",
+  "order": "listed biome, ascending X, ascending Z; Z changes fastest",
+  "original_case_contract_sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c",
+  "original_methods": [
+    "private getHeightAdjustedTemperature",
+    "modifier.modifyTemperature",
+    "Paper public temperature/rain/cold/melt/precipitation",
+    "actual fixed PerlinSimplex.getValue falseOffsets at X/Z*0.05, *0.2 and *0.09"
+  ],
+  "original_noise_observations": 98304,
+  "scalar_rows": 32768,
+  "schema": 1,
+  "scope": "Separately Root-approved fixed complete Frozen grid; no output-selected coordinates; frozen before original grid invocation",
+  "sea": 63,
+  "x_max": 63,
+  "x_min": -64,
+  "y": 79,
+  "z_max": 63,
+  "z_min": -64
+}

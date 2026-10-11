@@ -1,0 +1,195 @@
+{
+  "authority": {
+    ".codex-tmp/gen05_7/design.freeze.json": "f195f5c080335b9118083b60c3325f721b03123cd1f89f0d87f764b2f03de013",
+    ".codex-tmp/gen05_7/oracle.freeze.json": "e785007c594f1be18ce957c23f70652ab6a01da8fa80582eb3fec703572371bd",
+    ".codex-tmp/gen05_7/oracle/extension-contract.json": "cacfd7cdb7bfda05e05bb6e9c3f6ad67e138cd934d909328f58a8901b0310c49",
+    ".codex-tmp/gen05_7/oracle/frozen-extension-inputs.tsv": "8e5f79b25405651f5d2d3989b159a8dbfcc75e060f0b4d61c29e4c58ed3ce5c0",
+    ".codex-tmp/gen05_7/oracle/input-pins.json": "cae06b94b446ce6c07f644541b2b7c689c34e92d4a8d29bf01368981b206c9a8",
+    "docs/agent-tasks/GEN-05_7_BIOME_TEMPERATURE.md": "be5b6f86ba846af690cf81f10b0b24b864796fadd44e63b0ce92c0906122d7a8"
+  },
+  "expectations": "Only actual original output tokens; no arithmetic, normalization or substituted bits.",
+  "imported_outputs": {
+    "authority/.codex-tmp/gen05_7/census/metadata.json": {
+      "bytes": 25539,
+      "sha256": "c5cbff74cc572c67e1f0747e7e2014f41555897fed3377d3b361e32d84059cfc"
+    },
+    "authority/.codex-tmp/gen05_7/design.freeze.json": {
+      "bytes": 13093,
+      "sha256": "f195f5c080335b9118083b60c3325f721b03123cd1f89f0d87f764b2f03de013"
+    },
+    "authority/.codex-tmp/gen05_7/design/build_case_contract.py": {
+      "bytes": 7652,
+      "sha256": "ad41a8a42778e71e1f5b8883a0e27d4d0854a98b55c338d62519d559e3226ac9"
+    },
+    "authority/.codex-tmp/gen05_7/design/cases.json": {
+      "bytes": 773656,
+      "sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c"
+    },
+    "authority/.codex-tmp/gen05_7/oracle.freeze.json": {
+      "bytes": 25965,
+      "sha256": "e785007c594f1be18ce957c23f70652ab6a01da8fa80582eb3fec703572371bd"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/TemperatureOracle.java": {
+      "bytes": 18675,
+      "sha256": "15522911142e0269d63162af6714bacf108205e010d994425b64a1497cc88aaa"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/check_guards.py": {
+      "bytes": 5687,
+      "sha256": "f73c5b2081111b824412598a54485796444219cad84b24f38961cb236df46889"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/extension-contract.json": {
+      "bytes": 1212,
+      "sha256": "cacfd7cdb7bfda05e05bb6e9c3f6ad67e138cd934d909328f58a8901b0310c49"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/input-pins.json": {
+      "bytes": 178188,
+      "sha256": "cae06b94b446ce6c07f644541b2b7c689c34e92d4a8d29bf01368981b206c9a8"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/paper-library-origins.properties": {
+      "bytes": 1250,
+      "sha256": "46a60969d397cf221f25f960415322e990a61b98c4d6377e0ebde6faef0f6ad0"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/prepare_extension.py": {
+      "bytes": 5613,
+      "sha256": "8ffdd00502f71df73e21230332e8ae3d454926fdd9cc2a5264fb0baccba92114"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/prepare_inputs.py": {
+      "bytes": 9386,
+      "sha256": "3d0e870550e71e75a8058eae0945cf7f9b82f80731cb115f8b8fd8f3db08c634"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/run_oracle.py": {
+      "bytes": 12787,
+      "sha256": "c8228f06c78d46125c9d973361f94caafe3b344da268ee3b1b450b08a89c48c4"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/semantic-mappings.properties": {
+      "bytes": 6037,
+      "sha256": "8d41fbd3a9c3774efa37cf21e92fd61744bc916e8c08dfe40896c47ce6f985e5"
+    },
+    "authority/.codex-tmp/gen05_7/oracle/vanilla-library-origins.properties": {
+      "bytes": 1194,
+      "sha256": "28e9e90bd720b81e0503eb18b583e70a447b63e9069b8c4eeacd94eb124d09de"
+    },
+    "authority/docs/agent-tasks/GEN-05_7_BIOME_TEMPERATURE.md": {
+      "bytes": 19492,
+      "sha256": "be5b6f86ba846af690cf81f10b0b24b864796fadd44e63b0ce92c0906122d7a8"
+    },
+    "authority/docs/agent-tasks/GEN-05_7_BIOME_TEMPERATURE_CONTRACT_REVIEW.md": {
+      "bytes": 2843,
+      "sha256": "b74d7ddbc915072bac8a2e6ee31184a9487c0e6eaf834e48135379aeb425d11a"
+    },
+    "authority/docs/agent-tasks/GEN-05_7_BIOME_TEMPERATURE_ORACLE_REVIEW.md": {
+      "bytes": 3874,
+      "sha256": "9052b3e1c10795ffe553afe190a6ea661b188326f4bd5cc1a29e85dd61ad1002"
+    },
+    "diagnostics.json": {
+      "bytes": 29916,
+      "sha256": "c51835330260d4bdb1ed519bd33382042893151a5d44dac2d1e20f78c69390c8"
+    },
+    "metadata.tsv": {
+      "bytes": 3338,
+      "sha256": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783"
+    },
+    "noise.tsv": {
+      "bytes": 25064,
+      "sha256": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0"
+    },
+    "paper-constructors.tsv": {
+      "bytes": 7656,
+      "sha256": "09410d79a725be210d598fcd297f686ba04f1a5643eb42ca15fad34f1bf2b7d8"
+    },
+    "paper-origins.tsv": {
+      "bytes": 3671,
+      "sha256": "5eb12a778632551a848e8ab7c9b3f11549f5f506487c2bacac974f93903f17c6"
+    },
+    "temperatures.tsv": {
+      "bytes": 21086624,
+      "sha256": "e0f363ca4a2e3333602ab519ec17636a86e2600a2d028ceba80226c6c899f93d"
+    },
+    "vanilla-constructors.tsv": {
+      "bytes": 7656,
+      "sha256": "51183d2a58c2aeb66b8ad3d1c4767ae1fd839b239a33a5733eee7956c7d980d6"
+    },
+    "vanilla-origins.tsv": {
+      "bytes": 2118,
+      "sha256": "2b7cc27235a7099b71c46ab4feee9fab11c2323e4a2bf702757f9a0e86de729a"
+    }
+  },
+  "omitted": "Only full cache FIFO strings; original cache.tsv hashes and all diagnostic differences retained.",
+  "original_outputs": {
+    "paper/cache.tsv": {
+      "bytes": 371594,
+      "sha256": "bcf2a9b47a45d70192df37269cd946e4f6057a8e11426956e1826688918cfe25"
+    },
+    "paper/constructors.tsv": {
+      "bytes": 7656,
+      "sha256": "09410d79a725be210d598fcd297f686ba04f1a5643eb42ca15fad34f1bf2b7d8"
+    },
+    "paper/frozen-extension.tsv": {
+      "bytes": 5256272,
+      "sha256": "a6005f73212d24c70deb3068e829b24fcb480ba2b9ea5b451d93e8316fd7651d"
+    },
+    "paper/metadata.tsv": {
+      "bytes": 3338,
+      "sha256": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783"
+    },
+    "paper/mutable.tsv": {
+      "bytes": 8624,
+      "sha256": "8c5c6b3eef0621ccbae2009824a90068d8479765c9cdb1c662b99ce1c519db36"
+    },
+    "paper/noise.tsv": {
+      "bytes": 25064,
+      "sha256": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0"
+    },
+    "paper/origins.tsv": {
+      "bytes": 3671,
+      "sha256": "5eb12a778632551a848e8ab7c9b3f11549f5f506487c2bacac974f93903f17c6"
+    },
+    "paper/scalar.tsv": {
+      "bytes": 9849413,
+      "sha256": "da7789e7b90e4c1f558b36b35c246658c37e03303aa63485485abc59e11ea903"
+    },
+    "vanilla/cache.tsv": {
+      "bytes": 25254263,
+      "sha256": "976a986972fb5e7c09e09592dd7d3ce868adff59f26391610ebb6c4a387d294f"
+    },
+    "vanilla/constructors.tsv": {
+      "bytes": 7656,
+      "sha256": "51183d2a58c2aeb66b8ad3d1c4767ae1fd839b239a33a5733eee7956c7d980d6"
+    },
+    "vanilla/frozen-extension.tsv": {
+      "bytes": 4594176,
+      "sha256": "fcba3df18283548c3450602d2c3363960ffe5ef6d55b7274484550edd30db773"
+    },
+    "vanilla/metadata.tsv": {
+      "bytes": 3338,
+      "sha256": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783"
+    },
+    "vanilla/mutable.tsv": {
+      "bytes": 7504,
+      "sha256": "43fac162bc204c015ac2e946a16fc9408d9ca73101ca2faa5431d817e7dcf048"
+    },
+    "vanilla/noise.tsv": {
+      "bytes": 25064,
+      "sha256": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0"
+    },
+    "vanilla/origins.tsv": {
+      "bytes": 2118,
+      "sha256": "2b7cc27235a7099b71c46ab4feee9fab11c2323e4a2bf702757f9a0e86de729a"
+    },
+    "vanilla/scalar.tsv": {
+      "bytes": 7934256,
+      "sha256": "1c3caf81639d5ef9185d10838d85d31b322710a4815143703442f0ab69777212"
+    }
+  },
+  "pre_post_unchanged": {
+    "actual_inputs": 757,
+    "design": 64,
+    "evidence": 119
+  },
+  "rows": {
+    "C": 3156,
+    "F": 32768,
+    "M": 80,
+    "S": 93584
+  }
+}

@@ -1,0 +1,1077 @@
+{
+  "cache_checkpoints": [
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:plains/fifo/1023",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:plains/fifo/1024",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:plains/fifo/1025",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "274877907072",
+        "549755814016",
+        "824633720960",
+        "1099511627904"
+      ],
+      "actual_last_keys": [
+        "280650342989952",
+        "280925220896896",
+        "281200098803840",
+        "281474976710784"
+      ],
+      "id": "cache/minecraft:plains/fifo/1026",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "274877907072",
+        "549755814016",
+        "824633720960",
+        "1099511627904"
+      ],
+      "actual_last_keys": [
+        "280650342989952",
+        "280925220896896",
+        "281200098803840",
+        "281474976710784"
+      ],
+      "id": "cache/minecraft:plains/fifo/1027",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "549755814016",
+        "824633720960",
+        "1099511627904",
+        "1374389534848"
+      ],
+      "actual_last_keys": [
+        "280925220896896",
+        "281200098803840",
+        "281474976710784",
+        "128"
+      ],
+      "id": "cache/minecraft:plains/fifo/1028",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "824633720960",
+        "1099511627904",
+        "1374389534848",
+        "1649267441792"
+      ],
+      "actual_last_keys": [
+        "281200098803840",
+        "281474976710784",
+        "128",
+        "274877907072"
+      ],
+      "id": "cache/minecraft:plains/fifo/1029",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "1924145348736",
+        "2199023255680",
+        "2473901162624",
+        "2748779069568"
+      ],
+      "actual_last_keys": [
+        "549755814016",
+        "281749854617728",
+        "824633720960",
+        "1099511627904"
+      ],
+      "id": "cache/minecraft:plains/fifo/1039",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1023",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1024",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1025",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "274877907072",
+        "549755814016",
+        "824633720960",
+        "1099511627904"
+      ],
+      "actual_last_keys": [
+        "280650342989952",
+        "280925220896896",
+        "281200098803840",
+        "281474976710784"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1026",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "274877907072",
+        "549755814016",
+        "824633720960",
+        "1099511627904"
+      ],
+      "actual_last_keys": [
+        "280650342989952",
+        "280925220896896",
+        "281200098803840",
+        "281474976710784"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1027",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "549755814016",
+        "824633720960",
+        "1099511627904",
+        "1374389534848"
+      ],
+      "actual_last_keys": [
+        "280925220896896",
+        "281200098803840",
+        "281474976710784",
+        "128"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1028",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "824633720960",
+        "1099511627904",
+        "1374389534848",
+        "1649267441792"
+      ],
+      "actual_last_keys": [
+        "281200098803840",
+        "281474976710784",
+        "128",
+        "274877907072"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1029",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "1924145348736",
+        "2199023255680",
+        "2473901162624",
+        "2748779069568"
+      ],
+      "actual_last_keys": [
+        "549755814016",
+        "281749854617728",
+        "824633720960",
+        "1099511627904"
+      ],
+      "id": "cache/minecraft:frozen_ocean/fifo/1039",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1023",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1024",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "128",
+        "274877907072",
+        "549755814016",
+        "824633720960"
+      ],
+      "actual_last_keys": [
+        "280375465083008",
+        "280650342989952",
+        "280925220896896",
+        "281200098803840"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1025",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "274877907072",
+        "549755814016",
+        "824633720960",
+        "1099511627904"
+      ],
+      "actual_last_keys": [
+        "280650342989952",
+        "280925220896896",
+        "281200098803840",
+        "281474976710784"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1026",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "274877907072",
+        "549755814016",
+        "824633720960",
+        "1099511627904"
+      ],
+      "actual_last_keys": [
+        "280650342989952",
+        "280925220896896",
+        "281200098803840",
+        "281474976710784"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1027",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "549755814016",
+        "824633720960",
+        "1099511627904",
+        "1374389534848"
+      ],
+      "actual_last_keys": [
+        "280925220896896",
+        "281200098803840",
+        "281474976710784",
+        "128"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1028",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "824633720960",
+        "1099511627904",
+        "1374389534848",
+        "1649267441792"
+      ],
+      "actual_last_keys": [
+        "281200098803840",
+        "281474976710784",
+        "128",
+        "274877907072"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1029",
+      "size": 1024
+    },
+    {
+      "actual_first_keys": [
+        "1924145348736",
+        "2199023255680",
+        "2473901162624",
+        "2748779069568"
+      ],
+      "actual_last_keys": [
+        "549755814016",
+        "281749854617728",
+        "824633720960",
+        "1099511627904"
+      ],
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1039",
+      "size": 1024
+    }
+  ],
+  "cache_differences": [
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f2947ae",
+      "id": "cache/minecraft:plains/aliases/0001",
+      "private_bits": "3f2947ae",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "c08c28f5",
+      "id": "cache/minecraft:plains/aliases/0002",
+      "private_bits": "c08c28f5",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f3e4f66",
+      "id": "cache/minecraft:plains/aliases/0003",
+      "private_bits": "3f3e4f66",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f3e4f66",
+      "id": "cache/minecraft:plains/aliases/0004",
+      "private_bits": "3f3e4f66",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f4ccccd",
+      "id": "cache/minecraft:plains/aliases/0005",
+      "private_bits": "3f4ccccd",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3f3d5478",
+      "id": "cache/minecraft:plains/aliases/0007",
+      "private_bits": "3f3d5478",
+      "retained_public_bits": "3f3b49bf"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3f3dd650",
+      "id": "cache/minecraft:plains/aliases/0008",
+      "private_bits": "3f3dd650",
+      "retained_public_bits": "3f3b49bf"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3f4ccccd",
+      "id": "cache/minecraft:plains/aliases/0009",
+      "private_bits": "3f4ccccd",
+      "retained_public_bits": "3f3b49bf"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f2947ae",
+      "id": "cache/minecraft:plains/aliases/0010",
+      "private_bits": "3f2947ae",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "ca23d707",
+      "id": "cache/minecraft:plains/aliases/0011",
+      "private_bits": "ca23d707",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f2947ae",
+      "id": "cache/minecraft:plains/fifo/1024",
+      "private_bits": "3f2947ae",
+      "retained_public_bits": "3f3d70a4"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "3f4ccccd",
+      "id": "cache/minecraft:plains/fifo/1025",
+      "private_bits": "3f4ccccd",
+      "retained_public_bits": "3f3eb764"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "3f2a8e6e",
+      "id": "cache/minecraft:plains/fifo/1027",
+      "private_bits": "3f2a8e6e",
+      "retained_public_bits": "3f3eb764"
+    },
+    {
+      "actual_packed_key": 281474976710784,
+      "cold_public_bits": "3f4ccccd",
+      "id": "cache/minecraft:plains/fifo/1030",
+      "private_bits": "3f4ccccd",
+      "retained_public_bits": "3f3e4b15"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "ca23d707",
+      "id": "cache/minecraft:plains/fifo/1034",
+      "private_bits": "ca23d707",
+      "retained_public_bits": "3f3eb764"
+    },
+    {
+      "actual_packed_key": 281200098803840,
+      "cold_public_bits": "ca23d707",
+      "id": "cache/minecraft:plains/fifo/1035",
+      "private_bits": "ca23d707",
+      "retained_public_bits": "3f3efd34"
+    },
+    {
+      "actual_packed_key": 281749854617728,
+      "cold_public_bits": "3f28df4c",
+      "id": "cache/minecraft:plains/fifo/1036",
+      "private_bits": "3f28df4c",
+      "retained_public_bits": "3f3d0842"
+    },
+    {
+      "actual_packed_key": 281474976710784,
+      "cold_public_bits": "3f2a221f",
+      "id": "cache/minecraft:plains/fifo/1038",
+      "private_bits": "3f2a221f",
+      "retained_public_bits": "3f3e4b15"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3f3d70a4",
+      "id": "cache/minecraft:plains/fifo/1039",
+      "private_bits": "3f3d70a4",
+      "retained_public_bits": "3f2947ae"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3d7ae148",
+      "id": "cache/minecraft:frozen_ocean/aliases/0001",
+      "private_bits": "3d7ae148",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "c09f5c29",
+      "id": "cache/minecraft:frozen_ocean/aliases/0002",
+      "private_bits": "c09f5c29",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e12d72f",
+      "id": "cache/minecraft:frozen_ocean/aliases/0003",
+      "private_bits": "3e12d72f",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e12d72f",
+      "id": "cache/minecraft:frozen_ocean/aliases/0004",
+      "private_bits": "3e12d72f",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:frozen_ocean/aliases/0005",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3e0eeb78",
+      "id": "cache/minecraft:frozen_ocean/aliases/0007",
+      "private_bits": "3e0eeb78",
+      "retained_public_bits": "3e06c094"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3e10f2d9",
+      "id": "cache/minecraft:frozen_ocean/aliases/0008",
+      "private_bits": "3e10f2d9",
+      "retained_public_bits": "3e06c094"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:frozen_ocean/aliases/0009",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e06c094"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3d7ae148",
+      "id": "cache/minecraft:frozen_ocean/aliases/0010",
+      "private_bits": "3d7ae148",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "ca23d709",
+      "id": "cache/minecraft:frozen_ocean/aliases/0011",
+      "private_bits": "ca23d709",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3d7ae148",
+      "id": "cache/minecraft:frozen_ocean/fifo/1024",
+      "private_bits": "3d7ae148",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:frozen_ocean/fifo/1025",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e147727"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "3d87a6a0",
+      "id": "cache/minecraft:frozen_ocean/fifo/1027",
+      "private_bits": "3d87a6a0",
+      "retained_public_bits": "3e147727"
+    },
+    {
+      "actual_packed_key": 281474976710784,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:frozen_ocean/fifo/1030",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e12c5ec"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "ca23d709",
+      "id": "cache/minecraft:frozen_ocean/fifo/1034",
+      "private_bits": "ca23d709",
+      "retained_public_bits": "3e147727"
+    },
+    {
+      "actual_packed_key": 281200098803840,
+      "cold_public_bits": "ca23d709",
+      "id": "cache/minecraft:frozen_ocean/fifo/1035",
+      "private_bits": "ca23d709",
+      "retained_public_bits": "3e158e68"
+    },
+    {
+      "actual_packed_key": 281749854617728,
+      "cold_public_bits": "3d745b1c",
+      "id": "cache/minecraft:frozen_ocean/fifo/1036",
+      "private_bits": "3d745b1c",
+      "retained_public_bits": "3e0dba9f"
+    },
+    {
+      "actual_packed_key": 281474976710784,
+      "cold_public_bits": "3d844428",
+      "id": "cache/minecraft:frozen_ocean/fifo/1038",
+      "private_bits": "3d844428",
+      "retained_public_bits": "3e12c5ec"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e0f5c29",
+      "id": "cache/minecraft:frozen_ocean/fifo/1039",
+      "private_bits": "3e0f5c29",
+      "retained_public_bits": "3d7ae148"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3d7ae148",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0001",
+      "private_bits": "3d7ae148",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "c09f5c29",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0002",
+      "private_bits": "c09f5c29",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e12d72f",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0003",
+      "private_bits": "3e12d72f",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e12d72f",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0004",
+      "private_bits": "3e12d72f",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0005",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3e0eeb78",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0007",
+      "private_bits": "3e0eeb78",
+      "retained_public_bits": "3e06c094"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3e10f2d9",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0008",
+      "private_bits": "3e10f2d9",
+      "retained_public_bits": "3e06c094"
+    },
+    {
+      "actual_packed_key": -3968,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0009",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e06c094"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3d7ae148",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0010",
+      "private_bits": "3d7ae148",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "ca23d709",
+      "id": "cache/minecraft:deep_frozen_ocean/aliases/0011",
+      "private_bits": "ca23d709",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3d7ae148",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1024",
+      "private_bits": "3d7ae148",
+      "retained_public_bits": "3e0f5c29"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1025",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e147727"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "3d87a6a0",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1027",
+      "private_bits": "3d87a6a0",
+      "retained_public_bits": "3e147727"
+    },
+    {
+      "actual_packed_key": 281474976710784,
+      "cold_public_bits": "3e4ccccd",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1030",
+      "private_bits": "3e4ccccd",
+      "retained_public_bits": "3e12c5ec"
+    },
+    {
+      "actual_packed_key": 140737488355456,
+      "cold_public_bits": "ca23d709",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1034",
+      "private_bits": "ca23d709",
+      "retained_public_bits": "3e147727"
+    },
+    {
+      "actual_packed_key": 281200098803840,
+      "cold_public_bits": "ca23d709",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1035",
+      "private_bits": "ca23d709",
+      "retained_public_bits": "3e158e68"
+    },
+    {
+      "actual_packed_key": 281749854617728,
+      "cold_public_bits": "3d745b1c",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1036",
+      "private_bits": "3d745b1c",
+      "retained_public_bits": "3e0dba9f"
+    },
+    {
+      "actual_packed_key": 281474976710784,
+      "cold_public_bits": "3d844428",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1038",
+      "private_bits": "3d844428",
+      "retained_public_bits": "3e12c5ec"
+    },
+    {
+      "actual_packed_key": 128,
+      "cold_public_bits": "3e0f5c29",
+      "id": "cache/minecraft:deep_frozen_ocean/fifo/1039",
+      "private_bits": "3e0f5c29",
+      "retained_public_bits": "3d7ae148"
+    }
+  ],
+  "extension_differences": [],
+  "identical_outputs": [
+    {
+      "file": "cache.tsv",
+      "mode": "vanilla",
+      "sha256": "976a986972fb5e7c09e09592dd7d3ce868adff59f26391610ebb6c4a387d294f"
+    },
+    {
+      "file": "constructors.tsv",
+      "mode": "vanilla",
+      "sha256": "51183d2a58c2aeb66b8ad3d1c4767ae1fd839b239a33a5733eee7956c7d980d6"
+    },
+    {
+      "file": "frozen-extension.tsv",
+      "mode": "vanilla",
+      "sha256": "fcba3df18283548c3450602d2c3363960ffe5ef6d55b7274484550edd30db773"
+    },
+    {
+      "file": "frozen-observations.json",
+      "mode": "vanilla",
+      "sha256": "5db40f7c1fd14b8da8db8f1f24a0f337a14c1b3d00b08e0b247e6b8d5a63930a"
+    },
+    {
+      "file": "metadata.tsv",
+      "mode": "vanilla",
+      "sha256": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783"
+    },
+    {
+      "file": "mutable.tsv",
+      "mode": "vanilla",
+      "sha256": "43fac162bc204c015ac2e946a16fc9408d9ca73101ca2faa5431d817e7dcf048"
+    },
+    {
+      "file": "noise.tsv",
+      "mode": "vanilla",
+      "sha256": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0"
+    },
+    {
+      "file": "origins.tsv",
+      "mode": "vanilla",
+      "sha256": "2b7cc27235a7099b71c46ab4feee9fab11c2323e4a2bf702757f9a0e86de729a"
+    },
+    {
+      "file": "scalar.tsv",
+      "mode": "vanilla",
+      "sha256": "1c3caf81639d5ef9185d10838d85d31b322710a4815143703442f0ab69777212"
+    },
+    {
+      "file": "cache.tsv",
+      "mode": "paper",
+      "sha256": "bcf2a9b47a45d70192df37269cd946e4f6057a8e11426956e1826688918cfe25"
+    },
+    {
+      "file": "constructors.tsv",
+      "mode": "paper",
+      "sha256": "09410d79a725be210d598fcd297f686ba04f1a5643eb42ca15fad34f1bf2b7d8"
+    },
+    {
+      "file": "frozen-extension.tsv",
+      "mode": "paper",
+      "sha256": "a6005f73212d24c70deb3068e829b24fcb480ba2b9ea5b451d93e8316fd7651d"
+    },
+    {
+      "file": "frozen-observations.json",
+      "mode": "paper",
+      "sha256": "5db40f7c1fd14b8da8db8f1f24a0f337a14c1b3d00b08e0b247e6b8d5a63930a"
+    },
+    {
+      "file": "metadata.tsv",
+      "mode": "paper",
+      "sha256": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783"
+    },
+    {
+      "file": "mutable.tsv",
+      "mode": "paper",
+      "sha256": "8c5c6b3eef0621ccbae2009824a90068d8479765c9cdb1c662b99ce1c519db36"
+    },
+    {
+      "file": "noise.tsv",
+      "mode": "paper",
+      "sha256": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0"
+    },
+    {
+      "file": "origins.tsv",
+      "mode": "paper",
+      "sha256": "5eb12a778632551a848e8ab7c9b3f11549f5f506487c2bacac974f93903f17c6"
+    },
+    {
+      "file": "scalar.tsv",
+      "mode": "paper",
+      "sha256": "da7789e7b90e4c1f558b36b35c246658c37e03303aa63485485abc59e11ea903"
+    }
+  ],
+  "input_pins_sha256": "cae06b94b446ce6c07f644541b2b7c689c34e92d4a8d29bf01368981b206c9a8",
+  "modes": {
+    "paper": {
+      "cache_max_size": 0,
+      "cache_rows": 3156,
+      "codesources": 47,
+      "combined_temperature_rows": 129588,
+      "direct_noise_samples": 352,
+      "extension_frozen_noise_predicate_observations": {
+        "inner_not_below_0.8": 448,
+        "modified_to_0.2": 19296,
+        "outer_not_below_0.3": 13024
+      },
+      "extension_original_noise_samples": 98304,
+      "extension_scalar_rows": 32768,
+      "finite_original_scalar_rows": 93584,
+      "frozen_noise_predicate_observations": {
+        "inner_not_below_0.8": 0,
+        "modified_to_0.2": 47,
+        "outer_not_below_0.3": 41
+      },
+      "metadata": 65,
+      "mutable_rows": 80,
+      "original_core_draws": [
+        262,
+        786,
+        262
+      ],
+      "outputs": {
+        "cache.tsv": "bcf2a9b47a45d70192df37269cd946e4f6057a8e11426956e1826688918cfe25",
+        "constructors.tsv": "09410d79a725be210d598fcd297f686ba04f1a5643eb42ca15fad34f1bf2b7d8",
+        "frozen-extension.tsv": "a6005f73212d24c70deb3068e829b24fcb480ba2b9ea5b451d93e8316fd7651d",
+        "metadata.tsv": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783",
+        "mutable.tsv": "8c5c6b3eef0621ccbae2009824a90068d8479765c9cdb1c662b99ce1c519db36",
+        "noise.tsv": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0",
+        "origins.tsv": "5eb12a778632551a848e8ab7c9b3f11549f5f506487c2bacac974f93903f17c6",
+        "scalar.tsv": "da7789e7b90e4c1f558b36b35c246658c37e03303aa63485485abc59e11ea903"
+      },
+      "retained_public_different_from_private": 0,
+      "scalar_rows": 93584,
+      "simplex_permutations": 5,
+      "total_rows": 96820
+    },
+    "vanilla": {
+      "cache_max_size": 1024,
+      "cache_rows": 3156,
+      "codesources": 47,
+      "combined_temperature_rows": 129588,
+      "direct_noise_samples": 352,
+      "extension_frozen_noise_predicate_observations": {
+        "inner_not_below_0.8": 448,
+        "modified_to_0.2": 19296,
+        "outer_not_below_0.3": 13024
+      },
+      "extension_original_noise_samples": 98304,
+      "extension_scalar_rows": 32768,
+      "finite_original_scalar_rows": 93584,
+      "frozen_noise_predicate_observations": {
+        "inner_not_below_0.8": 0,
+        "modified_to_0.2": 47,
+        "outer_not_below_0.3": 41
+      },
+      "metadata": 65,
+      "mutable_rows": 80,
+      "original_core_draws": [
+        262,
+        786,
+        262
+      ],
+      "outputs": {
+        "cache.tsv": "976a986972fb5e7c09e09592dd7d3ce868adff59f26391610ebb6c4a387d294f",
+        "constructors.tsv": "51183d2a58c2aeb66b8ad3d1c4767ae1fd839b239a33a5733eee7956c7d980d6",
+        "frozen-extension.tsv": "fcba3df18283548c3450602d2c3363960ffe5ef6d55b7274484550edd30db773",
+        "metadata.tsv": "0181c806f0bd86162eb1f2f527db1473e45ecdd809b64c56bf612f2d681a6783",
+        "mutable.tsv": "43fac162bc204c015ac2e946a16fc9408d9ca73101ca2faa5431d817e7dcf048",
+        "noise.tsv": "f5729fde16b71c809017acc741eaac175ce7e0413206d77b4d0b3304be9077a0",
+        "origins.tsv": "2b7cc27235a7099b71c46ab4feee9fab11c2323e4a2bf702757f9a0e86de729a",
+        "scalar.tsv": "1c3caf81639d5ef9185d10838d85d31b322710a4815143703442f0ab69777212"
+      },
+      "retained_public_different_from_private": 57,
+      "scalar_rows": 93584,
+      "simplex_permutations": 5,
+      "total_rows": 96820
+    }
+  },
+  "normal_optimized_manifest_identical": true,
+  "offset_differences": [
+    {
+      "axis": "x",
+      "level": 0,
+      "noise": "temperature",
+      "paper_f64_bits": "4064b0cd20000000",
+      "vanilla_f64_bits": "4064b0cd12140cbe"
+    },
+    {
+      "axis": "y",
+      "level": 0,
+      "noise": "temperature",
+      "paper_f64_bits": "406e7185c0000000",
+      "vanilla_f64_bits": "406e7185b9e6475b"
+    },
+    {
+      "axis": "z",
+      "level": 0,
+      "noise": "temperature",
+      "paper_f64_bits": "406b715d60000000",
+      "vanilla_f64_bits": "406b715d5a8983f9"
+    },
+    {
+      "axis": "x",
+      "level": 0,
+      "noise": "frozen",
+      "paper_f64_bits": "406b6d5960000000",
+      "vanilla_f64_bits": "406b6d596845cb0b"
+    },
+    {
+      "axis": "y",
+      "level": 0,
+      "noise": "frozen",
+      "paper_f64_bits": "4060b470e0000000",
+      "vanilla_f64_bits": "4060b470d5524726"
+    },
+    {
+      "axis": "z",
+      "level": 0,
+      "noise": "frozen",
+      "paper_f64_bits": "406513a500000000",
+      "vanilla_f64_bits": "406513a4f376702a"
+    },
+    {
+      "axis": "x",
+      "level": 1,
+      "noise": "frozen",
+      "paper_f64_bits": "406e64ba00000000",
+      "vanilla_f64_bits": "406e64b9f90d225a"
+    },
+    {
+      "axis": "y",
+      "level": 1,
+      "noise": "frozen",
+      "paper_f64_bits": "404bdf9560000000",
+      "vanilla_f64_bits": "404bdf9566f319fc"
+    },
+    {
+      "axis": "z",
+      "level": 1,
+      "noise": "frozen",
+      "paper_f64_bits": "4068ed7660000000",
+      "vanilla_f64_bits": "4068ed765b6a50ae"
+    },
+    {
+      "axis": "x",
+      "level": 2,
+      "noise": "frozen",
+      "paper_f64_bits": "4064b472e0000000",
+      "vanilla_f64_bits": "4064b472ead4b41d"
+    },
+    {
+      "axis": "y",
+      "level": 2,
+      "noise": "frozen",
+      "paper_f64_bits": "3ffe9805a0000000",
+      "vanilla_f64_bits": "3ffe9805a3539000"
+    },
+    {
+      "axis": "z",
+      "level": 2,
+      "noise": "frozen",
+      "paper_f64_bits": "4047d5c360000000",
+      "vanilla_f64_bits": "4047d5c35507d10c"
+    },
+    {
+      "axis": "x",
+      "level": 0,
+      "noise": "info",
+      "paper_f64_bits": "406de0caa0000000",
+      "vanilla_f64_bits": "406de0ca90179e71"
+    },
+    {
+      "axis": "y",
+      "level": 0,
+      "noise": "info",
+      "paper_f64_bits": "4061f85cc0000000",
+      "vanilla_f64_bits": "4061f85cb5d59f4f"
+    },
+    {
+      "axis": "z",
+      "level": 0,
+      "noise": "info",
+      "paper_f64_bits": "402bd41b60000000",
+      "vanilla_f64_bits": "402bd41b584bd620"
+    }
+  ],
+  "scope": "Actual originals only; no Rust parity or gameplay",
+  "stateless_difference_count": 0
+}

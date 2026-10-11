@@ -276,6 +276,20 @@ The experimental multi-shard scheduler still uses that legacy capture path;
 it is not the production App path. Crash-atomic updates across player,
 overlay and journal records remain separate work.
 
+## Fixed builtin biome temperature
+
+`biome_temperature::BuiltinBiomeTemperatures` compiles the complete65-biome
+climate table and five fixed Simplex objects into an immutable2232-byte value.
+Construction/clone/query allocate nothing. Queries use checked biome IDs and
+all signed block/sea-level bits, preserving original f32 operation order and
+pure Paper rain/snow/iceberg predicates. No world seed or mutable cache enters
+this producer, and no surface or snow/ice world mutation is activated.
+
+The [temperature reference](tests/reference/biome-temperature/README.md) retains
+all129588 genuine original labelled cases per mode, direct/fixed constructor
+and complete Frozen-grid evidence, explicit Vanilla cache/Paper offset
+differences, parser boundary tests and external allocation measurements.
+
 ## Invariants
 
 See `INVARIANTS.md` in this directory.

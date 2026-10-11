@@ -2,6 +2,54 @@
 
 > Rules that must hold for all code in this crate. Violating these is a bug.
 
+## Fixed builtin biome temperature
+
+- `BuiltinBiomeTemperatures` owns exactly65 checked `BiomeResourceId` records
+  and five Simplex objects by value. Complete construction, clone and stateless
+  query allocate nothing. No worldseed/generic climate/JSON/offset API, cache,
+  mutable global, source callback or query RNG advancement is introduced.
+- Every full static Registry definition is privately syntax-validated, including
+  unrelated spawn/effects/generation fields. The two checked multinoise presets
+  remain a different resource type and never enter this climate table. Only an
+  absent modifier defaults to NONE; FLOAT decodes directly from the original
+  token, precipitation requires BOOL, and modifiers admit only none/frozen.
+- Strict JSON whitespace/numbers/literals/UTF8 escapes and surrogate pairs apply
+  to every consumed source. Duplicate decoded keys, including escaped aliases,
+  fail in all objects.33 depth-indexed frames retain at most256 borrowed key
+  spans each; arrays retain counts only. Two256-byte buffers decode comparisons.
+  Nodes count every key/value including root at depth0. Caps are128KiB/source,
+  4096nodes/source,depth32,256entries/container,256decoded string/key bytes,
+  2MiB distinct-source total,65records,8KiB native retained and1MiB scratch.
+- Allowance is1..=1048576.354535 refuses before parsing/construction;354536
+  admits the full fixed338695bytes +14466nodes +65records +1310 original-draw
+  census. Observed Registry/per-source/aggregate counts must match before
+  publication. Reported work is admission accounting, not a CPU or RNG meter.
+- Fixed Legacy seeds/configurations are1234/[0],3456/[-2,-1,0],2345/[0]. Frozen
+  levels retain original zero-to-negative order, input/value factors and f64
+  accumulation. All sampler calls use offsets=false. Existing private Vanilla
+  offsets remain unobservable; the15 genuine Paper offset differences are
+  preserved separately and Paper constructor bit parity is not claimed.
+- Frozen strict0.3/0.8 branches, altitude sea+17 Java-i32 wrap, horizontal
+  f32 division before f64 widening, noise×8 cast to f32 and separate f32 Y/height
+  operands preserve original operation order. Rain is>=0.15F, cold its negation,
+  melt>0.1F; the actual biome flag independently selects no precipitation.
+  All i32 positions/sea levels are supported, at most six Simplex calls occur,
+  and existing noise/nonfinite refusals remain typed with original context/bits.
+- Actual original differential acceptance uses every129588 labelled temperature
+  row per mode,65metadata records,5permutations,1310draws/final Legacy states,
+  352direct noise probes and98304 extension observations. The complete Frozen
+  grid has19296modified/13024outerfalse/448innerfalse outcomes.57 retained Vanilla
+  public cache differences remain diagnostic; stateless Rust compares genuine
+  private temperatures and actual Paper public predicates, never that cache.
+- Tested native retained layout is2232bytes; conservative simultaneous native
+  parser/build capacity is570216bytes on the pinned64-bit toolchain. Debug and
+  Release external allocator probes include a positive allocation control;
+  stack-write high-water observations supplement a successful1MiB-stack build.
+  These are bounded native/allocator observations, not RSS/TPS/latency promises.
+- Temperature remains a numeric producer only. It resolves no biome coordinates,
+  evaluates no surface rule, mutates no snow/ice/fluid, and activates no generator,
+  chunk installation, runtime/Survival, client, storage or Java-plugin behavior.
+
 ## Original biome zoom coordinate selection
 
 - `BiomeZoomSeed` preserves original Guava SHA-256 seed obfuscation: eight

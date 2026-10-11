@@ -1,0 +1,300 @@
+{
+  "actual_input_files": 661,
+  "case_counts": {
+    "builtin_metadata_records_per_mode": 65,
+    "cache": 3156,
+    "direct_original_noise_samples_per_mode": 352,
+    "mutable": 80,
+    "scalar": 93584,
+    "total_temperature_rows_per_mode": 96820
+  },
+  "case_input_reproductions": {
+    "normal": {
+      "contract_sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c",
+      "counts": {
+        "builtin_metadata_records_per_mode": 65,
+        "cache": 3156,
+        "direct_original_noise_samples_per_mode": 352,
+        "mutable": 80,
+        "scalar": 93584,
+        "total_temperature_rows_per_mode": 96820
+      },
+      "scalar_sha256": "b0a3fdb404468eb2c01764c4c249c9c9ba78279efa330739478492aee254fcdb"
+    },
+    "optimized": {
+      "contract_sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c",
+      "counts": {
+        "builtin_metadata_records_per_mode": 65,
+        "cache": 3156,
+        "direct_original_noise_samples_per_mode": 352,
+        "mutable": 80,
+        "scalar": 93584,
+        "total_temperature_rows_per_mode": 96820
+      },
+      "scalar_sha256": "b0a3fdb404468eb2c01764c4c249c9c9ba78279efa330739478492aee254fcdb"
+    }
+  },
+  "complete_source_copies": 38,
+  "files": {
+    ".codex-tmp/gen05_7/case-contract-normal/build_case_contract.py": {
+      "bytes": 7652,
+      "sha256": "ad41a8a42778e71e1f5b8883a0e27d4d0854a98b55c338d62519d559e3226ac9"
+    },
+    ".codex-tmp/gen05_7/case-contract-normal/cases.json": {
+      "bytes": 773656,
+      "sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c"
+    },
+    ".codex-tmp/gen05_7/case-contract-normal/scalar-inputs.tsv": {
+      "bytes": 5313923,
+      "sha256": "b0a3fdb404468eb2c01764c4c249c9c9ba78279efa330739478492aee254fcdb"
+    },
+    ".codex-tmp/gen05_7/case-contract-optimized/build_case_contract.py": {
+      "bytes": 7652,
+      "sha256": "ad41a8a42778e71e1f5b8883a0e27d4d0854a98b55c338d62519d559e3226ac9"
+    },
+    ".codex-tmp/gen05_7/case-contract-optimized/cases.json": {
+      "bytes": 773656,
+      "sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c"
+    },
+    ".codex-tmp/gen05_7/case-contract-optimized/scalar-inputs.tsv": {
+      "bytes": 5313923,
+      "sha256": "b0a3fdb404468eb2c01764c4c249c9c9ba78279efa330739478492aee254fcdb"
+    },
+    ".codex-tmp/gen05_7/census/metadata.json": {
+      "bytes": 25539,
+      "sha256": "c5cbff74cc572c67e1f0747e7e2014f41555897fed3377d3b361e32d84059cfc"
+    },
+    ".codex-tmp/gen05_7/census/original-normal/classes/ferrumc/temperaturereference/ConstructorCensus.class": {
+      "bytes": 4447,
+      "sha256": "0cc6b4a10c998700093fd9578e08991be97a37d27eeb6947adaeff02b5844ff2"
+    },
+    ".codex-tmp/gen05_7/census/original-normal/paper.log": {
+      "bytes": 47,
+      "sha256": "a19895deedee07ed7aeb6c002e43cf8ffe99325f86fa976c2d730864cb8298a2"
+    },
+    ".codex-tmp/gen05_7/census/original-normal/receipt.json": {
+      "bytes": 39800,
+      "sha256": "3d18c17085ab2751216c91d690ee1d802d5fc82bda21852a6ff4f6b5775b039a"
+    },
+    ".codex-tmp/gen05_7/census/original-normal/vanilla.log": {
+      "bytes": 47,
+      "sha256": "a19895deedee07ed7aeb6c002e43cf8ffe99325f86fa976c2d730864cb8298a2"
+    },
+    ".codex-tmp/gen05_7/census/original-optimized/classes/ferrumc/temperaturereference/ConstructorCensus.class": {
+      "bytes": 4447,
+      "sha256": "0cc6b4a10c998700093fd9578e08991be97a37d27eeb6947adaeff02b5844ff2"
+    },
+    ".codex-tmp/gen05_7/census/original-optimized/paper.log": {
+      "bytes": 47,
+      "sha256": "a19895deedee07ed7aeb6c002e43cf8ffe99325f86fa976c2d730864cb8298a2"
+    },
+    ".codex-tmp/gen05_7/census/original-optimized/receipt.json": {
+      "bytes": 39800,
+      "sha256": "9e6c5c64d01e324d1a120d68a75c0cdc6b6653bd1f0a5bc36ff8ba7403036715"
+    },
+    ".codex-tmp/gen05_7/census/original-optimized/vanilla.log": {
+      "bytes": 47,
+      "sha256": "a19895deedee07ed7aeb6c002e43cf8ffe99325f86fa976c2d730864cb8298a2"
+    },
+    ".codex-tmp/gen05_7/design/GEN-05_7_BIOME_TEMPERATURE.md": {
+      "bytes": 19492,
+      "sha256": "be5b6f86ba846af690cf81f10b0b24b864796fadd44e63b0ce92c0906122d7a8"
+    },
+    ".codex-tmp/gen05_7/design/actual-inputs.freeze.json": {
+      "bytes": 121620,
+      "sha256": "01fa7a1aa4c0a4154b35f0121af8d6380195705e85f2eb537057f689a520142b"
+    },
+    ".codex-tmp/gen05_7/design/build_case_contract.py": {
+      "bytes": 7652,
+      "sha256": "ad41a8a42778e71e1f5b8883a0e27d4d0854a98b55c338d62519d559e3226ac9"
+    },
+    ".codex-tmp/gen05_7/design/cases.json": {
+      "bytes": 773656,
+      "sha256": "1323fbf0f7318c3db1dfe3e0e68cd445ecf5d6bd944c227ae047888b510d7b6c"
+    },
+    ".codex-tmp/gen05_7/design/freeze_design.py": {
+      "bytes": 7640,
+      "sha256": "d59a337a34b0104fd2163cf46121763c8f7e766da86d784427671ab991fd5adc"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Applied-Biome.java": {
+      "bytes": 16762,
+      "sha256": "8e067d79b17d0ae639fad9dcfa5bab38c4e91d0b0f8e21bfe104907c81287a30"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-Biome.java": {
+      "bytes": 17148,
+      "sha256": "c56b5bc4dea70246512a8799f29bf8444d0fded363ea6fba3372b5da6c53063d"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-BiomeManager.java": {
+      "bytes": 4204,
+      "sha256": "c18751d26340f0b94dff0b567295d21905aded5b67739a978e10d72a2913eb9c"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-ChunkAccess.java": {
+      "bytes": 18001,
+      "sha256": "728791b7a77da3e06b784dbaac84dc4eb56b3c1de596c06104401ddbf7a872fd"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-LevelReader.java": {
+      "bytes": 8029,
+      "sha256": "cdd7d9e5c42d6c232c6c3f0dd88dd1bc2e70e3a5e4aaa6f5f4f70d8c248717a3"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-NoiseBasedChunkGenerator.java": {
+      "bytes": 20516,
+      "sha256": "1aee1be9952d347975d2a464da06ee330dc0980aba1a979ceca9d18e6d89dc71"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-ProtoChunk.java": {
+      "bytes": 12701,
+      "sha256": "5476b46d0fb580e77acbc1d0c69048d04613e378dcb92a66b660a45f53b79ba9"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-RandomState.java": {
+      "bytes": 7460,
+      "sha256": "95482aed87fb09b24ad4500cf03042aeebc808451c56b0299ae9ec6fd10d46d7"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-SurfaceRules.java": {
+      "bytes": 37316,
+      "sha256": "63cb2c4d2d1834793a7c43679781bc5649d2172505cb341c7c66d727fbf2a467"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-SurfaceSystem.java": {
+      "bytes": 14549,
+      "sha256": "0c2c3eb38babdb4d5f1b44ca03b887f955fe41301c14f75fc8f1b0105474b20c"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-VerticalAnchor.java": {
+      "bytes": 3513,
+      "sha256": "6625ed5166aa3238746244f132e5c9313925183d1c158527f2e22e1162f47cff"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-WorldGenRegion.java": {
+      "bytes": 17550,
+      "sha256": "ff08b6e0f03af88241df06ba535ec614f93372dd1fc624a4aaa28038afa3b34f"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Base-WorldGenerationContext.java": {
+      "bytes": 622,
+      "sha256": "977d951e1889f9900f2a51c925552231b008ce8ecb9e640969940a086d4fd065"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Biome.java.patch": {
+      "bytes": 524,
+      "sha256": "41e768c2d9170fc9611c7ce10da13a9b5343729fa53f0f487a025d236acc1c1b"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/BiomeManager.java": {
+      "bytes": 4252,
+      "sha256": "8b88719e452accdeb6a608764d437494eaddc576bd0032534e2578578d267bab"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/ChunkAccess.java": {
+      "bytes": 22805,
+      "sha256": "af4d29fbda5dc760acf8e60841d6cb84f7c1d0125913e51997ee0344bda96424"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/ChunkAccess.java.patch": {
+      "bytes": 4239,
+      "sha256": "b90ed65509957cbbffc2bf1d011aee2c3d5647d6a35e150d60a06f54f5cff01c"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/LegacyRandomSource.java": {
+      "bytes": 2787,
+      "sha256": "f05787a1b23d609499ec99e403ff267fecbc500f71bcc15311fce14a3a6a6c02"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/LevelReader.java": {
+      "bytes": 8906,
+      "sha256": "6e662f72c45a746dc88ac28267d72293e916b315a0d800d8100c60410d44903d"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/LevelReader.java.patch": {
+      "bytes": 602,
+      "sha256": "a557b4565d647fce16f274d69695cff4c44606892c96a5a2a4f180095c99610d"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/Moonrise.patch": {
+      "bytes": 1712119,
+      "sha256": "267e01eaeb0873893c09a903bae3d9880de7a98c757b59fca03bc827de06297b"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/NoiseBasedChunkGenerator.java": {
+      "bytes": 20646,
+      "sha256": "2b586e7fca9059b65d214f33f6b84fcc7ae3de90285ad7cd9c8a56edc319f2d8"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/NoiseBasedChunkGenerator.java.patch": {
+      "bytes": 1469,
+      "sha256": "031f165c23c23c603320cde05ecee4ce5656a5762a4e21abda2bdff9fb31e04a"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/PerlinSimplexNoise.java": {
+      "bytes": 3050,
+      "sha256": "eb89615bb6ef23e293d4415e16959f0f4d9e6c5fa9ea1662eaf21057c35b86fd"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/ProtoChunk.java": {
+      "bytes": 13167,
+      "sha256": "b0c0cd135c6f1af3d7138ccc819af306aaafdcbd6e28ac782caa320f2298d79f"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/ProtoChunk.java.patch": {
+      "bytes": 1488,
+      "sha256": "6420236a303d0ba745fee5993d102f1c763ee2734f1b31a7b2845b20154bc6cf"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/RandomState.java": {
+      "bytes": 7460,
+      "sha256": "95482aed87fb09b24ad4500cf03042aeebc808451c56b0299ae9ec6fd10d46d7"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/SimplexNoise.java": {
+      "bytes": 5962,
+      "sha256": "d5e6944c34c6a58c95816fe103386d3254290a2eef347a4239a44eecd1f66280"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/SurfaceRules.java": {
+      "bytes": 37316,
+      "sha256": "63cb2c4d2d1834793a7c43679781bc5649d2172505cb341c7c66d727fbf2a467"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/SurfaceSystem.java": {
+      "bytes": 14549,
+      "sha256": "0c2c3eb38babdb4d5f1b44ca03b887f955fe41301c14f75fc8f1b0105474b20c"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/VerticalAnchor.java": {
+      "bytes": 3513,
+      "sha256": "6625ed5166aa3238746244f132e5c9313925183d1c158527f2e22e1162f47cff"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/WorldGenRegion.java": {
+      "bytes": 21705,
+      "sha256": "fea4a750c45d93f013ff6f2cab43fa04b0fe922095496d83d9e3c274f716c5f5"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/WorldGenRegion.java.patch": {
+      "bytes": 5347,
+      "sha256": "6ed0b8e9cb3db2e1c2a50ee8eb54e9423b821ad49fa79afae0385bdad2a1f785"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/WorldGenerationContext.java": {
+      "bytes": 1459,
+      "sha256": "0a7d432f8152ad3cc832b56c3f4969b2dc5bc14738988c75d6e84cfcf75c784a"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/WorldGenerationContext.java.patch": {
+      "bytes": 1441,
+      "sha256": "927882259ae0b49801bf90110e87d9c372066fd7f501090e3c697e97579b770e"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/WorldgenRandom.java": {
+      "bytes": 2805,
+      "sha256": "f7b1d5f902d8e42286f7a0836a5b8b729d063b40c373fa185d77f996d95a286e"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/server-mappings.txt": {
+      "bytes": 8186232,
+      "sha256": "e373ba569839e6f3c7bd4880247f3e85577d92cde2c605adfa2024eb9cae503e"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/source-map.json": {
+      "bytes": 14563,
+      "sha256": "e7b43c075e59e1455d422a553233030ee78d7b9519522952d4e3255a8369ad8e"
+    },
+    ".codex-tmp/gen05_7/design/input-sources/worldgen.json": {
+      "bytes": 2530249,
+      "sha256": "bc0dbfa46f495865fc98af835c70dee13ddfdcebb263cf40b3a075324f261b30"
+    },
+    ".codex-tmp/gen05_7/design/scalar-inputs.tsv": {
+      "bytes": 5313923,
+      "sha256": "b0a3fdb404468eb2c01764c4c249c9c9ba78279efa330739478492aee254fcdb"
+    },
+    ".codex-tmp/gen05_7/reference/ConstructorCensus.java": {
+      "bytes": 2391,
+      "sha256": "57da2765ca0a82b67a6829017ef3a65f56b1f57843224a76cf424773f8d39dfe"
+    },
+    ".codex-tmp/gen05_7/reference/metadata_census.py": {
+      "bytes": 4145,
+      "sha256": "9c493466faca51ae4ea35f6ab4fff9bcf1a0bc3807dd1f0c1586b7f2c8f20a1a"
+    },
+    ".codex-tmp/gen05_7/reference/run_constructor_census.py": {
+      "bytes": 3215,
+      "sha256": "5cc9095361c92830345a0603e15fc0fee512df5b1f65b9fbe0de0fd779e04835"
+    },
+    "docs/agent-tasks/GEN-05_7_BIOME_TEMPERATURE.md": {
+      "bytes": 19492,
+      "sha256": "be5b6f86ba846af690cf81f10b0b24b864796fadd44e63b0ce92c0906122d7a8"
+    }
+  },
+  "pre_post_actual_inputs_unchanged": true,
+  "runtime_changed_by_this_task": false,
+  "schema": 1,
+  "scope": "Concrete complete temperature-producer design, actual constructor/resource census and input-only oracle contract; Root review pending; no runtime or temperature parity"
+}

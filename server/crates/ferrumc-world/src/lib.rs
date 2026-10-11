@@ -34,6 +34,7 @@
 //! [`ChunkLightData`] for the light masks and full-bright sky arrays.
 
 pub mod biome_selection;
+pub mod biome_temperature;
 pub mod biome_zoom;
 mod block_entity;
 mod block_entity_codec;
