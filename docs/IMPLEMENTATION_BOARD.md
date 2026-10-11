@@ -167,9 +167,12 @@ Prüfkopien geöffnet. Exklusiver Besitz ist Storage plus eigener Aufgabenbrief;
 Appmigration und FCPS-Gameplayadmission folgen separat.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
-Root integrierte sie als `579bed62` und `67a9aa94`. Der Agent konkretisiert
-jetzt readonly SIM-03.4 mit vor Workrequest reservierten immutable
-Publicationgruppen und retained Outbox. Keine Simproduktion vor Vertragsreview.
+Root integrierte sie als `579bed62` und `67a9aa94`. Der vollständige konkrete
+SIM-03.4-Entwurf `efbeb2be` ist durch Root und einen separaten readonly Reviewer
+CLEAN auf Vertragsumfang geprüft. Der Agent übernimmt jetzt ausschließlich
+Simproduktion mit vor Workrequest reservierten immutable Publicationgruppen
+und retained Outbox. [Vertragsreview](agent-tasks/SIM-03_4_ITEM_PUBLICATION_CONTRACT_REVIEW.md);
+Runtimeabnahme und Integration folgen separat.
 Die alten NBT-/MUTF8writer bleiben die Wireauthority. Anschließend folgen
 versiegelte Sim-Publikationsfakten und Sessionviewertracking. Die neuen
 Metadata-/Motion-/TakeItempakete, ihre Netklassifikation und der Apptracefix

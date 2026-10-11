@@ -494,7 +494,7 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Protokollagent `feature_catalog` | SIM-03.4-Entwurf | NET-04.2a unabhängig CLEAN als `67a9aa94`; konkreter Publicationvertrag in Vorbereitung | Exklusiv eigener Simbrief und Scratchevidenz, Runtime noch readonly. Vor Workrequest reservierte immutable Gruppen, retained Outbox; Sessiontracking danach. |
+| Protokollagent `feature_catalog` | SIM-03.4 | Entwurf `efbeb2be` durch Root und separaten Reviewer CLEAN auf Vertragsumfang; Simproduktion freigegeben | Exklusiv Sim, eigener Brief und Scratchevidenz. Vor Workrequest reservierte immutable Gruppen, retained Outbox; Runtimeabnahme und Sessiontracking danach. |
 | Consumeragent `select_world_ticket` | DUR-03.2 | DUR-04.2a unabhängig CLEAN als `d3c84252`; konkrete Storageproduktion freigegeben | Storage und eigener Migrationsbrief, echte Stage-CAS-/Sourceimportvariante A. App/FCPSconsumer bleiben getrennt. |
 | Weltagent `item_transfer_primitives` | GEN-05.7-Entwurf | GEN-05.6 unabhängig CLEAN als `34c8875e`; Temperaturvertrag in Vorbereitung | Eigener Temperaturbrief und Scratchevidenz, Runtime/Registry readonly. Originale feste Noises und Paperprädikate; Storedresolver/Surface/Carver danach. |
 
