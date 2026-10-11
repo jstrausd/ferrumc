@@ -196,6 +196,13 @@ Der freigewordene Worldslot bearbeitet jetzt
 [GEN-05.8 stored biome resolver](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_TASK.md):
 konkreter Originalvertrag und echte ProtoChunk-/BiomeManager-Oracle, zunächst
 ohne Productionänderungen. Danach folgen Surface-Regeln und der Columndriver.
+Vertrag und Originaloracle sind unabhängig CLEAN_CONTRACT: Der Reviewer hat den
+ganzen Oraclelauf normal und mit Python `-O` frisch reproduziert; alle28
+Differentialdateien, beide Manifeste und alle15 Guardverweigerungen sind
+bytegleich, alle211 Freezehashes stimmen weiterhin.
+[Vertragsreview](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_REVIEW.md).
+Root hat die Worldruntime mit den Auflagen A1–A5 freigegeben:
+[Runtimefreigabe](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_RUNTIME_TASK.md).
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
@@ -221,16 +228,17 @@ Inventory-/Blockwirkung. Runtimeabnahme steht aus; keine getrennten Legacywrites
 dürfen die gemeinsame Wirkung umgehen. DUR-03.3a, die explizite Offline-Migration
 Format6→7, folgt separat vor DUR-05.
 Die aktiven Aufträge wurden nach Providerabbrüchen mit ihrer bestehenden Arbeit
-wieder aufgenommen: GEN-05.8-Vertrag/Originaloracle und DUR-03.3-
-Storageimplementierung. Der unabhängige SIM-03.4a-Runtimereview ist abgeschlossen.
-Kein abgebrochener Auftrag
-wurde als abgenommen gewertet.
-Der nächste vorbereitete Anschluss ist der
-[native Driver-/Endpointworkorder NET-04.2d](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_TASK.md):
-tatsächlich konsumierter Receiver/Owner, Nativejoin und originale Detach-/
-Retirementfolge. Der nach dem Review frei gewordene Agentenslot erhält diesen
-readonly Vertragsauftrag. Produktionsänderungen folgen einem konkreten
-Vertragsreview und den tatsächlichen Voraussetzungstickets.
+wieder aufgenommen: GEN-05.8-Vertrag/Originaloracle, DUR-03.3-
+Storageimplementierung und NET-04.2d. Kein abgebrochener Auftrag wurde als
+abgenommen gewertet.
+Der [native Driver-/Endpointworkorder NET-04.2d](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_TASK.md)
+hat einen eingefrorenen Vertragskandidaten geliefert. Root hat vor dem Freeze
+fünf belegte Lücken entschieden: eigene native Endpointart statt
+GameInput-Receiver, 8x8-Regionsgrenze als sichtbare Aktivierungsgrenze,
+Retirement für zugelassene, nie gebundene Joins, Formatgates hinter
+DUR-03.3/03.3a/DUR-05 und das neue Simticket SIM-03.4b zur Freigabe abgemeldeter
+Spielerzustände nach bestätigtem Save. Ein unabhängiger Vertragsreview läuft;
+Produktionsänderungen folgen erst dessen Abnahme.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:
