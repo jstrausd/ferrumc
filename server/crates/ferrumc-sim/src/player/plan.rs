@@ -3,7 +3,10 @@
 use super::{
     NativePlayerSnapshot, NormalSlotButton, PlayerOwnershipError, NATIVE_PLAYER_SLOT_COUNT,
 };
-use ferrumc_items::{encode_persisted_stack, plan_split, plan_transfer, ComponentValue, ItemStack};
+use ferrumc_items::{
+    persisted_stack_size, plan_split, plan_transfer, same_stack_representation, ComponentValue,
+    ItemStack,
+};
 
 #[derive(Clone, Copy)]
 struct Cell<'a> {
@@ -52,17 +55,9 @@ fn same(a: &ItemStack, b: &ItemStack) -> Result<bool, PlayerOwnershipError> {
     if a.item().is_none() || a.item() != b.item() {
         return Ok(false);
     }
-    // Canonical FCIS has a single fixed-width count after its resource name.
-    // Validated persistence bytes preserve exact component order/float bits.
-    let mut left = encode_persisted_stack(a)?;
-    let mut right = encode_persisted_stack(b)?;
-    let Some(item) = a.item() else {
-        return Ok(false);
-    };
-    let count_offset = 9 + item.name().len();
-    left[count_offset] = 0;
-    right[count_offset] = 0;
-    Ok(left == right)
+    // InventoryPlan admission has already fully validated these borrowed sources.
+    // Preserve exact component order and float bits without encoding a frame.
+    Ok(same_stack_representation(a, b)?)
 }
 
 impl<'a> InventoryPlan<'a> {
@@ -80,11 +75,11 @@ impl<'a> InventoryPlan<'a> {
             .iter_mut()
             .zip(slots.iter().chain(std::iter::once(carried)))
         {
-            let bytes = encode_persisted_stack(stack)?;
+            let len = persisted_stack_size(stack)?;
             *cell = Cell {
                 source: stack,
                 count: stack.count(),
-                len: bytes.len(),
+                len,
             };
         }
         Ok(Self {
@@ -116,7 +111,7 @@ impl<'a> InventoryPlan<'a> {
         let limit = capacity(source)?;
         self.growth_source = Some(source);
         let mut remaining = source.count();
-        let source_len = encode_persisted_stack(source)?.len();
+        let source_len = persisted_stack_size(source)?;
         let order = std::iter::once(36 + usize::from(selected))
             .chain(std::iter::once(45))
             .chain(36..45)

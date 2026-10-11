@@ -81,9 +81,11 @@ impl OwnershipStoreBinding {
             .load_owned_player(self.player_key(player), self.generation.identity())
             .await?;
         self.validate_player(&snapshot)?;
+        let native_position = checked_player_position(&snapshot);
         Ok(OwnedPlayerRead {
             binding: self.clone(),
             snapshot,
+            native_position,
         })
     }
     /// Obtains real entity admission evidence, without inventing a wire identity.
@@ -97,9 +99,13 @@ impl OwnershipStoreBinding {
             .load_owned_entity(self.entity_key(entity), self.generation.identity())
             .await?;
         self.validate_entity(&snapshot)?;
+        let native_item_checked = snapshot.record().is_some_and(|record| {
+            crate::decode_item_entity(snapshot.expectation().key(), record).is_ok()
+        });
         Ok(OwnedEntityRead {
             binding: self.clone(),
             snapshot,
+            native_item_checked,
         })
     }
     /// Reads the actual coherent pair used by drop and pickup reservation.
@@ -149,8 +155,18 @@ impl OwnershipStoreBinding {
 /// Sealed readonly player evidence, created only by a real bound backend call.
 #[derive(Debug)]
 pub struct OwnedPlayerRead {
+    pub(crate) native_position: Option<ferrumc_math::Vec3>,
     pub(crate) binding: OwnershipStoreBinding,
     pub(crate) snapshot: OwnedPlayerSnapshot,
+}
+
+pub(crate) fn checked_player_position(
+    snapshot: &OwnedPlayerSnapshot,
+) -> Option<ferrumc_math::Vec3> {
+    snapshot
+        .record()
+        .and_then(|record| super::NativePlayerSnapshot::try_from_record(record).ok())
+        .map(|native| native.position())
 }
 impl OwnedPlayerRead {
     /// Borrows the real snapshot; cloning its data cannot forge this evidence.
@@ -161,6 +177,7 @@ impl OwnedPlayerRead {
 /// Sealed readonly entity evidence for restore or receipt-backed spawn.
 #[derive(Debug)]
 pub struct OwnedEntityRead {
+    pub(crate) native_item_checked: bool,
     pub(crate) binding: OwnershipStoreBinding,
     pub(crate) snapshot: OwnedEntitySnapshot,
 }
@@ -389,6 +406,17 @@ pub(crate) fn check_receipt_epochs(
     before: Option<&PersistentEntityRecord>,
     after: Option<&PersistentEntityRecord>,
 ) -> Result<(), PlayerOwnershipError> {
+    if before.zip(after).is_some_and(|(a, b)| {
+        a.chunk() == b.chunk()
+            && a.record().schema_version() == b.record().schema_version()
+            && a.record().data() == b.record().data()
+    }) {
+        return if receipt.epochs().is_empty() {
+            Ok(())
+        } else {
+            Err(PlayerOwnershipError::CompletionMismatch)
+        };
+    }
     let affected: std::collections::BTreeSet<_> = before
         .map(PersistentEntityRecord::chunk)
         .into_iter()

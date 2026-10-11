@@ -96,6 +96,7 @@ impl EntityStore {
         let bytes = checked_stack_bytes(proposal.stack())?;
         let used =
             self.replaced_item_bytes(0, crate::NATIVE_ITEM_ENTITY_HEADER_BYTES + bytes.len())?;
+        self.check_confirmed_replacement(0, crate::NATIVE_ITEM_ENTITY_HEADER_BYTES + bytes.len())?;
         let data = EntityData {
             owner: self.owner,
             uuid: base.uuid,
@@ -156,6 +157,14 @@ impl EntityStore {
                 old_len,
                 crate::NATIVE_ITEM_ENTITY_HEADER_BYTES + bytes.len(),
             )?;
+            let confirmed_old = self.slots[index]
+                .durability
+                .as_ref()
+                .map_or(0, |d| d.confirmed.record().data().len());
+            self.check_confirmed_replacement(
+                confirmed_old,
+                crate::NATIVE_ITEM_ENTITY_HEADER_BYTES + bytes.len(),
+            )?;
             let (_, record) = codec::encode_record(base, properties, &bytes)?;
             let item = ItemEntityState {
                 stack: stack.clone(),
@@ -183,6 +192,46 @@ impl EntityStore {
                 None,
             ))
         }
+    }
+
+    pub(crate) fn prepare_owned_item_save(
+        &self,
+        handle: &EntityHandle,
+        delete: bool,
+    ) -> Result<(PreparedOwnedEntity, Option<PersistentEntityRecord>), PlayerOwnershipError> {
+        self.require_owner()?;
+        let index = self.item_index(handle)?;
+        let base = *self.get(handle)?;
+        let item = self.item_state(handle)?;
+        if delete {
+            let used = self.replaced_item_bytes(item.native_body_len(), 0)?;
+            return Ok((
+                PreparedOwnedEntity::Remove {
+                    handle: handle.clone(),
+                    base,
+                    bucket: self.bucket(base.chunk())?,
+                    used,
+                },
+                None,
+            ));
+        }
+        self.check_confirmed_replacement(
+            self.slots[index]
+                .durability
+                .as_ref()
+                .map_or(0, |d| d.confirmed.record().data().len()),
+            item.native_body_len(),
+        )?;
+        let bytes = self.checked_item_bytes(index)?;
+        let (_, record) = codec::encode_record(base, item.properties(), &bytes)?;
+        Ok((
+            PreparedOwnedEntity::Replace {
+                handle: handle.clone(),
+                item: item.snapshot_admitted(),
+                used: self.item_bytes_used,
+            },
+            Some(record),
+        ))
     }
 
     pub(crate) fn reserve_owned(

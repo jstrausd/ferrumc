@@ -97,6 +97,42 @@ pub fn decode_item_entity(
     key: PersistentEntityKey,
     record: &PersistentEntityRecord,
 ) -> Result<RestoredItemEntity, ItemEntityError> {
+    let NativeItemHeader {
+        entity_type,
+        transform,
+        properties,
+        raw_stack,
+    } = checked_native_header(key, record)?;
+    let stack = decode_persisted_stack(raw_stack)?;
+    let checked = checked_stack_bytes(&stack)?;
+    if checked != raw_stack {
+        return Err(ItemEntityError::NonCanonicalFcis);
+    }
+    let item = ItemEntityState {
+        stack,
+        properties,
+        fcis_len: checked.len(),
+    };
+    Ok(RestoredItemEntity {
+        key,
+        entity_type,
+        transform,
+        item,
+    })
+}
+
+/// Borrowed native fixed fields, checked before any component allocation.
+pub(crate) struct NativeItemHeader<'a> {
+    pub(crate) entity_type: EntityTypeId,
+    pub(crate) transform: EntityTransform,
+    pub(crate) properties: ItemEntityProperties,
+    pub(crate) raw_stack: &'a [u8],
+}
+
+pub(crate) fn checked_native_header(
+    key: PersistentEntityKey,
+    record: &PersistentEntityRecord,
+) -> Result<NativeItemHeader<'_>, ItemEntityError> {
     let raw_record = record.record();
     if raw_record.schema_version() != PAYLOAD_SCHEMA {
         return Err(ItemEntityError::UnsupportedPayloadSchema {
@@ -181,21 +217,11 @@ pub fn decode_item_entity(
             remaining: raw_stack.len(),
         });
     }
-    let stack = decode_persisted_stack(raw_stack)?;
-    let checked = checked_stack_bytes(&stack)?;
-    if checked != raw_stack {
-        return Err(ItemEntityError::NonCanonicalFcis);
-    }
-    let item = ItemEntityState {
-        stack,
-        properties,
-        fcis_len: checked.len(),
-    };
-    Ok(RestoredItemEntity {
-        key,
+    Ok(NativeItemHeader {
         entity_type,
         transform,
-        item,
+        properties,
+        raw_stack,
     })
 }
 

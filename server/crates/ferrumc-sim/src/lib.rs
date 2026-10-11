@@ -73,6 +73,7 @@ mod entity;
 mod error;
 mod generation;
 mod harness;
+mod item_counters;
 mod loaded;
 mod message;
 mod mutation;
@@ -104,6 +105,11 @@ pub use entity::{
 pub use error::{SimError, SimResult};
 pub use generation::{GenerationBinding, VerifiedGenerationBinding};
 pub use harness::{SimHarness, TickOutcome};
+pub use item_counters::{
+    OwnedItemCounterHandle, OwnedItemCounterLimits, MAX_CONFIRMED_ITEM_BYTES,
+    MAX_OWNED_COUNTER_DEFER, MAX_OWNED_COUNTER_PLAN_BYTES, MAX_OWNED_COUNTER_PLAN_ENTRIES,
+    MAX_OWNED_ENTITY_SAVE_CHARGE,
+};
 pub use loaded::{
     load_or_generate, load_or_generate_bound, load_or_generate_legacy, ChunkAcquired,
     ChunkProvenance, LoadedChunkMap, TicketRelease, CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,

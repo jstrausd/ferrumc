@@ -51,6 +51,8 @@ fn kind_code(kind: PendingKind) -> u8 {
         PendingKind::Drop => 3,
         PendingKind::Pickup => 4,
         PendingKind::SpawnItem => 5,
+        PendingKind::EntityAutosave => 6,
+        PendingKind::EntityDespawn => 7,
     }
 }
 fn status_code(status: OwnershipPendingStatus) -> u8 {
@@ -107,6 +109,12 @@ impl OwnershipPendingCheckpoint {
             }
             PendingKind::Pickup => {
                 player && entity && self.before_player.is_some() && self.before_entity.is_some()
+            }
+            PendingKind::EntityAutosave => {
+                !player && entity && self.before_entity.is_some() && self.after_entity.is_some()
+            }
+            PendingKind::EntityDespawn => {
+                !player && entity && self.before_entity.is_some() && self.after_entity.is_none()
             }
             PendingKind::SpawnItem => {
                 !player
@@ -239,6 +247,8 @@ impl OwnershipPendingCheckpoint {
             3 => PendingKind::Drop,
             4 => PendingKind::Pickup,
             5 => PendingKind::SpawnItem,
+            6 => PendingKind::EntityAutosave,
+            7 => PendingKind::EntityDespawn,
             _ => return Err(PlayerOwnershipError::Malformed("checkpoint kind")),
         };
         let status = match r.byte()? {
@@ -482,10 +492,14 @@ impl OwnershipStoreBinding {
                 let (player, entity) = pair.snapshot.into_parts();
                 (
                     Some(OwnedPlayerRead {
+                        native_position: super::evidence::checked_player_position(&player),
                         binding: self.clone(),
                         snapshot: player,
                     }),
                     Some(OwnedEntityRead {
+                        native_item_checked: entity.record().is_some_and(|record| {
+                            crate::decode_item_entity(entity.expectation().key(), record).is_ok()
+                        }),
                         binding: self.clone(),
                         snapshot: entity,
                     }),

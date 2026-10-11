@@ -214,7 +214,8 @@
   remove an item or emit events. Keep/Due, cancellation age reset and owned
   removal are separate. Full active ticks must preserve physics/merge between
   the delay and age phases. No automatic activation, once-per-tick claim,
-  unloaded/offline step or wall-clock catch-up is implemented.
+  unloaded/offline step or wall-clock catch-up is implemented by these pure
+  projections. The explicitly opted-in DUR-04.2a consumer below owns checked ticks.
 - A logical region may have at most one ownership claim.
 - Shard lifecycle is strictly `Created -> Active -> Draining -> Stopped`.
   Rejected transitions leave the prior state unchanged.
@@ -318,3 +319,88 @@
   timer in this ticket. Physics, merge/despawn, activation/tracking, packet/App
   and Java-event consumers require immediate follow-ups; this is not live
   Survival or complete Paper compatibility.
+
+
+## Owned resident item counters and durability (DUR-04.2a / SRV-02.2)
+
+- Explicit initialization on the empty DUR-04.1 owner declares positive caps and
+  its actual last-completed logical Tick. Only the checked exact successor is
+  accepted; duplicates, gaps and Tick overflow refuse before scratch/inbox drain.
+  Terminal owner publication generation `u64::MAX` similarly refuses the entire
+  next logical boundary before scratch, counters, cursors or Tick advance, even
+  with clean items or no save IDs. `MAX-1` remains usable. Completion-only recovery
+  still checks each actual further publication generation before drain; it cannot
+  call an impossible acknowledgement quiescent or confirmed.
+- A readonly bounded scalar plan overlays the genuine completion prefix,
+  publication/defer and concrete FIFO admission before the first real drain.
+  Restore, accepted/refused rejoin, bootstrap, reservations, checked generations,
+  body charges and Stop use the future state. Player native validity/position is
+  checked from sealed genuine reads off-tick. No components/native body are cloned
+  for timer planning. Private slot Vec capacity is fallibly reserved before drain
+  for bounded future publications; no identities/properties are published there.
+- Borrowed stack sizing in input admission, inventory plans and counter boundary
+  Spawn/Drop preflight uses the checked Items `persisted_stack_size` authority,
+  without FCIS serialization or component cloning. InventoryPlan comparison
+  retains its private empty/item guard after all borrowed sources were fully
+  validated, then uses exact ordered/bitwise `same_stack_representation`.
+  Selected materialization and genuine persistence still encode their bodies.
+- Every eligible resident live item receives exactly one scalar step in each
+  accepted Tick, up to 65,536 items. Unloaded items receive zero and no offline
+  catch-up. A fully accepted Stop has no subsequent counter steps. Save scanning
+  alone defaults to 64 slots and can be configured to at most 256; it never samples
+  or limits the counter phase. The complete counter phase is bounded O(N).
+- Delay decrements only when positive and not 32767. Age Java-wraps unless -32768;
+  due compares the resulting signed age with the actual signed rate, including
+  negative rates. Health is not timer death. This explicit VanillaNoPlugins stage
+  marks due items ineligible for gameplay and prioritizes genuine receipt-backed
+  Entity CAS delete. It supplies no fictitious Java event/cancel/activation/physics.
+- Each private live slot owns both its current generation and last-confirmed
+  native FCIE body/stamp/saved generation/Tick. Confirmed bodies have a separate
+  positive at-most-16 MiB cap from the existing at-most-16 MiB live body cap.
+  Aggregate confirmed accounting precedes confirmed native decoding and any
+  snapshot clone. No per-counter-step body encoding or durable CAS runs.
+- Exact scalar scratch caps are at most 65,569 descriptors and 9 MiB including
+  actual Rust `size_of` metadata. Checked multiplication and fallible allocation
+  precede drain; retained scratch is reused. Encoded-body and metadata charges
+  do not claim equal decoded heap, allocator or RSS usage.
+- At most one Entity operation reserves the whole owner structure. Its visible
+  body and request postimage stay frozen; unrelated items may change only scalar
+  counters, leaving indexes, stack lengths and Prepared.used unchanged. The one
+  private original/postimage projection records at most 1024 actual logical claims.
+  Claim 1025 refuses the entire next Tick with CounterRecoveryRequired. Lost reply
+  or receipt None retains pending authority; CasConflict quarantines with the
+  original scalar projection and never publishes into the reserved visible body.
+- Genuine confirmed Rest/Spawn/Save publication installs captured confirmed bytes
+  and saved generation, then publishes only its checked bounded defer. The actual
+  publication boundary Tick names last save; completion-only recovery uses the
+  existing completed Tick. Full removal makes no defer publication. Missing
+  preflighted Rest/Spawn/original bodies fail-stop, never silently lose a step.
+- Pickup uses confirmed native bytes as the exact DB beforeimage and current
+  live counters/stack for the conserving afterimage. Pure borrowed inventory
+  planning shares the actual admission rule. Partial pickup normalizes negative
+  delay only in its confirmed rest; definitive refusal retains original delay.
+  No-op Entity CAS compares schema/chunk/full native bytes, preserves revision
+  and requires empty affected epochs; genuine changed CAS checks incremented epochs.
+- Save selection admits at most one job per boundary, at most 2 MiB logical
+  `661 + 2*before + 5*after` charge within the shared at-most-8 MiB pending cap.
+  Two slot cursors advance after each examined slot, three priority turns to one
+  normal turn, and freeze while Entity pending exists. The identical query survives
+  Busy/history refusal and uncertainty; retained refused completion leases also
+  block same-boundary retry until the caller drops that intact input.
+- A concrete Driver refill owns at most 32 IDs/512 raw ID bytes, bound to the real
+  owner incarnation. Local duplicate/cap refusal returns the whole refill.
+  An ID is consumed only on actual pending admission; empty pool emits at most
+  one SaveIdsNeeded intent per boundary and does not stop timers. The Driver owns
+  UUID authority. Confirmed does not mean an invented globally unique Sim counter.
+- Save period 100 means due after 100 logical Ticks, not a five-second durability
+  guarantee: 4096 dirty items with one successful job per boundary require at
+  least 4096 boundaries plus scanning/worker latency. Unload and controlled Drain
+  retain priority until dirty deferred state is genuinely saved. A Driver seeking
+  quiescence must unload or use completion-only recovery/flush; resident logical
+  ticks can continue making timers dirty. Stop needs true confirmed quiescence.
+- Opt-in refuses every ordinary GameInput at enqueue with OwnershipInputRequired;
+  owned Move/Mode/Select remain the concrete player inputs. Infallible legacy Tick
+  and scheduler entry fail-stop rather than bypass Tick authority. App Format6,
+  regular block/command consumers, physics/activation/merge/contact/tracking,
+  Java events/plugins and live Survival/Paper differential acceptance remain
+  separate DUR-05 and gameplay contracts.

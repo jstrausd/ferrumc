@@ -40,6 +40,15 @@ pub enum NormalSlotButton {
 
 #[derive(Debug)]
 pub(crate) enum InputKind {
+    EntitySave {
+        item: EntityHandle,
+        generation: u64,
+        id: OwnershipTransferId,
+    },
+    RefillItemSaveIds {
+        owner: crate::OwnedItemCounterHandle,
+        ids: Vec<OwnershipTransferId>,
+    },
     RestorePlayer(OwnedPlayerRead),
     Bootstrap {
         read: OwnedPlayerRead,
@@ -110,6 +119,25 @@ pub(crate) enum InputKind {
 #[derive(Debug)]
 pub struct OwnedPlayerInput(pub(crate) InputKind);
 impl OwnedPlayerInput {
+    /// Captures a concrete item save at its current positive local generation.
+    /// The native confirmed beforeimage remains owned by its existing slot.
+    pub fn save_item(item: EntityHandle, generation: u64, id: OwnershipTransferId) -> Self {
+        Self(InputKind::EntitySave {
+            item,
+            generation,
+            id,
+        })
+    }
+
+    /// Supplies whole move-owned save IDs to the concrete counter incarnation.
+    /// Refused admission returns the entire refill, with no ID consumed.
+    pub fn refill_item_save_ids(
+        owner: crate::OwnedItemCounterHandle,
+        ids: Vec<OwnershipTransferId>,
+    ) -> Self {
+        Self(InputKind::RefillItemSaveIds { owner, ids })
+    }
+
     /// Requests admission of a real stored FCPS3 player at the next owner boundary.
     pub fn restore(read: OwnedPlayerRead) -> Self {
         Self(InputKind::RestorePlayer(read))
@@ -251,6 +279,14 @@ impl OwnedPlayerInput {
     }
     pub(crate) fn charge(&self) -> Result<usize, PlayerOwnershipError> {
         let bytes = match &self.0 {
+            InputKind::RefillItemSaveIds { ids, .. } => {
+                if ids.len() > 32 || ids.capacity() > 32 {
+                    return Err(PlayerOwnershipError::Capacity("save ID input"));
+                }
+                ids.len()
+                    .checked_mul(16)
+                    .ok_or(PlayerOwnershipError::Capacity("save ID input"))?
+            }
             InputKind::RestorePlayer(r)
             | InputKind::Rejoin(r)
             | InputKind::Bootstrap { read: r, .. } => {
@@ -264,7 +300,7 @@ impl OwnedPlayerInput {
                 read.snapshot
                     .record()
                     .map_or(0, |r| r.record().data().len())
-                    + ferrumc_items::encode_persisted_stack(proposal.stack())?.len()
+                    + ferrumc_items::persisted_stack_size(proposal.stack())?
                     + crate::NATIVE_ITEM_ENTITY_HEADER_BYTES
             }
             InputKind::Drop { read, .. } | InputKind::Pickup { read, .. } => {
@@ -327,6 +363,8 @@ pub(crate) enum PendingKind {
     Drop,
     Pickup,
     SpawnItem,
+    EntityAutosave,
+    EntityDespawn,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +407,8 @@ pub(crate) struct PendingPlayerMutation {
     pub(crate) original_count: u8,
     pub(crate) stat_item: Option<ItemId>,
     pub(crate) animate: bool,
+    pub(crate) item_generation: Option<u64>,
+    pub(crate) counters: Option<crate::item_counters::DeferredOwnedCounters>,
 }
 
 /// Checked version-1 retained data, without live owner, CAS or completion authority.
@@ -408,6 +448,16 @@ impl OwnershipPendingCheckpoint {
 /// Actual owner publication, resync, stat or lifecycle intent after checked work.
 #[derive(Debug)]
 pub enum OwnershipIntent {
+    /// Automatic saving needs move-owned driver IDs; at most one per boundary.
+    SaveIdsNeeded,
+    /// Concrete save selection could not be admitted; dirty authority remains.
+    ItemSaveBlocked {
+        /// Actual locally selected item.
+        item: EntityHandle,
+        /// Specific resource or authority refusal.
+        reason: PlayerOwnershipError,
+    },
+
     /// Definitive single-spawn refusal returns the entire caller-owned proposal.
     ItemSpawnRefused {
         /// Original durable operation identity.
@@ -508,8 +558,19 @@ pub struct PlayerOwnershipTickOutcome {
     pub(crate) intents: Vec<OwnershipIntent>,
     pub(crate) refusals: Vec<OwnedPlayerInputRefusal>,
     pub(crate) game: Vec<GameOutput>,
+    pub(crate) counter_steps: usize,
+    pub(crate) save_scanned: usize,
 }
 impl PlayerOwnershipTickOutcome {
+    /// Number of eligible real resident counter claims in this successful boundary.
+    pub const fn counter_steps(&self) -> usize {
+        self.counter_steps
+    }
+    /// Slots examined for save selection; this does not limit counter claims.
+    pub const fn item_save_slots_scanned(&self) -> usize {
+        self.save_scanned
+    }
+
     /// Moves publication/refund intents to their concrete consumers without cloning.
     pub fn take_intents(&mut self) -> Vec<OwnershipIntent> {
         std::mem::take(&mut self.intents)
@@ -547,6 +608,7 @@ pub(crate) struct PlayerOwnershipState {
     pub(crate) draining: bool,
     pub(crate) stopped: bool,
     pub(crate) boundary_remaining: usize,
+    pub(crate) item_counters: Option<crate::item_counters::OwnedItemCounterState>,
 }
 impl PlayerOwnershipState {
     pub(crate) fn new(binding: OwnershipStoreBinding, limits: PlayerOwnershipLimits) -> Self {
@@ -564,6 +626,7 @@ impl PlayerOwnershipState {
             draining: false,
             stopped: false,
             boundary_remaining: 0,
+            item_counters: None,
         }
     }
     pub(crate) fn next_generation(
@@ -592,6 +655,10 @@ impl Clone for PlayerOwnershipState {
             draining: true,
             stopped: false,
             boundary_remaining: 0,
+            item_counters: self
+                .item_counters
+                .as_ref()
+                .map(crate::item_counters::OwnedItemCounterState::snapshot),
         }
     }
 }

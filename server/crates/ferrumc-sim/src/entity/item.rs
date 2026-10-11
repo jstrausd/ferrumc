@@ -19,6 +19,7 @@ use super::{
 };
 use crate::ShardId;
 
+pub(crate) use codec::checked_native_header;
 pub use codec::decode_item_entity;
 
 /// Maximum native item body, including the entire header and FCIS stack.
@@ -272,6 +273,9 @@ impl ItemEntityProperties {
         };
         properties.validate()?;
         Ok(properties)
+    }
+    pub(in crate::entity) fn with_counters(self, counters: ItemEntityCounters) -> Self {
+        Self { counters, ..self }
     }
     pub(super) fn validate(self) -> Result<(), ItemEntityError> {
         for (value, component) in [
@@ -790,6 +794,7 @@ impl EntityStore {
     /// The result has a fresh incarnation, not competing active owner authority.
     pub fn try_snapshot(&self) -> Result<Self, ItemEntityError> {
         self.validate_item_accounting()?;
+        self.validate_confirmed_accounting()?;
         Ok(Self {
             owner: self.owner,
             capacity: self.capacity,
@@ -809,6 +814,8 @@ impl EntityStore {
             ownership_mode: self.ownership_mode,
             snapshot_only: self.ownership_mode || self.snapshot_only,
             reservation: None,
+            confirmed_item_bytes: self.confirmed_item_bytes,
+            confirmed_item_cap: self.confirmed_item_cap,
         })
     }
     /// Takes a checked copy of one item, including after its chunk unloads.

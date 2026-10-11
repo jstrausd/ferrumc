@@ -749,6 +749,12 @@ impl SimShard {
     /// fully deterministic for a given inbox.
     #[allow(clippy::too_many_lines)] // one tick drain: join/leave/move + every block-edit input arm
     pub fn run_tick(&mut self) -> Vec<GameOutput> {
+        assert!(
+            self.player_ownership
+                .as_ref()
+                .is_none_or(|s| s.item_counters.is_none()),
+            "owned counters require an explicit checked Tick boundary"
+        );
         self.run_tick_with_boundary_inputs(Vec::new())
     }
 
@@ -762,6 +768,12 @@ impl SimShard {
         &mut self,
         mut tick_inputs: ScheduledTickInputs,
     ) -> (Vec<GameOutput>, Vec<CrossShardIntent>) {
+        assert!(
+            self.player_ownership
+                .as_ref()
+                .is_none_or(|s| s.item_counters.is_none()),
+            "owned counters require an explicit checked Tick boundary"
+        );
         let boundary_inputs = tick_inputs.take_boundary_inputs();
         let outputs = self.run_tick_with_boundary_inputs(boundary_inputs);
 

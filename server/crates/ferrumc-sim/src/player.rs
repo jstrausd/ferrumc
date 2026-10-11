@@ -56,6 +56,15 @@ pub const MAX_PLAYER_OWNERSHIP_INPUT_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlayerOwnershipError {
+    /// Counter tick differs from the checked exactly-next logical boundary.
+    #[error("owned item counter tick is not exactly next")]
+    CounterTickMismatch,
+    /// Logical tick cannot wrap at u64 maximum.
+    #[error("owned item counter tick exhausted")]
+    CounterTickOverflow,
+    /// Pending logical claims exceeded the declared bounded recovery allowance.
+    #[error("owned item counter recovery is required")]
+    CounterRecoveryRequired,
     /// A positive resource agreement exceeded its hard ceiling.
     #[error("invalid player ownership limit: {0}")]
     InvalidLimit(&'static str),

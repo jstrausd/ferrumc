@@ -1,7 +1,9 @@
 //! Actual player authority and receipt-confirmed tick-boundary consumers.
 
+mod counters;
+
 use ferrumc_core::{EntityId, EntityUuid, GameMode, PlayerId};
-use ferrumc_items::{encode_persisted_stack, plan_split, ItemStack};
+use ferrumc_items::{persisted_stack_size, plan_split, ItemStack};
 use ferrumc_math::{ChunkPos, Vec3};
 use ferrumc_storage::{
     EntityOwnershipCasRequest, EntityOwnershipProposal, OwnedEntityExpectation,
@@ -49,6 +51,60 @@ struct Candidate {
     charge: usize,
 }
 
+struct BorrowedPickupShape<'a> {
+    plan: InventoryPlan<'a>,
+    moved: u8,
+    remainder: u8,
+    after_len: usize,
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "borrowed player and item scalar facts share one checked pickup rule"
+)]
+fn borrowed_pickup_shape<'a>(
+    slots: &'a [ItemStack; crate::NATIVE_PLAYER_SLOT_COUNT],
+    carried: &'a ItemStack,
+    selected: u8,
+    player_id: PlayerId,
+    mode: GameMode,
+    position: Vec3,
+    source: &'a ItemStack,
+    counters: crate::ItemEntityCounters,
+    target: Option<EntityUuid>,
+    item_position: Vec3,
+) -> Result<BorrowedPickupShape<'a>, PlayerOwnershipError> {
+    if mode == GameMode::Spectator {
+        return Err(PlayerOwnershipError::Ineligible("spectator pickup"));
+    }
+    if counters.pickup_delay() > 0 {
+        return Err(PlayerOwnershipError::Ineligible("pickup delay"));
+    }
+    let player_uuid = EntityUuid::from_bytes(*player_id.as_uuid().as_bytes());
+    if target.is_some_and(|id| id != player_uuid) {
+        return Err(PlayerOwnershipError::Ineligible("pickup target"));
+    }
+    let delta = position - item_position;
+    if delta.x.abs() > 1.5 || delta.y.abs() > 2.0 || delta.z.abs() > 1.5 {
+        return Err(PlayerOwnershipError::Ineligible(
+            "item outside conservative pickup envelope",
+        ));
+    }
+    let mut plan = InventoryPlan::new(slots, carried)?;
+    let moved = plan.pickup(selected, source)?;
+    if moved == 0 {
+        return Err(PlayerOwnershipError::Ineligible("inventory full"));
+    }
+    let remainder = source.count() - moved;
+    let after_len = plan.encoded_len()?;
+    Ok(BorrowedPickupShape {
+        plan,
+        moved,
+        remainder,
+        after_len,
+    })
+}
+
 impl Candidate {
     fn request(&self, id: OwnershipTransferId) -> Result<WorkRequest, PlayerOwnershipError> {
         match (&self.player_expected, &self.entity_expected) {
@@ -81,12 +137,11 @@ impl Candidate {
             (None, Some(e)) => Ok(WorkRequest::Entity(EntityOwnershipCasRequest::new(
                 id,
                 e.clone(),
-                EntityOwnershipProposal::put(
-                    self.after_entity_record
-                        .as_ref()
-                        .ok_or(PlayerOwnershipError::Malformed("missing entity postimage"))?
-                        .clone(),
-                ),
+                self.after_entity_record
+                    .as_ref()
+                    .map_or_else(EntityOwnershipProposal::delete, |r| {
+                        EntityOwnershipProposal::put(r.clone())
+                    }),
             )?)),
             (None, None) => Err(PlayerOwnershipError::Malformed("empty candidate")),
         }
@@ -232,6 +287,15 @@ impl SimShard {
     pub fn run_tick_with_player_ownership(
         &mut self,
     ) -> Result<PlayerOwnershipTickOutcome, PlayerOwnershipError> {
+        if self.ownership_state()?.item_counters.is_some() {
+            return Err(PlayerOwnershipError::CounterTickMismatch);
+        }
+        self.run_player_ownership_boundary()
+    }
+
+    fn run_player_ownership_boundary(
+        &mut self,
+    ) -> Result<PlayerOwnershipTickOutcome, PlayerOwnershipError> {
         self.ownership_state()?;
         let mut outcome = PlayerOwnershipTickOutcome::default();
         let mut actions = std::collections::VecDeque::new();
@@ -257,7 +321,13 @@ impl SimShard {
             }
             self.apply_owned_input(input, &mut outcome);
         }
-        outcome.game = self.run_tick();
+        if self
+            .player_ownership
+            .as_ref()
+            .is_none_or(|s| s.item_counters.is_none())
+        {
+            outcome.game = self.run_tick();
+        }
         Ok(outcome)
     }
 
@@ -326,6 +396,8 @@ impl SimShard {
                     | InputKind::Retry(_)
                     | InputKind::Reconcile(_)
                     | InputKind::Autosave { .. }
+                    | InputKind::RefillItemSaveIds { .. }
+                    | InputKind::EntitySave { .. }
                     | InputKind::Disconnect(_)
                     | InputKind::Drain
                     | InputKind::Stop
@@ -334,6 +406,15 @@ impl SimShard {
             return Err(PlayerOwnershipError::Draining);
         }
         match input {
+            InputKind::RefillItemSaveIds { owner, ids } => self.refill_counter_save_ids(owner, ids),
+            InputKind::EntitySave {
+                item,
+                generation,
+                id,
+            } => {
+                let candidate = self.plan_counter_save(item, *generation)?;
+                self.install_candidate(*id, candidate, outcome)
+            }
             InputKind::RestorePlayer(read) => self.restore_owned_player(read, false, outcome),
             InputKind::Rejoin(read) => self.restore_owned_player(read, true, outcome),
             InputKind::Bootstrap {
@@ -386,7 +467,7 @@ impl SimShard {
                     return Err(PlayerOwnershipError::StaleSnapshot);
                 }
                 let len = crate::NATIVE_ITEM_ENTITY_HEADER_BYTES
-                    + encode_persisted_stack(proposal.stack())?.len();
+                    + persisted_stack_size(proposal.stack())?;
                 let charge = self.pending_charge(0, len)?;
                 let entities = self
                     .entities
@@ -487,6 +568,9 @@ impl SimShard {
             InputKind::Drain => {
                 if let Some(state) = self.player_ownership.as_mut() {
                     state.draining = true;
+                }
+                if let Some(e) = &mut self.entities {
+                    e.mark_counter_flush(None);
                 }
                 outcome.intents.push(OwnershipIntent::Draining);
                 Ok(())
@@ -621,6 +705,10 @@ impl SimShard {
                 && s.pending.is_empty()
                 && s.input.is_empty()
                 && s.boundary_remaining == 0
+                && self
+                    .entities
+                    .as_ref()
+                    .is_none_or(crate::EntityStore::counter_quiescent)
                 && self.players.values().all(|p| {
                     p.owned
                         .as_ref()
@@ -743,6 +831,11 @@ impl SimShard {
             .ok_or(PlayerOwnershipError::Ineligible(
                 "restore requires live FCIE record",
             ))?;
+        let entities = self
+            .entities
+            .as_ref()
+            .ok_or(PlayerOwnershipError::NotInitialized)?;
+        entities.check_confirmed_replacement(0, record.record().data().len())?;
         let restored = crate::decode_item_entity(read.snapshot.expectation().key(), record)?;
         let (key, kind, transform, stack, properties) = restored.into_parts();
         let proposal = crate::ItemEntitySpawn::new(
@@ -773,6 +866,17 @@ impl SimShard {
         else {
             return Err(PlayerOwnershipError::CompletionMismatch);
         };
+        if self
+            .player_ownership
+            .as_ref()
+            .is_some_and(|s| s.item_counters.is_some())
+        {
+            let tick = self.publication_counter_tick();
+            self.entities
+                .as_mut()
+                .ok_or(PlayerOwnershipError::NotInitialized)?
+                .install_confirmed(&item, checked, 1, tick);
+        }
         outcome.intents.push(OwnershipIntent::ItemRestored { item });
         Ok(())
     }
@@ -961,8 +1065,7 @@ impl SimShard {
             plan.drop_selected(owned.selected, selection == DropSelection::All)?;
         let after_len = plan.encoded_len()?;
         self.check_player_post_bytes(owned, after_len)?;
-        let entity_len =
-            crate::NATIVE_ITEM_ENTITY_HEADER_BYTES + encode_persisted_stack(source)?.len();
+        let entity_len = crate::NATIVE_ITEM_ENTITY_HEADER_BYTES + persisted_stack_size(source)?;
         let charge = self.pending_charge(owned.confirmed.data().len(), after_len + entity_len)?;
         let dropped = plan_split(source, moved)?.into_stacks().1;
         let snapshot = plan.materialize(
@@ -1034,38 +1137,42 @@ impl SimShard {
         {
             return Err(PlayerOwnershipError::StaleSnapshot);
         }
-        let (key, before) = entities.capture_item(item)?;
+        let legacy_capture;
+        let (key, before) = if self.ownership_state()?.item_counters.is_some() {
+            let durable = entities.item_durability(item)?;
+            if durable.due {
+                return Err(PlayerOwnershipError::Ineligible("item despawn due"));
+            }
+            (expected.key(), &durable.confirmed)
+        } else {
+            legacy_capture = entities.capture_item(item)?;
+            (legacy_capture.0, &legacy_capture.1)
+        };
         if key != read_entity.expectation().key()
             || read_entity
                 .record()
-                .is_none_or(|r| !entity_equal(r, &before))
+                .is_none_or(|r| !entity_equal(r, before))
         {
             return Err(PlayerOwnershipError::StaleSnapshot);
         }
         let properties = actual.properties();
-        if properties.counters().pickup_delay() > 0 {
-            return Err(PlayerOwnershipError::Ineligible("pickup delay"));
-        }
-        let player_uuid = EntityUuid::from_bytes(*handle.player.as_uuid().as_bytes());
-        if properties
-            .owner_target()
-            .is_some_and(|id| id != player_uuid)
-        {
-            return Err(PlayerOwnershipError::Ineligible("pickup target"));
-        }
-        let delta = player.position - base.transform().position();
-        if delta.x.abs() > 1.5 || delta.y.abs() > 2.0 || delta.z.abs() > 1.5 {
-            return Err(PlayerOwnershipError::Ineligible(
-                "item outside conservative pickup envelope",
-            ));
-        }
-        let mut plan = Self::player_plan(player)?;
-        let moved = plan.pickup(owned.selected, actual.stack())?;
-        if moved == 0 {
-            return Err(PlayerOwnershipError::Ineligible("inventory full"));
-        }
-        let remainder = actual.stack().count() - moved;
-        let after_len = plan.encoded_len()?;
+        let BorrowedPickupShape {
+            plan,
+            moved,
+            remainder,
+            after_len,
+        } = borrowed_pickup_shape(
+            &owned.slots,
+            &owned.carried,
+            owned.selected,
+            handle.player,
+            player.game_mode,
+            player.position,
+            actual.stack(),
+            properties.counters(),
+            properties.owner_target(),
+            base.transform().position(),
+        )?;
         self.check_player_post_bytes(owned, after_len)?;
         let after_entity_len = if remainder == 0 {
             0
@@ -1095,7 +1202,7 @@ impl SimShard {
             player_expected: Some(read.snapshot.player().expectation().clone()),
             entity_expected: Some(expected.clone()),
             before_player: Some(owned.confirmed.clone()),
-            before_entity: Some(before),
+            before_entity: Some(before.clone()),
             after_player: Some(snapshot),
             after_player_record: Some(record),
             after_entity: Some(prepared),
@@ -1135,6 +1242,7 @@ impl SimShard {
                 "planned encoded charge differs",
             ));
         }
+        let (item_generation, counters) = self.prepare_counter_candidate(&candidate)?;
         let request = candidate.request(id)?;
         let Candidate {
             kind,
@@ -1192,6 +1300,8 @@ impl SimShard {
             after_entity,
             after_entity_record,
             local_before,
+            item_generation,
+            counters,
             status: OwnershipPendingStatus::InFlight,
             charge,
             moved,
@@ -1297,6 +1407,10 @@ impl SimShard {
         Ok(pending)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one joint receipt/current image check preserves atomic ownership authority"
+    )]
     fn confirm_current(
         pending: &PendingPlayerMutation,
         receipt: &OwnershipReceipt,
@@ -1359,7 +1473,16 @@ impl SimShard {
                 .ok_or(PlayerOwnershipError::CompletionMismatch)?;
             if id != expected.key().uuid()
                 || before != expected.stamp()
-                || !changed_stamp(before, after, pending.after_entity_record.is_some(), true)
+                || !changed_stamp(
+                    before,
+                    after,
+                    pending.after_entity_record.is_some(),
+                    pending
+                        .before_entity
+                        .as_ref()
+                        .zip(pending.after_entity_record.as_ref())
+                        .is_none_or(|(a, b)| !entity_equal(a, b)),
+                )
                 || receipt.before_entity_chunk()
                     != pending
                         .before_entity
@@ -1436,6 +1559,11 @@ impl SimShard {
                     OwnershipError::Busy | OwnershipError::HistoryCapacity { .. }
                 ) {
                     self.set_pending_status(id, OwnershipPendingStatus::Prepared);
+                } else if self.ownership_state()?.item_counters.is_some()
+                    && matches!(source, OwnershipError::CasConflict { .. })
+                {
+                    self.quarantine_counter_conflict(id);
+                    self.set_pending_status(id, OwnershipPendingStatus::Quarantined);
                 } else {
                     self.preflight_deferred_for(Some(id), 0)?;
                     self.release_pending(id, outcome)?;
@@ -1483,6 +1611,7 @@ impl SimShard {
         let id = query.id();
         let generation = self.ownership_state()?.generation.next()?;
         self.preflight_deferred_for(Some(id), 1)?;
+        self.preflight_counter_completion(id, true)?;
         let mut pending = self.remove_pending(id)?;
         let take_wire = pending
             .after_entity
@@ -1523,6 +1652,7 @@ impl SimShard {
                 .as_mut()
                 .ok_or(PlayerOwnershipError::NotInitialized)?
                 .publish_owned(id, prepared, expected);
+            self.publish_counter_confirmation(&publication, &mut pending);
             Self::publish_entity_intent(query, publication, outcome);
         }
         if let Some(state) = self.player_ownership.as_mut() {
@@ -1600,7 +1730,9 @@ impl SimShard {
         id: OwnershipTransferId,
         outcome: &mut PlayerOwnershipTickOutcome,
     ) -> Result<(), PlayerOwnershipError> {
+        self.preflight_counter_completion(id, false)?;
         let mut pending = self.remove_pending(id)?;
+        self.release_counter_projection(&pending);
         if matches!(pending.kind, PendingKind::SpawnItem) {
             if let Some(PreparedOwnedEntity::Spawn { base, item, .. }) = pending.after_entity.take()
             {
@@ -1893,7 +2025,13 @@ impl SimShard {
         ticket: crate::ChunkTicket,
     ) -> Result<crate::TicketRelease, PlayerOwnershipError> {
         self.ownership_state()?;
-        Ok(self.chunks.release(pos, ticket))
+        let release = self.chunks.release(pos, ticket);
+        if !self.chunks.is_loaded(pos) {
+            if let Some(e) = &mut self.entities {
+                e.mark_counter_flush(Some(pos));
+            }
+        }
+        Ok(release)
     }
 }
 
@@ -1911,6 +2049,23 @@ fn standing_drop(
     seed: i64,
     stack: ItemStack,
 ) -> Result<crate::ItemEntitySpawn, PlayerOwnershipError> {
+    let (base, properties) = standing_drop_parts(scope, player, uuid, wire, position, look, seed)?;
+    Ok(crate::ItemEntitySpawn::new(base, stack, properties))
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pure native drop facts are shared by readonly planning and publication"
+)]
+fn standing_drop_parts(
+    scope: ferrumc_storage::GenerationKey,
+    player: PlayerId,
+    uuid: EntityUuid,
+    wire: EntityId,
+    position: Vec3,
+    look: [f32; 2],
+    seed: i64,
+) -> Result<(crate::EntitySpawn, crate::ItemEntityProperties), PlayerOwnershipError> {
     use ferrumc_world::random::WorldgenRandomSource;
     let mut constructor =
         WorldgenRandomSource::legacy(ferrumc_world::WorldSeed::new(seed.wrapping_add(1)));
@@ -1958,7 +2113,7 @@ fn standing_drop(
         None,
         Some(EntityUuid::from_bytes(*player.as_uuid().as_bytes())),
     )?;
-    Ok(crate::ItemEntitySpawn::new(base, stack, properties))
+    Ok((base, properties))
 }
 
 fn mth(value: f32, cos: bool) -> f32 {

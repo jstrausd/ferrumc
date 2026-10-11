@@ -4,6 +4,7 @@
 //! and persistence. Item payloads use the same owner slots and a tick capability;
 //! physics, pickup, tracking and durable storage consumers remain separate.
 
+pub(crate) mod counters;
 mod item;
 pub(crate) mod ownership;
 pub use item::*;
@@ -353,6 +354,7 @@ struct Slot {
     entity: Option<EntityData>,
     item: Option<ItemEntityState>,
     ownership: Option<ferrumc_storage::OwnedEntityExpectation>,
+    durability: Option<crate::item_counters::OwnedItemDurability>,
     previous: Option<usize>,
     next: Option<usize>,
     next_free: Option<usize>,
@@ -366,6 +368,7 @@ impl Slot {
             entity: self.entity,
             item: self.item.as_ref().map(ItemEntityState::snapshot_admitted),
             ownership: self.ownership.clone(),
+            durability: self.durability.clone(),
             previous: self.previous,
             next: self.next,
             next_free: self.next_free,
@@ -407,6 +410,8 @@ pub struct EntityStore {
     ownership_mode: bool,
     snapshot_only: bool,
     reservation: Option<ferrumc_storage::OwnershipTransferId>,
+    confirmed_item_bytes: usize,
+    confirmed_item_cap: Option<usize>,
 }
 
 impl Clone for EntityStore {
@@ -447,6 +452,8 @@ impl EntityStore {
             ownership_mode: false,
             snapshot_only: false,
             reservation: None,
+            confirmed_item_bytes: 0,
+            confirmed_item_cap: None,
         })
     }
 
@@ -620,6 +627,7 @@ impl EntityStore {
             self.slots[index].entity = Some(entity);
             self.slots[index].item = item;
             self.slots[index].ownership = None;
+            self.slots[index].durability = None;
             index
         } else {
             let index = self.slots.len();
@@ -628,6 +636,7 @@ impl EntityStore {
                 entity: Some(entity),
                 item,
                 ownership: None,
+                durability: None,
                 previous: None,
                 next: None,
                 next_free: None,
@@ -737,6 +746,9 @@ impl EntityStore {
         bucket: usize,
     ) -> (EntityData, Option<ItemEntityState>) {
         let item = self.slots[index].item.take();
+        if let Some(durable) = self.slots[index].durability.take() {
+            self.confirmed_item_bytes -= durable.confirmed.record().data().len();
+        }
         self.detach(index, bucket);
         self.by_uuid.remove(&entity.uuid);
         self.by_wire.remove(&entity.wire_id);
