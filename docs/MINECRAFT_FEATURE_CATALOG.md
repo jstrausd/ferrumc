@@ -494,9 +494,10 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Rolle / Agent | Ticket | Aktueller Status, Welle 4 | Exklusiver Dateibesitz / nächste Entscheidung |
 | --- | --- | --- | --- |
 | Orchestrator `/root` | Board/Integration/Betreiberrequests | aktiv | Vergaben, Git, finaler Prüflauf und Status; keine Runtimeimplementierung. |
-| Protokollagent `feature_catalog` | SIM-03.4 | Entwurf `efbeb2be` durch Root und separaten Reviewer CLEAN auf Vertragsumfang; Simproduktion freigegeben | Exklusiv Sim, eigener Brief und Scratchevidenz. Vor Workrequest reservierte immutable Gruppen, retained Outbox; Runtimeabnahme und Sessiontracking danach. |
-| Consumeragent `select_world_ticket` | DUR-03.2 | DUR-04.2a unabhängig CLEAN als `d3c84252`; konkrete Storageproduktion freigegeben | Storage und eigener Migrationsbrief, echte Stage-CAS-/Sourceimportvariante A. App/FCPSconsumer bleiben getrennt. |
-| Weltagent `item_transfer_primitives` | GEN-05.7-Entwurf | GEN-05.6 unabhängig CLEAN als `34c8875e`; Temperaturvertrag in Vorbereitung | Eigener Temperaturbrief und Scratchevidenz, Runtime/Registry readonly. Originale feste Noises und Paperprädikate; Storedresolver/Surface/Carver danach. |
+| Simlieferung `feature_catalog` | SIM-03.4 | Unabhängig CLEAN als `b9f15db8` integriert; Auftrag abgeschlossen | Debug/Release jeweils347 auf frischem Archiv mit DUR-03.2, strictchecks grün. Retainedfacts implementiert; Session/Appverbraucher und Gameplayaktivierung offen. |
+| Sessionagent `select_world_ticket` | NET-04.2c | DUR-03.2 unabhängig CLEAN als `242c8f07` lokal integriert; konkreter Sessionvertrag in readonly Vorbereitung | Eigener NET-04.2c-Brief und Scratchevidenz. Echte Nativeplayer-/Selfjoinproducer benennen; Sessionruntime noch readonly. |
+| T3-Weltagent „GEN-05.7 originale Biomtemperatur in Rust“ | GEN-05.7 | Rootreproduktion und separater Oraclereview CLEAN; Worldproduktion vergeben | Exklusiv World und neue Runtimeevidenz. Alte Design-/Oracleinputs immutable;65 Biome und feste allocationfreie Originalnoises/Prädikate. |
+| T3-Storageagent „DUR-03.3 gemeinsame Inventar- und Blocktransaktion“ | DUR-03.3 | Konkreter readonly API-/Grammar-/Receiptvertrag in Arbeit | Eigener Brief und Scratchevidenz. Gemeinsame Player-/Blockdurability und sämtliche normalen Writerrevisionspfade prüfen; Runtime noch readonly. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
 aktiven Slots stehen im Implementierungsboard. Reviews nutzen frei gewordene

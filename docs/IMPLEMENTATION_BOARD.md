@@ -147,36 +147,51 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
-Aktuell arbeiten neben Root drei Agents parallel. Der Weltagent
-`item_transfer_primitives` hat GEN-05.6 unabhängig CLEAN geliefert; Root hat
-den allocationfreien Biom-Zoomproducer als `34c8875e` integriert. Der Agent
-konkretisiert jetzt readonly GEN-05.7: originale feste Biomtemperatur-Noises
-und Paper-Temperatur-/Niederschlagsprädikate.65 echte Biomdefinitionen und
-zwei Presetdefinitionen bleiben getrennt. Runtimefreigabe folgt auf den
-konkreten Parser-/RNG-/Ressourcen-/Originaloraclevertrag.
-Oberflächen benötigen außerdem originale Temperatur-/Surface-Regeln; Carver
-benötigen eigene Tag-/Konfigurationsproducer. Die aktive App bleibt Flat-v1/Plains.
+Root hat DUR-03.2 unabhängig CLEAN geprüft und als `242c8f07` auf lokalem
+`main` integriert. Debug/Release jeweils299 Tests und strictchecks bestehen
+im frischen `b87d5b61`-Archiv mit exakt61 Storagefiles;62 Source-/36
+Evidenzfiles und das vollständige Quellarchiv sind hashgeprüft.
+[Prüfbericht](agent-tasks/DUR-03_2_OWNERSHIP_FORMAT6_MIGRATION_REVIEW.md).
+Die Migration verwendet tatsächliche private Stage-CASreceipts und einen
+atomaren Sourceimport; Appmigration und FCPS-Gameplayadmission bleiben offen.
 
-`select_world_ticket` implementiert nach der CLEAN-Simintegration die konkret
-geprüfte [DUR-03.2-Migration](agent-tasks/DUR-03_2_OWNERSHIP_FORMAT6_MIGRATION.md).
-Die intern gewählte Variante A benutzt echte private Format6-Stage-CASreceipts
-und genau einen atomaren Sourceimport. Originalpayloads bleiben erhalten;
-Chunkepochs steigen checked um die tatsächliche importierte Entityzahl.
-Immutable Stage/Backup werden nach Checkpointseal nur über begrenzte eigene
-Prüfkopien geöffnet. Exklusiver Besitz ist Storage plus eigener Aufgabenbrief;
-Appmigration und FCPS-Gameplayadmission folgen separat.
+`select_world_ticket` konkretisiert jetzt ausschließlich readonly
+[NET-04.2c](agent-tasks/NET-04_2c_COLLECTOR_SESSION_BINDING.md): tatsächliche
+OwnedPlayer-/Session-/Collector-Wirebindung und Collectortracking. Der heutige
+Appjoin verwendet weiterhin den Legacyplayerpfad und eigene JoinGame-ID1;
+die fehlenden tatsächlichen Sim-/Appproducer werden ausdrücklich benannt.
+Sessionruntime ist noch nicht freigegeben.
+
+GEN-05.6 ist unabhängig CLEAN als `34c8875e` integriert. Der konkrete
+GEN-05.7-Temperaturvertrag ist CLEAN auf Vertragsumfang. Die finale genuine
+Originalserie umfasst129588 Temperaturfälle je Original,65 Biome und alle
+Frozenzweige. Root reproduzierte den gesamten Lauf und12 Guardrefusals;
+26 Ausgabedateien sind bytegleich,119 Evidence-/64 Design-/757 tatsächliche
+Inputdateien vor/nach hashgeprüft. Ein eigener T3-Reviewer hat die vollständige
+Oraclequelle unabhängig CLEAN geprüft. Root hat daraufhin die Worldproduktion
+an den T3-Agenten „GEN-05.7 originale Biomtemperatur in Rust“ vergeben.
+[Oraclereview und Freigabe](agent-tasks/GEN-05_7_BIOME_TEMPERATURE_ORACLE_REVIEW.md).
+Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
-Root integrierte sie als `579bed62` und `67a9aa94`. Der vollständige konkrete
-SIM-03.4-Entwurf `efbeb2be` ist durch Root und einen separaten readonly Reviewer
-CLEAN auf Vertragsumfang geprüft. Der Agent übernimmt jetzt ausschließlich
-Simproduktion mit vor Workrequest reservierten immutable Publicationgruppen
-und retained Outbox. [Vertragsreview](agent-tasks/SIM-03_4_ITEM_PUBLICATION_CONTRACT_REVIEW.md);
-Runtimeabnahme und Integration folgen separat.
+Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
+DUR-03.2 als `b9f15db8` integriert. Debug/Release jeweils347 Prüfungen und alle
+strictchecks bestehen;53 Source-/24 Evidenzfiles sind gebunden. Vor Workrequest
+reservierte immutable Gruppen und retained Outbox sind implementiert.
+[Runtimeprüfung](agent-tasks/SIM-03_4_ITEM_PUBLICATION_REVIEW.md).
+Sessiontracking, tatsächlicher native Join/Detach und vollständige terminale
+Ausgabedisposition sind noch offene Verbraucher.
 Die alten NBT-/MUTF8writer bleiben die Wireauthority. Anschließend folgen
 versiegelte Sim-Publikationsfakten und Sessionviewertracking. Die neuen
 Metadata-/Motion-/TakeItempakete, ihre Netklassifikation und der Apptracefix
 sind integriert. Das aktiviert noch keine Live-Item-Entities.
+
+Der T3-Agent „DUR-03.3 gemeinsame Inventar- und Blocktransaktion“ konkretisiert
+jetzt readonly den gemeinsamen Player-/Blockdurabilityvertrag. Storage ist nach
+DUR-03.2 frei; Runtime benötigt erst die tatsächliche API-/Grammar-/Revision-/
+Receipt-/Limitprüfung. Keine getrennten Legacywrites dürfen die gemeinsame
+Inventory-/Blockwirkung umgehen. Aktuell laufen neben Root drei Childaufträge:
+Worldproduktion, Sessionvertrag und dieser Storagevertrag.
 
 ITEM-SIZE-01 ist unabhängig CLEAN als `b5551395` integriert. Seine Größen- und
 Repräsentations-APIs vermeiden die zuvor gefundenen temporären FCIS-Buffer;
