@@ -14,10 +14,12 @@
 //! * [`persistence`] — versioned, bounded, lossless storage of modelled stacks.
 //! * [`transfer`] — checked pure split and non-swapping transfer plans.
 //! * [`crafting`] — pinned normal recipes and conservative single-craft plans.
+//! * [`metadata`] — bounded trusted `DATA_ITEM` metadata with exact size admission.
 
 pub mod component;
 pub mod crafting;
 pub mod item_id;
+pub mod metadata;
 pub mod persistence;
 pub mod stack;
 pub mod transfer;
@@ -27,6 +29,10 @@ pub mod wire;
 pub use component::{ComponentPatch, ComponentTypeId, ComponentValue, OpaqueComponent};
 pub use crafting::{CraftingError, CraftingGrid, NormalRecipe, NormalRecipes, SingleCraftPlan};
 pub use item_id::ItemId;
+pub use metadata::{
+    encode_item_entity_metadata, ItemEntityMetadata, ItemMetadataError,
+    MAX_ITEM_ENTITY_METADATA_BYTES,
+};
 pub use persistence::{
     decode_persisted_stack, encode_persisted_stack, persisted_stack_size, ItemPersistenceError,
     MAX_PERSISTED_STACK_BYTES,

@@ -25,6 +25,8 @@ Brigadier `Commands` packet); this crate produces and consumes those bytes.
   partial transfer plans, preserving exact supported component representation.
 - `persisted_stack_size` / `same_stack_representation` — lossless borrowed
   size/identity probes without encoding, allocating, or cloning components.
+- `encode_item_entity_metadata` — one complete bounded trusted `DATA_ITEM` entry
+  with immutable bytes or a moved output buffer.
 
 ## Trusted vs untrusted slots
 
@@ -55,6 +57,21 @@ A `max_stack_size` component cannot raise that registry ceiling, and any count
 or component-encoding error restores the output buffer to its original length.
 Container-content encoding routes every list and carried stack through the same
 check.
+
+## Bounded item entity metadata
+
+`encode_item_entity_metadata(&stack)` produces `08 07 <trusted slot> ff` without
+an entity ID or packet framing. Canonical empty yields `08 07 00 ff`; present
+AIR is an explicit refusal because silently emitting empty would lose its model
+representation. Existing lossless model validation precedes that refusal.
+
+Exact complete wire sizing precedes the one fallible output reservation. The
+256 KiB cap includes index, serializer, all slot bytes and terminator. Typed NBT
+reuses the shared checked direct writer, with no temporary NBT buffer or source
+clones. Signed damage, component order, removals, NBT bits and checked trusted
+opaque bytes remain preserved. Opaque inner schemas and Paper sanitizers are
+not newly validated. This local encoded-byte policy is not a decoded heap or
+aggregate allowance; the result grants no confirmed entity/publication authority.
 
 ## Hostile-input normalization
 

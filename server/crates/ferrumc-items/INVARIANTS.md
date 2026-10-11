@@ -32,6 +32,15 @@
   duplicate component-patch ids.
 - Opaque bytes originate from the checked server-authored passthrough type;
   their internal wire semantics are not newly interpreted by persistence.
+- `encode_item_entity_metadata` performs the unchanged lossless model preflight
+  before present-AIR refusal, exact complete trusted slot sizing, or allocation.
+  The whole DATA_ITEM entry including index/serializer/end is capped at 256 KiB.
+  Canonical empty is `08 07 00 ff`; present-AIR is unsupported without rewriting.
+- Metadata uses one fallible exact output reservation and checks append bounds;
+  typed NBT writes directly through the checked shared network-root producer.
+  No source clones, temporary NBT output, normalization, component reordering,
+  or inner-schema/sanitizer admission for trusted opaque bytes is introduced.
+  Metadata bytes grant no entity, durable revision or publication authority.
 - Pure split/transfer planning validates both models before any result clone,
   including no-op and incompatible transfers. It shares persistence's
   allocation-free structural/count/encoded-byte preflight; preflight scratch
