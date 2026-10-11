@@ -261,8 +261,15 @@ Liveaktivierung, eigenes Simticket gegen dauerhaft `Degraded` durch quarantinier
 Pendings und typisierte Disposition fehlschlagender Recoveryboundaries.
 [Vertrag](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT.md),
 [Rootentscheidungen](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_ROOT_DECISIONS.md).
-Als erstes Runtimeticket ist NET-04.2e1 (nur `ferrumc-session`) freigegeben;
-sein Kandidat ist nach dem Reviewbefund B1 nachgebessert. Als nächstes ist
+Das erste Runtimeticket NET-04.2e1 (nur `ferrumc-session`) ist CLEAN_RUNTIME
+integriert: native Endpointart, bounded Lane mit Bewegungscoalescing je Session,
+Revalidierung per Probe, Join-Reservierung/-Admission und minimales
+`disconnect_native`. Nach dem Reviewbefund B1 laufen alle Pflichttests auf
+Memory und redb; Root hat Session Debug/Release je206 Tests, Clippy und fmt
+selbst bestätigt. Storage und World sind nur Testabhängigkeiten der Session.
+[Delivery](agent-tasks/NET-04_2e1_NATIVE_ENDPOINT_SESSION_RUNTIME_DELIVERY.md),
+[Review](agent-tasks/NET-04_2e1_NATIVE_ENDPOINT_SESSION_RUNTIME_REVIEW.md);
+die Auflagen A1–A7 gehen an e2/f. Als nächstes ist
 [SIM-03.4b](agent-tasks/SIM-03_4b_DETACHED_PLAYER_RELEASE_TASK.md) (nur
 `ferrumc-sim`) freigegeben; e2, DUR-05a, NET-04.2f und DUR-05b folgen der
 Ticketfolge.

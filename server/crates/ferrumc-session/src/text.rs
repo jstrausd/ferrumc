@@ -65,7 +65,7 @@ pub(crate) fn text_component_to_nbt(component: &TextComponent) -> NbtTag {
 ///
 /// `overlay = true` renders the message above the hotbar (the action bar);
 /// `overlay = false` renders it in the chat box. The component is encoded as
-/// network NBT (see [`text_component_to_nbt`]). System chat is unsigned, so this
+/// network NBT (see `text_component_to_nbt`). System chat is unsigned, so this
 /// is the carrier for command feedback, relayed player chat, and any other
 /// server-authored message — none of which need the 1.19 signing apparatus.
 ///

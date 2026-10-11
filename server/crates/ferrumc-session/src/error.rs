@@ -1,6 +1,6 @@
 //! Error types for the session router.
 
-use ferrumc_core::{PlayerId, ServerError};
+use ferrumc_core::{DimensionId, PlayerId, ServerError, WorldId};
 use ferrumc_math::ShardPos;
 use ferrumc_sim::ShardId;
 
@@ -116,6 +116,39 @@ pub enum SessionError {
     /// (it exceeded the NBT depth or size limits).
     #[error("failed to encode text component to NBT: {0}")]
     TextEncode(#[from] ferrumc_nbt::NbtError),
+
+    /// A legacy input or registration operation resolved to a native endpoint.
+    ///
+    /// The input is returned intact; no UUID-only input is translated for a
+    /// native owner. Native inputs are routed by session key instead.
+    #[error("endpoint {home} is native and requires a native session")]
+    NativeEndpointRequiresSession {
+        /// Home of the native endpoint.
+        home: ShardId,
+    },
+
+    /// Legacy and native coverage cannot coexist in one world/dimension.
+    #[error("endpoint kind conflict in world {world}, dimension {dimension}")]
+    EndpointKindConflict {
+        /// The contested world.
+        world: WorldId,
+        /// The contested dimension.
+        dimension: DimensionId,
+    },
+
+    /// The router's shared entity wire allocator is exhausted; it never wraps.
+    ///
+    /// Checked before any slow-viewer disconnect or `PlayerJoin`.
+    #[error("entity wire ids exhausted")]
+    EntityIdsExhausted,
+
+    /// Installed sessions plus native reservations reached the opt-in
+    /// collector session limit.
+    #[error("session capacity {limit} reached")]
+    SessionCapacity {
+        /// The configured session limit.
+        limit: usize,
+    },
 }
 
 impl From<SessionError> for ServerError {
@@ -163,6 +196,18 @@ impl From<SessionError> for ServerError {
             }
             SessionError::TextEncode(err) => {
                 ServerError::invalid_state(format!("text component NBT encode failed: {err}"))
+            }
+            SessionError::NativeEndpointRequiresSession { home } => {
+                ServerError::invalid_state(format!("endpoint {home} requires a native session"))
+            }
+            SessionError::EndpointKindConflict { world, dimension } => ServerError::invalid_state(
+                format!("endpoint kind conflict in world {world}, dimension {dimension}"),
+            ),
+            SessionError::EntityIdsExhausted => {
+                ServerError::capacity("entity wire ids exhausted".to_owned())
+            }
+            SessionError::SessionCapacity { limit } => {
+                ServerError::capacity(format!("session capacity {limit} reached"))
             }
         }
     }

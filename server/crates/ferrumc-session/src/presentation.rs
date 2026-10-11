@@ -72,7 +72,7 @@ pub fn title_animation_times(fade_in: i32, stay: i32, fade_out: i32) -> Clientbo
 /// A sound's numeric `sound_event` registry id (protocol 772).
 ///
 /// Held opaquely because `ferrumc-registry` has no sound table yet; see the
-/// [module docs](self) for the limitation. The wire holder encodes it as
+/// module docs for the limitation. The wire holder encodes it as
 /// `id + 1` (a leading `0` means an *inline* sound, which this slice does not
 /// emit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,15 +194,15 @@ pub fn play_sound(
     )))
 }
 
-/// `minecraft:block.note_block.harp`. Curated id — see the [module docs](self).
+/// `minecraft:block.note_block.harp`. Curated id — see the module docs.
 pub const SOUND_NOTE_BLOCK_HARP: SoundId = SoundId::new(1088);
-/// `minecraft:entity.player.levelup`. Curated id — see the [module docs](self).
+/// `minecraft:entity.player.levelup`. Curated id — see the module docs.
 pub const SOUND_PLAYER_LEVELUP: SoundId = SoundId::new(489);
-/// `minecraft:ui.button.click`. Curated id — see the [module docs](self).
+/// `minecraft:ui.button.click`. Curated id — see the module docs.
 pub const SOUND_UI_BUTTON_CLICK: SoundId = SoundId::new(1235);
-/// `minecraft:entity.experience_orb.pickup`. Curated id — see the [module docs](self).
+/// `minecraft:entity.experience_orb.pickup`. Curated id — see the module docs.
 pub const SOUND_EXPERIENCE_ORB_PICKUP: SoundId = SoundId::new(327);
-/// `minecraft:block.anvil.land`. Curated id — see the [module docs](self).
+/// `minecraft:block.anvil.land`. Curated id — see the module docs.
 pub const SOUND_ANVIL_LAND: SoundId = SoundId::new(150);
 
 // ---------------------------------------------------------------------------

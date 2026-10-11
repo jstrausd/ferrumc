@@ -1,7 +1,11 @@
 //! [`SessionRouter`] and [`PlayerSessionHandle`]: the player<->shard mapping and
 //! the message-based bridge between connections and simulation shards.
 
+mod native;
+
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU64;
+use std::sync::Arc;
 
 use tokio::sync::mpsc::{self, error::TrySendError};
 
@@ -9,12 +13,18 @@ use ferrumc_core::{DimensionId, PlayerId, TextComponent, WorldId};
 use ferrumc_math::{BlockPos, ChunkPos, ShardPos, Vec3};
 use ferrumc_net::{Criticality, OutboundPriority};
 use ferrumc_proto::generated::play::ClientboundPlayPacket;
-use ferrumc_sim::{BlockStateId, GameInput, GameOutput, MutationCause, ShardId, ShardPartitioner};
+use ferrumc_sim::{
+    BlockStateId, GameInput, GameOutput, GenerationBinding, MutationCause, ShardId,
+    ShardPartitioner,
+};
 
 use crate::delivery::{DeliveryLane, InputDeliveryError, InputDeliveryPolicy};
 use crate::directory::{ShardCoverage, ShardDirectory, ShardLease, ShardRegistrationId};
 use crate::error::SessionError;
 use crate::event::NetEvent;
+use crate::native::{
+    LaneItem, NativeLaneIdentity, NativeSpawnProjection, PlayerSessionKey, RouterIdentity,
+};
 use crate::outbound::OutboundMessage;
 use crate::translate::{
     ack_shell, block_update_shell, chunk_for_position, entity_spawn_shell, entity_teleport_shell,
@@ -75,7 +85,26 @@ const DEFAULT_DIMENSION: DimensionId = DimensionId::new(0);
 #[derive(Debug, Clone)]
 struct ShardEndpoint {
     home: ShardId,
-    sender: mpsc::Sender<GameInput>,
+    kind: EndpointKind,
+}
+
+/// The private endpoint kind. Legacy and native coverage exclude each other per
+/// world/dimension; a legacy input is never translated for a native endpoint.
+#[derive(Debug, Clone)]
+enum EndpointKind {
+    /// The existing `GameInput` lane.
+    Legacy(mpsc::Sender<GameInput>),
+    /// The native session lane (NET-04.2e1).
+    Native(NativeEndpoint),
+}
+
+/// A native endpoint: bounded lane sender, per-generation lane identity and
+/// the validated generation scope.
+#[derive(Debug, Clone)]
+struct NativeEndpoint {
+    sender: mpsc::Sender<LaneItem>,
+    lane: Arc<NativeLaneIdentity>,
+    generation: GenerationBinding,
 }
 
 /// A stable data-plane binding to one directory coverage slot.
@@ -200,12 +229,26 @@ pub struct PlayerSessionHandle {
     player: PlayerId,
     shard: ShardId,
     outbound: mpsc::Receiver<OutboundMessage>,
+    key: Option<PlayerSessionKey>,
+    projection: Option<NativeSpawnProjection>,
 }
 
 impl PlayerSessionHandle {
     /// The player this session belongs to.
     pub fn player(&self) -> PlayerId {
         self.player
+    }
+
+    /// The sealed native session key, or `None` for a legacy session (legacy
+    /// UUID-only APIs keep their semantics and mint no key).
+    pub fn session_key(&self) -> Option<PlayerSessionKey> {
+        self.key.clone()
+    }
+
+    /// The native spawn projection minted at admission, or `None` for a legacy
+    /// session.
+    pub fn native_spawn_projection(&self) -> Option<NativeSpawnProjection> {
+        self.projection
     }
 
     /// The shard the player was routed to on join.
@@ -247,7 +290,9 @@ impl PlayerSessionHandle {
 /// The router is the only component that knows where each player lives. It never
 /// holds a [`SimShard`](ferrumc_sim::SimShard), a chunk, a socket, or a database
 /// handle: it communicates purely by [`GameInput`]/[`GameOutput`] messages over
-/// bounded [`mpsc`] channels.
+/// bounded [`mpsc`] channels, and for native coverage by
+/// [`NativeShardInput`](crate::NativeShardInput) over the bounded native lane
+/// (see [`register_native_world_shard`](Self::register_native_world_shard)).
 ///
 /// # Wiring
 ///
@@ -317,7 +362,18 @@ pub struct SessionRouter {
     shard_control_reserve: usize,
     outbound_capacity: usize,
     view_distance: i32,
-    next_entity_id: i32,
+    /// The next unused wire id of the single shared allocator over
+    /// `[2, i32::MAX]`; `None` once `i32::MAX` was issued. Never wraps.
+    next_entity_id: Option<i32>,
+    /// Private router identity that every [`PlayerSessionKey`] weakly names.
+    identity: Arc<RouterIdentity>,
+    /// The next unused session incarnation; `None` once `u64::MAX` was issued.
+    next_session: Option<NonZeroU64>,
+    /// Router-local revalidation probe sequence (checked, never reused).
+    probe_seq: u64,
+    collector: Option<native::CollectorConfig>,
+    native_sessions: BTreeMap<PlayerId, native::NativeSession>,
+    native_reservations: BTreeMap<PlayerId, native::NativeReservationRecord>,
 }
 
 impl SessionRouter {
@@ -364,7 +420,13 @@ impl SessionRouter {
                 .min(shard_input_capacity.saturating_sub(1)),
             outbound_capacity: outbound_capacity.max(1),
             view_distance: DEFAULT_VIEW_DISTANCE,
-            next_entity_id: FIRST_ENTITY_ID,
+            next_entity_id: Some(FIRST_ENTITY_ID),
+            identity: Arc::new(RouterIdentity),
+            next_session: Some(NonZeroU64::MIN),
+            probe_seq: 0,
+            collector: None,
+            native_sessions: BTreeMap::new(),
+            native_reservations: BTreeMap::new(),
         }
     }
 
@@ -518,9 +580,19 @@ impl SessionRouter {
         &mut self,
         lease: &ShardLease,
     ) -> Result<ShardRegistration, SessionError> {
-        let home = self.shards.get(lease)?.endpoint().home;
+        let endpoint = self.shards.get(lease)?.endpoint();
+        let home = endpoint.home;
+        if matches!(endpoint.kind, EndpointKind::Native(_)) {
+            return Err(SessionError::NativeEndpointRequiresSession { home });
+        }
         let (sender, receiver) = mpsc::channel(self.shard_input_capacity);
-        let next = self.shards.replace(lease, ShardEndpoint { home, sender })?;
+        let next = self.shards.replace(
+            lease,
+            ShardEndpoint {
+                home,
+                kind: EndpointKind::Legacy(sender),
+            },
+        )?;
         Ok(ShardRegistration {
             home,
             lease: next,
@@ -539,6 +611,12 @@ impl SessionRouter {
         &mut self,
         lease: &ShardLease,
     ) -> Result<ShardId, SessionError> {
+        let endpoint = self.shards.get(lease)?.endpoint();
+        if matches!(endpoint.kind, EndpointKind::Native(_)) {
+            return Err(SessionError::NativeEndpointRequiresSession {
+                home: endpoint.home,
+            });
+        }
         Ok(self.shards.remove(lease)?.home)
     }
 
@@ -547,10 +625,21 @@ impl SessionRouter {
         coverage: ShardCoverage,
         home: ShardId,
     ) -> Result<ShardRegistration, SessionError> {
+        let (world, dimension) = match coverage {
+            ShardCoverage::Exact(shard) => (shard.world(), shard.dimension()),
+            ShardCoverage::World { world, dimension } => (world, dimension),
+        };
+        if self.scope_has_kind(world, dimension, true) {
+            return Err(SessionError::EndpointKindConflict { world, dimension });
+        }
         let (sender, receiver) = mpsc::channel(self.shard_input_capacity);
-        let lease = self
-            .shards
-            .register(coverage, ShardEndpoint { home, sender })?;
+        let lease = self.shards.register(
+            coverage,
+            ShardEndpoint {
+                home,
+                kind: EndpointKind::Legacy(sender),
+            },
+        )?;
         Ok(ShardRegistration {
             home,
             lease,
@@ -644,18 +733,23 @@ impl SessionRouter {
             DEFAULT_DIMENSION,
             chunk_for_position(position),
         );
-        let shard = self
+        let resolved = self
             .shards
             .resolve(target)
-            .map(|resolved| ShardBinding {
-                coverage: resolved.coverage(),
-                registration_id: resolved.registration_id(),
-                home: resolved.endpoint().home,
-            })
             .ok_or(SessionError::UnknownShard {
                 shard: target.position(),
             })?;
-        if self.players.contains_key(&player) {
+        if let EndpointKind::Native(_) = resolved.endpoint().kind {
+            return Err(SessionError::NativeEndpointRequiresSession {
+                home: resolved.endpoint().home,
+            });
+        }
+        let shard = ShardBinding {
+            coverage: resolved.coverage(),
+            registration_id: resolved.registration_id(),
+            home: resolved.endpoint().home,
+        };
+        if self.has_any_session(player) {
             return Err(SessionError::DuplicatePlayer { player });
         }
 
@@ -681,6 +775,18 @@ impl SessionRouter {
             .count();
         if in_range.saturating_mul(2) > self.outbound_capacity {
             return Err(SessionError::OutboundFull { player });
+        }
+        // The shared session count (opt-in with collector sessions) and the
+        // checked wire allocator refuse before the first slow-viewer
+        // disconnect or PlayerJoin, so exhaustion leaves no side effect.
+        if let Some(limit) = self.collector_session_limits() {
+            let limit = limit.sessions().get();
+            if self.installed_sessions() >= limit {
+                return Err(SessionError::SessionCapacity { limit });
+            }
+        }
+        if self.next_entity_id.is_none() {
+            return Err(SessionError::EntityIdsExhausted);
         }
 
         // Remove an in-range viewer that cannot accept the joiner's mandatory
@@ -713,7 +819,9 @@ impl SessionRouter {
         self.send_to_shard(shard, GameInput::PlayerJoin { player, position })?;
 
         let (tx, rx) = mpsc::channel(self.outbound_capacity);
-        let entity_id = self.allocate_entity_id();
+        // Allocated at the historical point so legacy ids stay unchanged; the
+        // availability was checked above and nothing in between allocates.
+        let entity_id = self.allocate_entity_id()?;
         self.players.insert(
             player,
             SessionEntry {
@@ -744,16 +852,20 @@ impl SessionRouter {
             player,
             shard: shard.home,
             outbound: rx,
+            key: None,
+            projection: None,
         })
     }
 
-    /// Allocates the next network entity id, advancing the counter.
-    fn allocate_entity_id(&mut self) -> i32 {
-        let id = self.next_entity_id;
-        // Wrap rather than overflow-panic; a process churning through 2^31 joins
-        // is not a real concern, but a panic in the router would be.
-        self.next_entity_id = self.next_entity_id.wrapping_add(1);
-        id
+    /// Allocates the next network entity id from the single checked shared
+    /// allocator. `i32::MAX` is issued once; afterwards the allocator is
+    /// exhausted and never wraps into reused, colliding or negative ids.
+    fn allocate_entity_id(&mut self) -> Result<i32, SessionError> {
+        let id = self
+            .next_entity_id
+            .ok_or(SessionError::EntityIdsExhausted)?;
+        self.next_entity_id = id.checked_add(1);
+        Ok(id)
     }
 
     /// Exchanges player-list-add + spawn packets between the joiner and every
@@ -1364,12 +1476,12 @@ impl SessionRouter {
     }
 
     /// Broadcasts `player`'s changed equipment (the pre-encoded `equipment`
-    /// [`SetEquipment`](set_equipment_shell) body — the full set: main hand, off
+    /// `SetEquipment` body — the full set: main hand, off
     /// hand, and armor) to every viewer that currently has `player` spawned, and
     /// refreshes the cached body so later viewers entering view receive it too.
     ///
     /// The body is built app-side (it owns the trusted Slot encoder) and passed
-    /// opaque. Only viewers holding a [`delivered`](SessionEntry::delivered) baseline
+    /// opaque. Only viewers holding a `delivered` baseline
     /// for the subject are sent the update — exactly those that have the entity
     /// spawned. The send is **droppable** and best-effort (cosmetic): a *full* or
     /// *closed* recipient simply misses it, matching the chat broadcasts; a closed
@@ -1932,7 +2044,18 @@ impl SessionRouter {
             ));
         }
         let endpoint = current.endpoint();
-        let sender = &endpoint.sender;
+        let sender = match &endpoint.kind {
+            EndpointKind::Legacy(sender) => sender,
+            EndpointKind::Native(_) => {
+                return Err(InputDeliveryError::new(
+                    input,
+                    policy,
+                    SessionError::NativeEndpointRequiresSession {
+                        home: endpoint.home,
+                    },
+                ));
+            }
+        };
         let shard = endpoint.home.position();
 
         // The router is the sole sender. Refusing ordinary data once only the

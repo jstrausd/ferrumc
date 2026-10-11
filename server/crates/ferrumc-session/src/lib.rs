@@ -36,6 +36,11 @@
 //! - [`net_event_to_input`] / [`output_to_clientbound`] / [`shard_for_position`]
 //!   — the pure translation and routing-policy functions.
 //! - [`SessionError`] — the classifying error type.
+//! - Native collector sessions (NET-04.2e1): [`CollectorSessionLimits`],
+//!   [`PlayerSessionKey`], [`NativeJoinReservation`], the bounded
+//!   [`NativeShardReceiver`] lane carrying [`NativeShardInput`], closure
+//!   revalidation via [`NativeRevalidationProbe`], and
+//!   [`CollectorSessionError`].
 //!
 //! # Scope (this milestone)
 //!
@@ -50,6 +55,7 @@ mod delivery;
 mod directory;
 mod error;
 mod event;
+mod native;
 mod outbound;
 mod presentation;
 mod router;
@@ -65,6 +71,15 @@ pub use directory::{
 };
 pub use error::SessionError;
 pub use event::NetEvent;
+pub use native::{
+    CollectorSessionError, CollectorSessionLimits, NativeDisconnect, NativeEndpointState,
+    NativeInputClass, NativeJoinReservation, NativeLaneRecv, NativeRevalidation,
+    NativeRevalidationProbe, NativeRevalidationVerdict, NativeRouted, NativeSessionPhase,
+    NativeSessionStatus, NativeShardInput, NativeShardReceiver, NativeShardRegistration,
+    NativeSpawnProjection, NativeUnregisterError, PlayerSessionKey, MAX_BASELINES_PER_VIEWER,
+    MAX_COLLECTOR_AUDIENCE, MAX_COLLECTOR_SCRATCH, MAX_COLLECTOR_SESSIONS, MAX_COLLECTOR_WORK,
+    MAX_NATIVE_LANE_CAPACITY, MAX_SIMULATION_DISTANCE, MAX_TOTAL_BASELINES,
+};
 pub use outbound::OutboundMessage;
 pub use presentation::{
     action_bar, encode_dust_data, encode_sound_effect_payload, play_sound, spawn_dust,

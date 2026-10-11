@@ -51,6 +51,17 @@ tokio = { workspace = true }
 # through the generated codecs. Test-only; `ferrumc-testkit` does not depend on
 # this crate, so the dev edge stays acyclic.
 ferrumc-testkit = { workspace = true }
+# Test-only (Root decision NET-04.2e1 F2): the native-session contract tests
+# need genuine simulation admissions, which only exist with a real
+# `PlayerEntityOwnershipStore` (memory and redb backends), its
+# `GenerationKey`/`OwnershipTransferId` scope types, and the flat world
+# generator/identity used to bind the shard. Production code never uses these
+# crates: the session reaches sim types only through `ferrumc-sim`, and a
+# source-scan test refuses any `ferrumc_storage`/`ferrumc_world` mention outside
+# `#[cfg(test)]` modules and `tests/`. Both are workspace crates; no external
+# package is added.
+ferrumc-storage = { workspace = true }
+ferrumc-world = { workspace = true }
 
 [lints]
 workspace = true
