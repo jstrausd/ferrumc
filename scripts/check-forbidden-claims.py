@@ -1059,6 +1059,12 @@ def neutral_compatibility(clause: str, match: re.Match[str]) -> bool:
     if word == "compatible":
         if re.search(r"\bc[- ]\s*$", prefix, re.I):
             return True
+        # Rust dyn compatibility describes a trait, not server/API parity.
+        if re.search(r"\bdyn-\s*$", prefix, re.I) and re.match(
+            r"\s+[A-Z][A-Za-z0-9_]*(?:Store|Trait)\s+(?:has|provides)\s+",
+            suffix,
+        ):
+            return True
         if re.match(r"\s+additions?\b", suffix, re.I):
             return True
         return bool(
@@ -1067,6 +1073,8 @@ def neutral_compatibility(clause: str, match: re.Match[str]) -> bool:
             and UI_STATUS_SUFFIX.fullmatch(suffix.strip()) is not None
         )
     if clause.strip().casefold() == "compatibility":
+        return True
+    if re.search(r"\bUUID\s+$", prefix) and re.match(r"\s+pages\b", suffix):
         return True
     if re.search(r"\b(?:fixed|legacy\s+app)\s*$", prefix, re.I):
         return True
@@ -1104,6 +1112,20 @@ def render_public_text(text: str) -> str:
     )
 
 
+def neutral_plugin_read_maps(text: str, match: re.Match[str]) -> bool:
+    """Distinguish the documented storage-map separation from plugin trust."""
+    return (
+        match.group().casefold() == "isolated"
+        and re.search(r"(?:^|[.!?]\s+)Generation\s+and\s+$", text[: match.start()])
+        is not None
+        and re.match(
+            r"\s+plugin\s+reads\s+keep\s+their\s+own\s+maps\.",
+            text[match.end() :],
+        )
+        is not None
+    )
+
+
 def scan(blocks: list[Block]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[tuple[str, str, int, str]] = set()
@@ -1136,6 +1158,8 @@ def scan(blocks: list[Block]) -> list[Finding]:
         plain = render_public_text(block.text)
         if block.plugin_context:
             for match in PLUGIN_TERM.finditer(plain):
+                if neutral_plugin_read_maps(plain, match):
+                    continue
                 term_pattern = re.compile(rf"\b{re.escape(match.group())}\b", re.I)
                 add(
                     block,
@@ -1771,6 +1795,46 @@ def self_test(repo_root: Path) -> None:
                         )
                     },
                     None,
+                ),
+                (
+                    "neutral-rust-dyn-trait",
+                    {
+                        "docs/storage.md": (
+                            "The new dyn-compatible PlayerBlockDurabilityStore "
+                            "has five methods.\n"
+                        )
+                    },
+                    None,
+                ),
+                (
+                    "dyn-compatible-plugin-claim",
+                    {"README.md": "FerrumC offers dyn-compatible plugins.\n"},
+                    "unqualified-compatibility",
+                ),
+                (
+                    "neutral-uuid-storage-pages",
+                    {"docs/storage.md": "Reads, including UUID compatibility pages, use unified state.\n"},
+                    None,
+                ),
+                (
+                    "uuid-compatible-claim",
+                    {"README.md": "FerrumC is UUID compatible.\n"},
+                    "unqualified-compatibility",
+                ),
+                (
+                    "neutral-plugin-read-maps",
+                    {"docs/storage.md": "Generation and isolated plugin reads keep their own maps.\n"},
+                    None,
+                ),
+                (
+                    "plugin-read-maps-plus-runtime-claim",
+                    {
+                        "docs/storage.md": (
+                            "Generation and isolated plugin reads keep their own maps. "
+                            "Plugin execution is isolated.\n"
+                        )
+                    },
+                    "plugin-context-term",
                 ),
                 (
                     "neutral-compatibility-terms",
