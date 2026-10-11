@@ -4,7 +4,9 @@ Zielversion: Minecraft Java Edition **1.21.8, Protokoll 772, DataVersion 4440**.
 Diese Abnahme ergänzt den [214-Ticket-Katalog](MINECRAFT_FEATURE_CATALOG.md)
 und das [Implementierungsboard](IMPLEMENTATION_BOARD.md). Sie ersetzt weder
 die vollständige Inhaltsmatrix noch Plugin-, Betriebs- oder Performanceabnahme.
-Stand der Vergabe: `347080f4`; **alle Etappen sind offen**.
+Stand der Vergabe: `65f050fb`; **alle Etappen sind offen**.
+Biomcompute und Itemcounter sind unabhängig geprüft; die aktive App verwendet
+weiterhin Flat-v1/Plains. Diese Grundlagen schließen keine Gameplayetappe ab.
 
 ## Fortschrittsstrecke
 
