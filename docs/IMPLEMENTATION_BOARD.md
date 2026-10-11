@@ -147,20 +147,24 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
-Root hat DUR-03.2 unabhängig CLEAN geprüft und als `242c8f07` auf lokalem
-`main` integriert. Debug/Release jeweils299 Tests und strictchecks bestehen
+Root hat DUR-03.2 unabhängig CLEAN geprüft und als `242c8f07` auf
+`main` veröffentlicht. Debug/Release jeweils299 Tests und strictchecks bestehen
 im frischen `b87d5b61`-Archiv mit exakt61 Storagefiles;62 Source-/36
 Evidenzfiles und das vollständige Quellarchiv sind hashgeprüft.
 [Prüfbericht](agent-tasks/DUR-03_2_OWNERSHIP_FORMAT6_MIGRATION_REVIEW.md).
 Die Migration verwendet tatsächliche private Stage-CASreceipts und einen
 atomaren Sourceimport; Appmigration und FCPS-Gameplayadmission bleiben offen.
 
-`select_world_ticket` konkretisiert jetzt ausschließlich readonly
-[NET-04.2c](agent-tasks/NET-04_2c_COLLECTOR_SESSION_BINDING.md): tatsächliche
-OwnedPlayer-/Session-/Collector-Wirebindung und Collectortracking. Der heutige
-Appjoin verwendet weiterhin den Legacyplayerpfad und eigene JoinGame-ID1;
-die fehlenden tatsächlichen Sim-/Appproducer werden ausdrücklich benannt.
-Sessionruntime ist noch nicht freigegeben.
+`select_world_ticket` hat den konkreten
+[NET-04.2c-Vertrag](agent-tasks/NET-04_2c_COLLECTOR_SESSION_BINDING.md) abgeschlossen.
+Root hat alle fünf Freeze-, 25 Referenz-, 44 Source- und 53 akzeptierten
+Simdateien ohne Drift geprüft und den Vertrag unabhängig CLEAN abgenommen.
+[Vertragsreview](agent-tasks/NET-04_2c_COLLECTOR_SESSION_BINDING_REVIEW.md).
+Der nächste echte Simproducer ist als
+[SIM-03.4a](agent-tasks/SIM-03_4a_COLLECTOR_LIFECYCLE.md) vergeben: borrowed
+ConnectedPlayerView, bounded Lifecyclezellen, applied Detachfacts und
+reserved/retained Takepins. Session-/App-Wiring und der native Join folgen
+danach; heutiger Appjoin bleibt der Legacyplayerpfad mit eigener JoinGame-ID1.
 
 GEN-05.6 ist unabhängig CLEAN als `34c8875e` integriert. Der konkrete
 GEN-05.7-Temperaturvertrag ist CLEAN auf Vertragsumfang. Die finale genuine
@@ -171,6 +175,18 @@ Inputdateien vor/nach hashgeprüft. Ein eigener T3-Reviewer hat die vollständig
 Oraclequelle unabhängig CLEAN geprüft. Root hat daraufhin die Worldproduktion
 an den T3-Agenten „GEN-05.7 originale Biomtemperatur in Rust“ vergeben.
 [Oraclereview und Freigabe](agent-tasks/GEN-05_7_BIOME_TEMPERATURE_ORACLE_REVIEW.md).
+Der finale 234-Datei-Umfang `53f29051` ist unabhängig CLEAN_RUNTIME abgenommen
+und als `40488324` auf `main` integriert: Whole-World Debug/Release jeweils285
+Tests, striktes Alltarget-Clippy, fmt, rustdoc und explizite kalte
+Allokationsproben grün. Der absichtlich ignorierte Instrumentierungstest wurde
+separat in beiden Modi ausgeführt. Alle43 Evidence-Dateien sind frisch gegen den
+Freeze geprüft;1028 Außendateien und alle1224 Baseline-Dateien blieben unverändert.
+Der alte Harnesskandidat ist ausdrücklich vor Abnahme verworfen.
+[Runtimeabnahme](agent-tasks/GEN-05_7_BIOME_TEMPERATURE_RUNTIME_REVIEW.md).
+Der freigewordene Worldslot bearbeitet jetzt
+[GEN-05.8 stored biome resolver](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_TASK.md):
+konkreter Originalvertrag und echte ProtoChunk-/BiomeManager-Oracle, zunächst
+ohne Productionänderungen. Danach folgen Surface-Regeln und der Columndriver.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
@@ -186,12 +202,21 @@ versiegelte Sim-Publikationsfakten und Sessionviewertracking. Die neuen
 Metadata-/Motion-/TakeItempakete, ihre Netklassifikation und der Apptracefix
 sind integriert. Das aktiviert noch keine Live-Item-Entities.
 
-Der T3-Agent „DUR-03.3 gemeinsame Inventar- und Blocktransaktion“ konkretisiert
-jetzt readonly den gemeinsamen Player-/Blockdurabilityvertrag. Storage ist nach
-DUR-03.2 frei; Runtime benötigt erst die tatsächliche API-/Grammar-/Revision-/
-Receipt-/Limitprüfung. Keine getrennten Legacywrites dürfen die gemeinsame
-Inventory-/Blockwirkung umgehen. Aktuell laufen neben Root drei Childaufträge:
-Worldproduktion, Sessionvertrag und dieser Storagevertrag.
+Der konkrete DUR-03.3-Vertrag ist unabhängig CLEAN abgenommen:
+1224 Archiv-, 461 Dependency-, 45 redb-, 82 Paper- und 16 Freeze-Dateien ohne
+Drift;216 unabhängige Grammatik-Arithmetikfälle bestanden.
+[Vertragsreview](agent-tasks/DUR-03_3_PLAYER_BLOCK_DURABILITY_REVIEW.md).
+Der neue T3-Storageagent implementiert ausschließlich Storage-Format7 mit
+gemeinsamer Player-/Chunkrevision, echten Snapshotautoritäten und atomarer
+Inventory-/Blockwirkung. Runtimeabnahme steht aus; keine getrennten Legacywrites
+dürfen die gemeinsame Wirkung umgehen. DUR-03.3a, die explizite Offline-Migration
+Format6→7, folgt separat vor DUR-05. Aktuell laufen neben Root drei Childaufträge:
+GEN-05.8-Vertrag/Originaloracle, SIM-03.4a-Lifecycle und DUR-03.3-Storageimplementierung.
+
+Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
+vollständig erfolgreiche CI:
+[Lauf38101579432](https://github.com/jstrausd/ferrumc/actions/runs/38101579432).
+Noch ungeprüfte Runtimeänderungen gehören nicht zu diesem CI-Nachweis.
 
 ITEM-SIZE-01 ist unabhängig CLEAN als `b5551395` integriert. Seine Größen- und
 Repräsentations-APIs vermeiden die zuvor gefundenen temporären FCIS-Buffer;
