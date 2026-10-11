@@ -217,6 +217,13 @@ integriert als `251efaf9`. Der freie Worldslot bearbeitet jetzt
 [GEN-05.9 Surface-Regeln](agent-tasks/GEN-05_9_SURFACE_RULES_TASK.md): originaler
 Overworld-Regelbaum und Einzelblockauswertung, zuerst Vertrag und echte
 Originaloracle ohne Productionänderungen. Der Columndriver folgt separat.
+Nach drei Reviewrunden ist der Vertrag CLEAN_CONTRACT: Runde 1 fand einen
+fabrizierten Flat-Bedrock-Probekontext (jetzt nur `Disabled`), Runde 2 einen
+Konflikt der Replayregel mit der eigenen Höhen-/Stone-Depth-Policy (jetzt
+eigene Klasse `refused`). Die Runtime ist
+[freigegeben](agent-tasks/GEN-05_9_SURFACE_RULES_RUNTIME_TASK.md), mit
+Pflicht zum direkten Bitvergleich von `clay_bands_offset` über eine erweiterte
+Kopie des Originalhelpers.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
@@ -276,7 +283,9 @@ nativer Spielerzustände nur nach bestätigtem Save, rein lesender Status,
 Storage-Re-Export für die Session. Sim Debug/Release je394 und Session206 gegen
 das neue Sim grün; fünf eigene Reviewerprobes auf Memory und redb. Ein fremder
 Owner meldet weiter `StaleHandle` (offengelegt; e2 behandelt beides als
-Quarantäne). NET-04.2e2, DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge.
+Quarantäne). [NET-04.2e2](agent-tasks/NET-04_2e2_NATIVE_SESSION_LIFECYCLE_TASK.md) (nur
+`ferrumc-session`) ist freigegeben; DUR-05a, NET-04.2f und DUR-05b folgen der
+Ticketfolge.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:
