@@ -560,7 +560,7 @@ fn charge(work: &mut SampleWork) -> Result<(), NoiseChunkError> {
 fn pack_column(x: i32, z: i32) -> u64 {
     u64::from(x as u32) | (u64::from(z as u32) << 32)
 }
-fn admit_chunk(chunk: ChunkPos) -> Result<(), NoiseChunkError> {
+pub(crate) fn admit_chunk(chunk: ChunkPos) -> Result<(), NoiseChunkError> {
     for (axis, coordinate) in [("x", chunk.x()), ("z", chunk.z())] {
         let origin = i64::from(coordinate) * 16;
         if origin < -30_000_000 || origin + 16 > 30_000_000 {

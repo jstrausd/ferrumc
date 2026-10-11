@@ -12,6 +12,8 @@ mod graph;
 mod json;
 mod seeded;
 
+// GEN-05.8 stored lookup reuses the single accepted chunk-domain predicate.
+pub(crate) use chunk::admit_chunk;
 pub use chunk::{
     ChunkDensitySamples, ChunkMaterialSamples, NoiseChunkError, NoiseChunkErrorKind,
     NoiseChunkLimit, NoiseChunkSession, NoiseChunkWorkBudget, MAX_NOISE_CHUNK_WORK,

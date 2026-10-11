@@ -27,6 +27,9 @@
 //!   natural terrain are separate implementation steps.
 //! - [`density`] — checked builtin graphs, original seeded scalar/climate samples;
 //!   no evaluation or natural terrain is activated by their compilation.
+//! - [`stored_biome`] — borrowed complete 3×3 stored-biome neighborhoods with
+//!   the original quart lookup and the existing zoom selector; no generation,
+//!   surface rule, fallback biome or chunk installation.
 //!
 //! The network encoder turns a [`Chunk`] into the wire bytes a 1.21.8 client
 //! expects: [`encode_chunk_section_data`] for the paletted section blob,
@@ -54,6 +57,7 @@ mod paletted_container;
 pub mod random;
 mod sample_work;
 pub mod spline;
+pub mod stored_biome;
 
 pub use block_entity::{
     is_chest_state, sign_kind_for_state, BlockEntity, ChestInventory, Sign, SignFace, SignKind,

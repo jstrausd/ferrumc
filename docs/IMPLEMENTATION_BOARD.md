@@ -203,6 +203,16 @@ bytegleich, alle211 Freezehashes stimmen weiterhin.
 [Vertragsreview](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_REVIEW.md).
 Root hat die Worldruntime mit den Auflagen A1–A5 freigegeben:
 [Runtimefreigabe](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_RUNTIME_TASK.md).
+Die Worldruntime `stored_biome` ist unabhängig CLEAN_RUNTIME abgenommen und
+integriert: Whole-World Debug/Release jeweils320 Tests (2 ignorierte
+Messharnesses separat ausgeführt), striktes Workspace-Clippy, fmt, rustdoc und
+1195 Verbrauchertests grün. Alle220960 Queryzeilen und243 Arrays sind
+unabhängig gegen die rohen Java-Ausgaben zurückverfolgt; Build/Clone/Query
+allokieren nicht (positive Kontrolle4096 B). A3 war wörtlich unerfüllbar, weil
+GEN-05.6 keine Vanilla/Paper-Differenzen hat; der test-only Ersatz tötet fest
+verdrahtete Modi und falsche Seeds. Offene Auflage R-A1 für das nächste
+Worldticket: ein Test, der die zweiphasige Halo-Refusalreihenfolge festlegt.
+[Runtimeabnahme](agent-tasks/GEN-05_8_STORED_BIOME_RESOLVER_RUNTIME_REVIEW.md).
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;

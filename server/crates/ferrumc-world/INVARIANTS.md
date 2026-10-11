@@ -2,6 +2,44 @@
 
 > Rules that must hold for all code in this crate. Violating these is a bug.
 
+## Borrowed stored-biome resolver
+
+- `StoredBiomeNeighborhood` borrows 1..=9 complete sealed GEN-05.5
+  `ChunkBiomeSamples` inside the centre's 3×3 window. It copies at most nine
+  immutable references and retains no slice, collection, `Arc`, source session,
+  callback or cache. No raw-array, digest or textual authority exists. Every
+  array must match the expected seed, settings, explicit source and geometry.
+  Keys must be unique, and every centre and supplied key must satisfy the single
+  accepted `admit_chunk` domain.
+- Construction refuses in a fixed order: count, centre domain, retained and
+  scratch ceilings, then each array in caller order (window/key domain,
+  duplicate, seed, settings, source, geometry, length, history shape). The
+  whole work requirement `2 + 10·N + values` (+9 for surface) is refused before
+  any value scan or zoom-seed hash. Then the value scan runs: Fixed equality
+  and the final MultiNoise slot. The zoom seed is derived exactly once from the
+  world seed. Surface checks every halo domain and then every presence. Failure
+  publishes nothing and mutates nothing.
+- Lookup selects the chunk `(qX >> 2, qZ >> 2)` and refuses in this order:
+  `OutsideNeighborhood`, `CoordinateDomain`, `MissingChunk`. It clamps only Y to
+  the closed accessor interval and reads `((qY − minQY)·4 + (qX&3))·4 + (qZ&3)`.
+  No Plains, nearest-chunk, fresh-source or partial fallback exists.
+- Block methods first refuse X, then Z, outside ±30,000,000 with
+  `BlockCoordinateDomain { axis, coordinate }`. This is FerrumC policy, not
+  original behaviour. Surface then refuses blocks outside the centre column.
+  Every signed32 Y is admitted.
+- Block, zoom, stored and density quarts, resource IDs and wire IDs remain
+  distinct types. Queries are constant-bounded, allocation-free and stateless.
+  There are no budgets, no poison state and no I/O.
+- Caps: 9 arrays, 2048 values per array, 18432 borrowed values, 512 retained
+  bytes, a 4096-byte typed construction-scratch census and allowance
+  1..=1048576. Borrowed array bytes are counted separately and never reported
+  as retained or RSS.
+- Original equality uses every compact mechanical fixture row in both zoom
+  modes. Controlled-hook rows and the 32 exception rows are policy or evidence,
+  never equality. Vanilla histories were produced with `-Dmax.bg.threads=1`.
+  This producer generates nothing and evaluates no surface rule. It installs,
+  persists and activates nothing.
+
 ## Fixed builtin biome temperature
 
 - `BuiltinBiomeTemperatures` owns exactly65 checked `BiomeResourceId` records
