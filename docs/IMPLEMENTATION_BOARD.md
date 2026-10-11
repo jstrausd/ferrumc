@@ -142,14 +142,18 @@ Format-3-App; die Format-4-App folgt in der vierten Welle.
 | DUR-04.2a / SRV-02.2 | `select_world_ticket`, unabhängiger Review Root | `server/crates/ferrumc-sim/**`, eigener Counterbrief | CLEAN geprüft und als `d3c84252` integriert: unabhängige Debug-/Releaseprüfung jeweils320 Tests und strictchecks ohne Ausnahmen. Der historische FCIS-Allokationsbefund bleibt erhalten; sieben Größenstellen und ein Repräsentationsvergleich verwenden jetzt die separat geprüften borrowed Items-APIs. Alle residenten Items jeTick,64-Slot-Saveauswahl getrennt. [Review](agent-tasks/DUR-04_2_OWNED_ITEM_COUNTERS_REVIEW.md); Physik, Merge, Javaevents und Appaktivierung bleiben offen. |
 | GEN-05.5 | `item_transfer_primitives`, unabhängiger Review Root | `server/crates/ferrumc-world/**`, eigener Biomebrief | CLEAN geprüft und als `65f050fb` integriert: Debug/Release je262 Tests, strictchecks ohne Ausnahmen,184 Source-/94 Evidence-/175 Inputpins frisch geprüft.156 echte createBiomes-Arrays,27 End-Grenzproben,3287 Selectoraufrufe; acht Runnerguards jeweils normal/-O grün. [Review](agent-tasks/GEN-05_5_BIOME_SELECTION_REVIEW.md); Zoom, Surface, Carver und aktive Naturwelt bleiben offen. |
 | NBT-WRITE-01 | `feature_catalog`, unabhängiger Review Root | ausschließlich NBT und eigener Brief | CLEAN geprüft und als `579bed62` integriert: frisches f753e312-Archiv, Debug/Release je105, strictchecks ohne Ausnahmen.19 Source-/27 Evidence-/4 Fixturepins vor/nach geprüft;1161 übrige Archivdateien und alter Writer-/MUTF8code unverändert. [Review](agent-tasks/NBT-WRITE-01_BORROWED_NETWORK_ROOT_REVIEW.md); separater Itemsconsumer folgt. |
+| GEN-05.6 | `item_transfer_primitives`, unabhängiger Review Root | ausschließlich World und eigener Brief; Root besitzt Lockresolution | CLEAN als `34c8875e` integriert: frisches65064bc7-Archiv, Debug/Release je270 und strictchecks ohne Ausnahmen.198 Overlay-/137 Source-/103 Evidence-/185 Inputpins,999 Outside/179 alte World-/44 Fixturedateien geprüft.63.443 tatsächliche Originalrecords je Modus, neun Rootguards normal/-O grün. [Review](agent-tasks/GEN-05_6_BIOME_ZOOM_REVIEW.md); Temperatur/Resolver/Surface folgen. |
+| NET-04.2a | `feature_catalog`, unabhängiger Review Root | ausschließlich Items und eigener Brief | CLEAN als `67a9aa94` integriert: frisches65064bc7-Archiv, Debug/Release je120 und strictchecks ohne Ausnahmen.30 Source-/24 Evidence-/20 Paperpins;1155 Outside/24 alte Items-/19 NBT-/4 Fixturedateien plus Codecwriter unverändert. Fünf ganze Originalrows bytegleich, bounded direkte Metadataausgabe ohne Sourceclone. [Review](agent-tasks/NET-04_2a_ITEM_METADATA_BUILDER_REVIEW.md); bestätigte Simfakten und Sessiontracking folgen. |
 | SRV-05.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-items/**`, eigener [Rezeptbrief](agent-tasks/SRV-05_1_NORMAL_CRAFTING_RECIPES.md) | Unabhängig CLEAN und integriert `572083d1`: alle968 normalen Rezepte und21.855 Original-JAR-Fälle; Debug/Release je84 plus3 unabhängige Rootprobes mit301.510 Matchmodellvergleichen grün, strictchecks und frischer bytegleicher Reexport. [Review](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md). Specials und Onlinecrafting bleiben Folgeconsumer. |
 | SIM-03.3 / SRV-02.1 | `feature_catalog`, Review Root | `server/crates/ferrumc-sim/**`, eigener Itembrief | Unabhängig CLEAN geprüft und integriert `84967c54`: sealed Slotpayload, owned Refusals/Removal, lossless FCIE/FCIS, checked Capture/Restore und originale Zähler. Root Debug/Release je252 Tests einschließlich3 eigener Probes grün; strictchecks und10/10Freezehashes gleich. [Review](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE_REVIEW.md). App-/Drop-/Pickup-/Physikaktivierung folgt. |
 
 Aktuell arbeiten neben Root drei Agents parallel. Der Weltagent
-`item_transfer_primitives` hat GEN-05.5 unabhängig abgenommen geliefert und
-bereitet jetzt den allocationfreien Biom-Zoomproducer GEN-05.6 mit tatsächlicher
-Vanilla-/Paper-Originaloracle vor. Der konkrete Vertrag ist nach vollständiger Originalquellenprüfung intern
-freigegeben; Originaloracle und Runtime sind in Arbeit.
+`item_transfer_primitives` hat GEN-05.6 unabhängig CLEAN geliefert; Root hat
+den allocationfreien Biom-Zoomproducer als `34c8875e` integriert. Der Agent
+konkretisiert jetzt readonly GEN-05.7: originale feste Biomtemperatur-Noises
+und Paper-Temperatur-/Niederschlagsprädikate.65 echte Biomdefinitionen und
+zwei Presetdefinitionen bleiben getrennt. Runtimefreigabe folgt auf den
+konkreten Parser-/RNG-/Ressourcen-/Originaloraclevertrag.
 Oberflächen benötigen außerdem originale Temperatur-/Surface-Regeln; Carver
 benötigen eigene Tag-/Konfigurationsproducer. Die aktive App bleibt Flat-v1/Plains.
 
@@ -162,9 +166,10 @@ Immutable Stage/Backup werden nach Checkpointseal nur über begrenzte eigene
 Prüfkopien geöffnet. Exklusiver Besitz ist Storage plus eigener Aufgabenbrief;
 Appmigration und FCPS-Gameplayadmission folgen separat.
 
-`feature_catalog` hat den NBT-WRITE-01-Producer unabhängig CLEAN geliefert;
-Root integrierte ihn als `579bed62`. Der separat geprüfte
-NET-04.2a-Itemmetadatabuilder ist jetzt zur Items-only-Umsetzung freigegeben.
+`feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
+Root integrierte sie als `579bed62` und `67a9aa94`. Der Agent konkretisiert
+jetzt readonly SIM-03.4 mit vor Workrequest reservierten immutable
+Publicationgruppen und retained Outbox. Keine Simproduktion vor Vertragsreview.
 Die alten NBT-/MUTF8writer bleiben die Wireauthority. Anschließend folgen
 versiegelte Sim-Publikationsfakten und Sessionviewertracking. Die neuen
 Metadata-/Motion-/TakeItempakete, ihre Netklassifikation und der Apptracefix
@@ -210,21 +215,27 @@ Der ältere Lauf38095460007 scheiterte mit dem konkret behobenen App-E0004 und
 wird nicht als bestanden geführt. Die gemeinsame CI für Biome und Counter auf
 `f753e312` ist vollständig erfolgreich:
 [Lauf38097220739](https://github.com/jstrausd/ferrumc/actions/runs/38097220739).
+Auch die Gesamt-CI für `65064bc7`, einschließlich NBT-WRITE-01, ist
+vollständig erfolgreich:
+[Lauf38098204450](https://github.com/jstrausd/ferrumc/actions/runs/38098204450).
+GEN-05.6 und NET-04.2a sind lokal unabhängig CLEAN integriert; gemeinsame
+Gesamt-CI für den neuen veröffentlichten Head folgt.
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.
 
 ## Vorbereitete unmittelbare Verbraucher
 
-GEN-05.5 und DUR-04.2a sind unabhängig CLEAN integriert. Unmittelbar folgen
-Biom-Zoom und Oberflächenabhängigkeiten sowie Storage-Format6migration,
-NBT-/Itemmetadata und Sessiontracking. Der echte Format6-Appdriver folgt nach
+GEN-05.6, NET-04.2a und DUR-04.2a sind unabhängig CLEAN integriert.
+Unmittelbar folgen Biomtemperatur-/Oberflächenabhängigkeiten sowie
+Storage-Format6migration, versiegelte Simpostimages und Sessiontracking.
+Der echte Format6-Appdriver folgt nach
 seinen Storage-/Wire-/Session-/Ordinary-Block-/Commandabhängigkeiten.
 Vor dem Live-Drop-/Pickupdriver ist
 [NET-04.1](agent-tasks/NET-04_1_ITEM_ENTITY_WIRE.md) konkret vorbereitet:
 Metadata0x5c, Motion0x5e und TakeItem0x75 sowie ihre echte Netklassifikation
 sind mit NET-04.1/.1b/.1c integriert und Gesamt-CI-grün.
-NBT-WRITE-01 ist integriert; Itemmetadata, versiegelte Simpostimages,
+NBT-WRITE-01 und Itemmetadata sind integriert; versiegelte Simpostimages,
 Player-Wirebindung und Sessiontracking fehlen noch für den Liveconsumer.
 Zusätzlich ist [SRV-05.2](agent-tasks/SRV-05_2_SINGLE_ITEM_RECIPES_FUEL.md)
 für alle114 Koch-/254 Steinschneiderrezepte und originale Brennstoffe vorbereitet;
@@ -249,16 +260,17 @@ bytegleiche Parameter und vollständige Manifeste. DatenSHA
 `4e9ee584071de6822b9e0e8030eb0666814a3c61b77f8e0ce611f9757508f971`,
 10-Dateienfreeze `.codex-tmp/gen05_5-root-biome-census.freeze.json`, SHA
 `95deae4a95856a4a80cb3ec71c1c251e1852b6ecc0a1506d6aa811433e28729b`.
-Noch kein Rustselector, Surface- oder Clientpass.
+Der separate Rustselector ist mit GEN-05.5 abgenommen; dieser Census allein
+belegt weiterhin keinen Surface- oder Clientpass.
 
 Der getrennte [DUR-05-Appbrief](agent-tasks/DUR-05_FORMAT6_APP_DRIVER.md)
 konkretisiert die tatsächliche Umschaltung auf Format6 und FCPS3. Vor dieser
 Umschaltung benötigen gewöhnliche Block-/Commandaktionen eigene Ownedconsumer;
 Placement mit Itemverbrauch verlangt gemeinsame Player-/Chunkdurability.
 Der Appdriver ist vorbereitet, noch nicht vergeben oder aktiviert.
-[NET-04.2a](agent-tasks/NET-04_2a_ITEM_METADATA_BUILDER.md) ist als eigener
-Items-only-Metadatabuilder vorbereitet; konkreter trusted Slotwirepreflight vor
-Allocation und vollständiger Eintrag innerhalb der opaque Protohülle.
+[NET-04.2a](agent-tasks/NET-04_2a_ITEM_METADATA_BUILDER_REVIEW.md) ist als eigener
+Items-only-Metadatabuilder unabhängig CLEAN integriert: trusted Slotwirepreflight
+vor Allocation und vollständiger Eintrag innerhalb der opaque Protohülle.
 [NET-04.2b](agent-tasks/NET-04_2b_ITEM_VIEWER_TRACKING.md) konkretisiert das
 Sessionviewertracking, bevor DUR-05 Liveentities aktiviert. Fehlende echte
 Simpublicationfacts benötigen zuerst einen eigenen Producer; die Session
