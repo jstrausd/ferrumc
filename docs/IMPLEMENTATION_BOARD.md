@@ -262,7 +262,10 @@ Pendings und typisierte Disposition fehlschlagender Recoveryboundaries.
 [Vertrag](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT.md),
 [Rootentscheidungen](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_ROOT_DECISIONS.md).
 Als erstes Runtimeticket ist NET-04.2e1 (nur `ferrumc-session`) freigegeben;
-SIM-03.4b, e2, DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge.
+sein Kandidat ist nach dem Reviewbefund B1 nachgebessert. Als nächstes ist
+[SIM-03.4b](agent-tasks/SIM-03_4b_DETACHED_PLAYER_RELEASE_TASK.md) (nur
+`ferrumc-sim`) freigegeben; e2, DUR-05a, NET-04.2f und DUR-05b folgen der
+Ticketfolge.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:

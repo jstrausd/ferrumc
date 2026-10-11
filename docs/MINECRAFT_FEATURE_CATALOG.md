@@ -511,7 +511,8 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | T3-Weltagent „GEN-05.9 surface rules contract and original oracle“ | GEN-05.9 | Konkreter Vertrag und genuine Originaloracle in Vorbereitung | Eigener neuer Brief und `.codex-tmp/gen05_9/**`; Production readonly bis Rootreview. |
 | T3-Reviewer „SIM-03.4a unabhängige Runtimeprüfung“ | SIM-03.4a | CLEAN_RUNTIME_REVIEW abgeschlossen; Root integrierte `394d4c27` | Vollständiger Code-/Evidenzreview und zwei zusätzliche genuine Memory/redb-Probes; historische Kandidatbytes unverändert. |
 | T3-Driveragent „NET-04.2d actual native driver and endpoint contract“ | NET-04.2d | Nach drei Reviewrunden unabhängig CLEAN_CONTRACT; Auftrag abgeschlossen | Rootentscheidungen R3-A1–A6 binden die Runtimetickets; SIM-03.4b und ein Simticket gegen dauerhaft `Degraded` vorgemerkt. |
-| T3-Sessionagent „NET-04.2e1 native endpoint session runtime“ | NET-04.2e1 | Runtimeimplementierung freigegeben | Exklusiv `server/crates/ferrumc-session/**`, `.codex-tmp/net04_2e1-runtime/**` und Deliverybrief. |
+| T3-Sessionagent „NET-04.2e1 native endpoint session runtime“ | NET-04.2e1 | Kandidat nach Reviewbefund B1 nachgebessert; Rootprüfung läuft | Exklusiv `server/crates/ferrumc-session/**`, `.codex-tmp/net04_2e1-runtime/**` und Deliverybrief; Auflagen A1–A7 für e2/f. |
+| T3-Simagent „SIM-03.4b detached player release“ | SIM-03.4b | Runtimeimplementierung freigegeben | Exklusiv `server/crates/ferrumc-sim/**`, `.codex-tmp/sim03_4b-runtime/**` und Deliverybrief. |
 | T3-Storageagent „DUR-03.3 Storage Player+Block implementation“ | DUR-03.3 | Vertrag unabhängig CLEAN; Implementierung läuft | Exklusiv Storage und neue Runtimeevidenz; Format7 ohne automatische Migration. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen
