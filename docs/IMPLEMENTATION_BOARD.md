@@ -221,8 +221,10 @@ wird nicht als bestanden geführt. Die gemeinsame CI für Biome und Counter auf
 Auch die Gesamt-CI für `65064bc7`, einschließlich NBT-WRITE-01, ist
 vollständig erfolgreich:
 [Lauf38098204450](https://github.com/jstrausd/ferrumc/actions/runs/38098204450).
-GEN-05.6 und NET-04.2a sind lokal unabhängig CLEAN integriert; gemeinsame
-Gesamt-CI für den neuen veröffentlichten Head folgt.
+Die gemeinsame Gesamt-CI für GEN-05.6 und NET-04.2a auf exakt `b87d5b61`
+ist vollständig erfolgreich, einschließlich unabhängiger Client-/Inventar-/
+Operator-/Neustartabnahmen:
+[Lauf38099105046](https://github.com/jstrausd/ferrumc/actions/runs/38099105046).
 Ergebnisse der vierten Welle stehen im
 [Prüfbericht](AGENT_WAVE_04_VALIDATION.md); eine ältere grüne CI ist kein
 Nachweis für diese neue Runtime.

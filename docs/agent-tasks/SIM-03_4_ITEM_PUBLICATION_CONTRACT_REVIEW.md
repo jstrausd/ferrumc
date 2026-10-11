@@ -43,3 +43,12 @@ folgen whole-crate Debug/Release, strikte Clippy-/Fmt-/Rustdocchecks,
 meaningful Memory-/redb-/Credit-/Cutpoint-/Retry-/Shadowtests und unabhängiger
 Rootreview vor Integration. Session, App, Storage, Items, NBT, Registry,
 Dependencies und Checkpointformat bleiben außerhalb dieser Vergabe.
+
+Als enge additiv geprüfte Consumerkorrektur erlaubt Root
+`ItemCollectorBinding::matches_owned_player(&OwnedPlayerHandle) -> bool`.
+Der readonly Vergleich prüft ausschließlich die wirkliche private Owner-Weak,
+PlayerId und ursprüngliche Admission, gibt keinen Weak oder Mutationshandle
+heraus und behauptet keine aktuelle Live-/Connected-/Scopevalidierung.
+Fremde Owner und Rejoin müssen die meaningful Runtimefälle unterscheiden.
+Der ursprüngliche Designfreeze bleibt unverändert; tatsächliche Session-/
+viewerspezifische Wirebindung folgt in NET-04.2c.
