@@ -101,11 +101,17 @@ impl SimShard {
         let Some(state) = self.player_ownership.as_mut() else {
             return Err(PlayerOwnershipError::NotInitialized);
         };
-        state
+        let pin = state
             .publications
             .as_mut()
             .ok_or(ItemPublicationError::NotInitialized)?
             .acknowledge(&state.owner, ticket)?;
+        if let Some(pin) = pin {
+            let Some(lifecycle) = &mut state.lifecycle else {
+                panic!("retained lifecycle mode disappeared");
+            };
+            lifecycle.acknowledge_pin(pin);
+        }
         Ok(())
     }
 
@@ -137,9 +143,19 @@ impl SimShard {
             PreparedOwnedEntity::Replace { .. } => ItemPublicationKind::Changed,
             PreparedOwnedEntity::Remove { .. } => ItemPublicationKind::Removed,
         };
+        let lifecycle_pin = if let Some(take) = &take {
+            self.ownership_state()?
+                .lifecycle
+                .as_ref()
+                .map(|l| l.staged_pin(take.collector()))
+                .transpose()?
+        } else {
+            None
+        };
         let mut result = self.prepare_item_publication(prepared, kind)?;
         if let Some(result) = &mut result {
             result.take = take;
+            result.lifecycle_pin = lifecycle_pin;
         }
         Ok(result)
     }
@@ -177,6 +193,7 @@ impl SimShard {
         };
         // The additional bounded clone occurs only after borrowed model/charge checks.
         Ok(Some(PreparedItemPublication {
+            lifecycle_pin: None,
             kind,
             stack: stack.cloned(),
             removed,
@@ -195,6 +212,16 @@ impl SimShard {
                 panic!("staged publication owner disappeared");
             };
             publications.ledger.reserve(prepared.charge);
+            if let Some(pin) = prepared.lifecycle_pin {
+                let Some(lifecycle) = self
+                    .player_ownership
+                    .as_mut()
+                    .and_then(|s| s.lifecycle.as_mut())
+                else {
+                    panic!("staged lifecycle pin owner disappeared");
+                };
+                lifecycle.reserve_pin(pin);
+            }
         }
     }
 
@@ -203,6 +230,16 @@ impl SimShard {
         pending: &super::PendingPlayerMutation,
     ) -> Result<(), PlayerOwnershipError> {
         if let Some(prepared) = &pending.publication {
+            if let Some(pin) = prepared.lifecycle_pin {
+                if self
+                    .ownership_state()?
+                    .lifecycle
+                    .as_ref()
+                    .is_none_or(|l| !l.has_reserved_pin(pin))
+                {
+                    return Err(PlayerOwnershipError::CompletionMismatch);
+                }
+            }
             if self
                 .ownership_state()?
                 .publications
@@ -225,6 +262,16 @@ impl SimShard {
                 panic!("reserved publication owner disappeared");
             };
             publications.ledger.cancel(prepared.charge);
+            if let Some(pin) = prepared.lifecycle_pin {
+                let Some(lifecycle) = self
+                    .player_ownership
+                    .as_mut()
+                    .and_then(|s| s.lifecycle.as_mut())
+                else {
+                    panic!("reserved lifecycle pin owner disappeared");
+                };
+                lifecycle.cancel_pin(pin);
+            }
         }
     }
 
@@ -267,6 +314,17 @@ impl SimShard {
         else {
             panic!("reserved publication queue disappeared");
         };
+        let pin = prepared.lifecycle_pin;
         publications.publish(prepared, owner, instance, scalars, origin);
+        if let Some(pin) = pin {
+            let Some(lifecycle) = self
+                .player_ownership
+                .as_mut()
+                .and_then(|s| s.lifecycle.as_mut())
+            else {
+                panic!("confirmed lifecycle pin owner disappeared");
+            };
+            lifecycle.retain_pin(pin);
+        }
     }
 }

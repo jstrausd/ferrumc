@@ -387,6 +387,7 @@ pub(crate) struct OwnedPlayerInventory {
 
 #[derive(Debug)]
 pub(crate) struct PendingPlayerMutation {
+    pub(crate) lifecycle_cell: Option<crate::collector_lifecycle::LifecycleCellKey>,
     pub(crate) publication: Option<crate::item_publication::PreparedItemPublication>,
     pub(crate) buffer: std::sync::Weak<()>,
     pub(crate) kind: PendingKind,
@@ -596,6 +597,7 @@ impl PlayerOwnershipTickOutcome {
 
 #[derive(Debug)]
 pub(crate) struct PlayerOwnershipState {
+    pub(crate) lifecycle: Option<crate::collector_lifecycle::CollectorLifecycleState>,
     pub(crate) publications: Option<crate::item_publication::ItemPublicationState>,
     pub(crate) binding: OwnershipStoreBinding,
     pub(crate) limits: PlayerOwnershipLimits,
@@ -617,6 +619,7 @@ impl PlayerOwnershipState {
         Self {
             binding,
             publications: None,
+            lifecycle: None,
             limits,
             owner: Arc::new(()),
             snapshot_only: false,
@@ -647,6 +650,7 @@ impl Clone for PlayerOwnershipState {
         Self {
             binding: self.binding.clone(),
             publications: None,
+            lifecycle: None,
             limits: self.limits,
             owner: Arc::new(()),
             snapshot_only: true,

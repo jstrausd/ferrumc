@@ -17,6 +17,8 @@ use ferrumc_sim::*;
 use ferrumc_storage::*;
 use ferrumc_world::{FlatWorldGenerator, GenerationIdentity, WorldSeed};
 
+mod collector_lifecycle;
+
 trait Backend: PlayerEntityOwnershipStore + WorldStore {}
 impl<T: PlayerEntityOwnershipStore + WorldStore> Backend for T {}
 static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);

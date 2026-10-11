@@ -67,6 +67,7 @@
 //!
 //! [`Tick`]: ferrumc_core::Tick
 
+mod collector_lifecycle;
 mod coordinator;
 mod cross_shard;
 mod entity;
@@ -91,6 +92,11 @@ mod spawn;
 mod ticket;
 mod time;
 
+pub use collector_lifecycle::{
+    CollectorLifecycleError, CollectorLifecycleLimits, CollectorLifecycleStatus,
+    CollectorLifecycleTicket, CollectorLifecycleView, ConnectedOwnedPlayerView,
+    NativePlayerDetachFact, MAX_COLLECTOR_LIFECYCLE_BYTES,
+};
 pub use coordinator::{TickCoordinator, TickRate};
 pub use entity::{
     decode_item_entity, step_active_item_counters, step_inactive_item_counters, EntityChunkIter,

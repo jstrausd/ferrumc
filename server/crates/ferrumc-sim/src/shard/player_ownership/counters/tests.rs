@@ -9,6 +9,7 @@ use ferrumc_world::{FlatWorldGenerator, GenerationIdentity, WorldSeed};
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::path::Path;
 
+mod lifecycle;
 mod publications;
 
 trait Backend: WorldStore + PlayerEntityOwnershipStore {}

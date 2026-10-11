@@ -374,6 +374,7 @@ pub struct ItemPublicationGroup {
     kind: ItemPublicationKind,
     postimage: Option<ItemPublicationPostimage>,
     take: Option<ItemTakeFact>,
+    pub(crate) lifecycle_pin: Option<crate::collector_lifecycle::LifecycleCellKey>,
     charge: usize,
 }
 impl ItemPublicationGroup {
@@ -457,6 +458,9 @@ pub(crate) struct PublicationLedger {
     last: u64,
 }
 impl PublicationLedger {
+    pub(crate) const fn group_limit(self) -> usize {
+        self.limits.groups
+    }
     pub(crate) fn check(&self, charge: usize) -> Result<(), ItemPublicationError> {
         let groups = self
             .reserved
@@ -576,7 +580,7 @@ impl ItemPublicationState {
         &mut self,
         owner: &Arc<()>,
         ticket: &ItemPublicationTicket,
-    ) -> Result<(), ItemPublicationError> {
+    ) -> Result<Option<crate::collector_lifecycle::LifecycleCellKey>, ItemPublicationError> {
         let head = self
             .queue
             .front()
@@ -589,10 +593,11 @@ impl ItemPublicationState {
             return Err(ItemPublicationError::AckMismatch);
         }
         let charge = head.charge;
+        let pin = head.lifecycle_pin;
         self.queue.pop_front();
         self.ledger.retained -= 1;
         self.ledger.retained_bytes -= charge;
-        Ok(())
+        Ok(pin)
     }
     pub(crate) fn publish(
         &mut self,
@@ -626,6 +631,7 @@ impl ItemPublicationState {
             kind: prepared.kind,
             postimage,
             take: prepared.take,
+            lifecycle_pin: prepared.lifecycle_pin,
             charge: prepared.charge,
         });
     }
@@ -633,6 +639,7 @@ impl ItemPublicationState {
 
 #[derive(Debug)]
 pub(crate) struct PreparedItemPublication {
+    pub(crate) lifecycle_pin: Option<crate::collector_lifecycle::LifecycleCellKey>,
     pub(crate) kind: ItemPublicationKind,
     pub(crate) stack: Option<ItemStack>,
     pub(crate) removed: Option<ItemInstanceBinding>,

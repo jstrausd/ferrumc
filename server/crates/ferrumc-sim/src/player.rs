@@ -56,6 +56,9 @@ pub const MAX_PLAYER_OWNERSHIP_INPUT_BYTES: usize = 8 * 1024 * 1024;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlayerOwnershipError {
+    /// Original-admission lifecycle configuration or resource admission refused.
+    #[error(transparent)]
+    Lifecycle(#[from] crate::CollectorLifecycleError),
     /// Bounded immutable publication admission or acknowledgement refused.
     #[error(transparent)]
     Publication(#[from] crate::ItemPublicationError),

@@ -188,20 +188,20 @@ enum RegionWorkKind {
 
 /// Per-player state owned exclusively by the shard.
 #[derive(Debug, Clone)]
-struct PlayerState {
-    position: Vec3,
+pub(crate) struct PlayerState {
+    pub(crate) position: Vec3,
     /// Body yaw in degrees, seeded to `0.0` on join and updated by a
     /// [`GameInput::PlayerMove`] carrying rotation. Broadcast to viewers so a
     /// remote player faces the right way instead of always facing north.
-    yaw: f32,
+    pub(crate) yaw: f32,
     /// Pitch in degrees, seeded to `0.0` on join and updated by a
     /// [`GameInput::PlayerMove`] carrying rotation.
-    pitch: f32,
+    pub(crate) pitch: f32,
     /// The authoritative server-side game mode. Seeded to [`GameMode::default`] on
     /// join and mutated by [`GameInput::SetGameMode`]; later milestones read it to
     /// enforce mode-specific rules (creative no-decrement, break speed, flight).
-    game_mode: GameMode,
-    owned: Option<crate::player::OwnedPlayerInventory>,
+    pub(crate) game_mode: GameMode,
+    pub(crate) owned: Option<crate::player::OwnedPlayerInventory>,
 }
 
 /// A movement coalesced within one tick: the latest valid position and/or

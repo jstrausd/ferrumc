@@ -1,6 +1,7 @@
 //! Actual player authority and receipt-confirmed tick-boundary consumers.
 
 mod counters;
+mod lifecycle;
 mod publications;
 
 use ferrumc_core::{EntityId, EntityUuid, GameMode, PlayerId};
@@ -433,6 +434,7 @@ impl SimShard {
                 }
                 self.check_player_admission(read.snapshot.expectation().key().id(), 558, false)?;
                 self.require_player_region(*position)?;
+                self.staged_lifecycle_cell(self.ownership_state()?.generation.next()?)?;
                 // The empty native body is fixed, so even its slot allocation
                 // follows pending admission rather than spending it on refusal.
                 let charge = self.pending_charge(0, 558)?;
@@ -553,14 +555,7 @@ impl SimShard {
                 self.select_owned_player(player, *selected, outcome)
             }
             InputKind::Disconnect(player) => {
-                self.actual_player(player)?;
-                if let Some(owned) = self
-                    .players
-                    .get_mut(&player.player)
-                    .and_then(|p| p.owned.as_mut())
-                {
-                    owned.connected = false;
-                }
+                self.apply_native_disconnect(player)?;
                 outcome.intents.push(OwnershipIntent::PlayerDetached {
                     player: player.player,
                 });
@@ -707,6 +702,7 @@ impl SimShard {
         self.player_ownership.as_ref().is_none_or(|s| {
             !s.snapshot_only
                 && s.publications.as_ref().is_none_or(|p| p.ledger.is_empty())
+                && s.lifecycle.as_ref().is_none_or(|l| l.credits.cells == 0)
                 && s.pending.is_empty()
                 && s.input.is_empty()
                 && s.boundary_remaining == 0
@@ -729,6 +725,9 @@ impl SimShard {
         rejoin: bool,
     ) -> Result<(), PlayerOwnershipError> {
         let state = self.ownership_state()?;
+        if let Some(lifecycle) = &state.lifecycle {
+            lifecycle.credits.check_cell()?;
+        }
         if let Some(existing) = self.players.get(&id) {
             let owned = existing
                 .owned
@@ -805,9 +804,12 @@ impl SimShard {
                 return Err(PlayerOwnershipError::StaleSnapshot);
             }
         }
+        let lifecycle_cell =
+            self.staged_lifecycle_cell(self.ownership_state()?.generation.next()?)?;
         let snapshot = NativePlayerSnapshot::try_from_record(record)?;
         self.require_player_region(snapshot.position)?;
         let generation = self.next_owned_generation()?;
+        self.reserve_lifecycle_cell(lifecycle_cell, id);
         self.publish_player(
             id,
             snapshot,
@@ -816,6 +818,7 @@ impl SimShard {
             generation,
             true,
         );
+        self.seal_lifecycle_cell(lifecycle_cell, &self.handle_owned(id)?);
         outcome.intents.push(OwnershipIntent::PlayerAdmitted {
             player: self.handle_owned(id)?,
             generation,
@@ -1138,6 +1141,8 @@ impl SimShard {
         animate: bool,
     ) -> Result<Candidate, PlayerOwnershipError> {
         let player = self.validate_pair(handle, read)?;
+        // Original-admission pin admission precedes every candidate/body copy.
+        self.preflight_take_pin(handle, animate)?;
         let owned = player
             .owned
             .as_ref()
@@ -1249,6 +1254,11 @@ impl SimShard {
             return Err(PlayerOwnershipError::Reserved);
         }
         let generation = state.generation.next()?;
+        let lifecycle_cell = if matches!(candidate.kind, PendingKind::Bootstrap) {
+            self.staged_lifecycle_cell(generation)?
+        } else {
+            None
+        };
         self.validate_candidate_charge(&candidate)?;
         let publication = self.prepare_candidate_publication(&candidate)?;
         let (item_generation, counters) = self.prepare_counter_candidate(&candidate)?;
@@ -1294,9 +1304,16 @@ impl SimShard {
                 owned.pending = Some(id);
             }
         }
+        if matches!(kind, PendingKind::Bootstrap) {
+            let Some(player) = player else {
+                panic!("bootstrap player disappeared");
+            };
+            self.reserve_lifecycle_cell(lifecycle_cell, player);
+        }
         self.reserve_publication(publication.as_ref());
         let buffer = Arc::new(());
         let pending = PendingPlayerMutation {
+            lifecycle_cell,
             publication,
             buffer: Arc::downgrade(&buffer),
             kind,
@@ -1671,6 +1688,9 @@ impl SimShard {
             let admitted = matches!(pending.kind, PendingKind::Bootstrap);
             self.publish_player(player, snapshot, record, expected, generation, admitted);
             let handle = self.handle_owned(player)?;
+            if admitted {
+                self.seal_lifecycle_cell(pending.lifecycle_cell, &handle);
+            }
             outcome.intents.push(if admitted {
                 OwnershipIntent::PlayerAdmitted {
                     player: handle,
@@ -1771,6 +1791,7 @@ impl SimShard {
     ) -> Result<(), PlayerOwnershipError> {
         self.preflight_counter_completion(id, false)?;
         let mut pending = self.remove_pending(id)?;
+        self.release_bootstrap_lifecycle(&pending);
         self.release_counter_projection(&pending);
         self.cancel_publication(pending.publication.take());
         if matches!(pending.kind, PendingKind::SpawnItem) {

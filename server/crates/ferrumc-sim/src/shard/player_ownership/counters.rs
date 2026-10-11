@@ -47,6 +47,7 @@ struct ShadowPlayer<'a> {
 }
 
 struct ShadowResources {
+    lifecycle: Option<crate::collector_lifecycle::LifecycleCredits>,
     publications: Option<crate::item_publication::PublicationLedger>,
     pending_count: usize,
     pending_bytes: usize,
@@ -506,6 +507,7 @@ impl SimShard {
         let mut handled_len = 0;
         let mut future_retired = 0;
         let mut publication_ledger = state.publications.as_ref().map(|p| p.ledger);
+        let mut lifecycle_credits = state.lifecycle.as_ref().map(|l| l.credits);
         for (input, _) in &state.input {
             let InputKind::Completion(c) = &input.0 else {
                 continue;
@@ -545,6 +547,22 @@ impl SimShard {
                     let _ = ledger.publish(publication.charge);
                 } else {
                     ledger.cancel(publication.charge);
+                }
+            }
+            if let Some(credits) = &mut lifecycle_credits {
+                if pending
+                    .publication
+                    .as_ref()
+                    .is_some_and(|p| p.lifecycle_pin.is_some())
+                {
+                    if confirmed {
+                        credits.retain_pin();
+                    } else {
+                        credits.cancel_pin();
+                    }
+                }
+                if !confirmed && pending.lifecycle_cell.is_some() {
+                    credits.release_cell();
                 }
             }
             if confirmed {
@@ -652,6 +670,7 @@ impl SimShard {
             future_generation,
             future_retired,
             publication_ledger,
+            lifecycle_credits,
         )?;
         if stopped {
             for entry in entries.iter_mut() {
@@ -671,6 +690,10 @@ impl SimShard {
         clippy::too_many_lines,
         reason = "explicit scalar FIFO dispatch mirrors the concrete admission consumer without body clones"
     )]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the completion prefix carries both actual resource ledgers"
+    )]
     fn plan_counter_actions<'a>(
         &'a self,
         entries: &mut Vec<CounterBoundaryEntry>,
@@ -679,6 +702,7 @@ impl SimShard {
         future_generation: PlayerLocalGeneration,
         future_retired: usize,
         publication_ledger: Option<crate::item_publication::PublicationLedger>,
+        lifecycle_credits: Option<crate::collector_lifecycle::LifecycleCredits>,
     ) -> Result<bool, PlayerOwnershipError> {
         let state = self.ownership_state()?;
         let entities = self
@@ -702,6 +726,7 @@ impl SimShard {
             .sum::<usize>();
         let mut resources = ShadowResources {
             publications: publication_ledger,
+            lifecycle: lifecycle_credits,
             pending_count: state
                 .pending
                 .values()
@@ -872,6 +897,7 @@ impl SimShard {
                         && resources
                             .publications
                             .is_none_or(crate::item_publication::PublicationLedger::is_empty)
+                        && resources.lifecycle.is_none_or(|l| l.cells == 0)
                         && resources.pending_count == 0
                         && players_clean
                         && entries
@@ -1003,6 +1029,7 @@ impl SimShard {
                     item,
                     read,
                     id,
+                    animate,
                     cancelled: false,
                     ..
                 } if !reserved => {
@@ -1086,6 +1113,21 @@ impl SimShard {
                     else {
                         continue;
                     };
+                    let take_pin =
+                        *animate && publication_charge.is_some() && resources.lifecycle.is_some();
+                    if take_pin {
+                        let Some(handle) = player_handle else {
+                            continue;
+                        };
+                        if state
+                            .lifecycle
+                            .as_ref()
+                            .is_none_or(|l| l.lookup(handle).is_err())
+                            || resources.lifecycle.is_some_and(|l| l.check_pin().is_err())
+                        {
+                            continue;
+                        }
+                    }
                     if !self.shadow_candidate_admitted(
                         &mut resources,
                         consumed,
@@ -1097,6 +1139,11 @@ impl SimShard {
                         continue;
                     }
                     reserve_shadow_publication(&mut resources, publication_charge, false);
+                    if take_pin {
+                        if let Some(lifecycle) = &mut resources.lifecycle {
+                            lifecycle.reserve_pin();
+                        }
+                    }
                     let generation = if shape.remainder == 0 {
                         entry.generation
                     } else {
@@ -1402,6 +1449,12 @@ impl SimShard {
                     {
                         continue;
                     }
+                    if resources.lifecycle.is_some_and(|l| l.check_cell().is_err()) {
+                        continue;
+                    }
+                    if let Some(lifecycle) = &mut resources.lifecycle {
+                        lifecycle.reserve_cell();
+                    }
                     resources.generation = resources.generation.next()?;
                     resources.player_bytes = resources.player_bytes
                         - existing.map_or(0, |p| p.record.data().len())
@@ -1439,6 +1492,9 @@ impl SimShard {
                     ) {
                         continue;
                     }
+                    if resources.lifecycle.is_some_and(|l| l.check_cell().is_err()) {
+                        continue;
+                    }
                     if self.shadow_candidate_admitted(
                         &mut resources,
                         consumed,
@@ -1447,6 +1503,9 @@ impl SimShard {
                         558,
                         Some((player_id, 0, 558)),
                     )? {
+                        if let Some(lifecycle) = &mut resources.lifecycle {
+                            lifecycle.reserve_cell();
+                        }
                         resources.bootstraps += 1;
                         resources.bootstrap_bytes += 558;
                     }

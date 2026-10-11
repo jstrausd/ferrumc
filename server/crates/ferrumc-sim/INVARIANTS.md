@@ -455,3 +455,48 @@
   format. Session/driver activation, metadata refusal policy for present AIR or
   trusted opaque inner schemas, socket emission, item physics and live Survival
   remain separate consumer/gameplay tickets.
+
+## Collector admission lifecycle addendum (SIM-03.4a)
+
+- `connected_owned_player_view` borrows actual native PlayerState/owner state,
+  checking private owner/admission, complete current chunk/entity generation,
+  connected and not stopped. Drain preserves connected output authority.
+  Native mode/pose are read without normalization; seed obfuscation uses the
+  existing `BiomeZoomSeed::from_world_seed` producer, never caller hash bits.
+- Once-only empty-owner opt-in requires actual publication configuration.
+  Lifecycle cell count is checked actual player limit plus actual group limit;
+  exact outer charge is `size_of::<Vec<Option<CollectorLifecycleCell>>>() +
+  count * size_of::<Option<CollectorLifecycleCell>>()`, within a positive
+  at-most-one-MiB scalar byte cap. The entire Vec is fallibly reserved before
+  activation. Logical charge is not allocator/RSS measurement.
+- Cell admission is checked before native Bootstrap/Restore body copies. Staged
+  scalar credits move into real pending Bootstrap or immediate Restore admission;
+  no-start refusal releases staged work, definitive Bootstrap abort releases its
+  reserved cell, uncertainty/quarantine keeps it. Only actual admitted handles
+  seal cells. Every rejoin receives its own cell; unacknowledged pinless old
+  detach facts remain counted, with no unbounded history or payload sidecar.
+- Native Disconnect seals exactly one retained scalar fact after the actual
+  admission becomes disconnected. Repeated historical Disconnect uses that
+  existing fact without touching a rejoined PlayerState. UUID-only detached
+  intents and enqueued Disconnect are not proofs. Facts/views have no public
+  factory, Clone, Weak getter or mutation handle.
+- Every genuine staged `take:Some` in lifecycle mode carries one original-cell
+  pin; admission precedes candidate body copies and Workrequest. Pendinginstall
+  reserves it, Confirm moves reserved to retained, definitive release_pending
+  and valid actual FIFO head acknowledgement release it exactly once. Busy,
+  history refusal, lost reply, absent receipt, refresh, quarantine and detach
+  retain it. Reserved plus retained pins never exceed the actual group cap.
+- Countershadow copies fixed lifecycle credit scalars and uses the same cell/pin
+  transitions over the genuine completion prefix before further admissions.
+  Counter scratch includes the actual new scalar resource layout; Tick overflow,
+  scratch refusal and scope mismatch preserve queued work and lifecycle credits.
+- Historical lifecycle views borrow original cells after rejoin. Only genuine
+  detached cells with both source pin counts zero mint exact cell-credit/owner/
+  admission/full-generation tickets. Ack revalidates all bindings and zero pins;
+  stale, foreign and repeated tickets release nothing. Driver must separately
+  prove original Session retirement and zero consumer refs before Sim ack.
+  A Sim ticket is no socket or network receipt.
+- All unresolved lifecycle cells prevent native Stop and scheduler quiescence.
+  Drain permits publication/lifecycle acknowledgements. Clone/SnapshotOnly has
+  no runnable cells, detach facts or pins. Durable checkpoint formats, App and
+  Session activation, Java events and live Survival remain separate contracts.
