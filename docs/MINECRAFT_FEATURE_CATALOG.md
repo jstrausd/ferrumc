@@ -485,7 +485,7 @@ Artefakte und verbleibende Grenzen stehen im
 | SRV-05.1 | F | [Normale Craftingrezepte](agent-tasks/SRV-05_1_NORMAL_CRAFTING_REVIEW.md), `572083d1`: unabhängiger Rootreview CLEAN; alle968 Rezepte und21.855 Original-JAR-Fälle, Debug/Release je84 sowie3 Rootprobes mit301.510 zusätzlichen Matchmodellen grün. Strictchecks und frischer bytegleicher Reexport. Onlinecrafting/Specials/weitere Serializer bleiben offen. |
 | SIM-03.3 / SRV-02.1 | F | [Besessene ItemEntities](agent-tasks/SIM-03_3_ITEM_ENTITY_STATE.md), `84967c54`: Rootreview CLEAN, Debug/Release je252 Tests samt3 zusätzlichen Probes und strictchecks grün; sealed Slotstate, lossless FCIE/FCIS, owned Refusals/Removal, checked Restore und originale Counter. Drop/Pickup/Appaktivierung folgen; SIM-03/SRV-02 bleiben offen. |
 | SIM-03.4 | F | [Retained Itempublications](agent-tasks/SIM-03_4_ITEM_PUBLICATION_REVIEW.md), `b9f15db8`: unabhängig CLEAN; Debug/Release je347 und strictchecks auf akzeptiertem DUR-03.2-Archiv. Immutable Gruppen vor Workrequest reserviert, Outbox retained; Session-/App-Verbraucher bleiben offen. |
-| SIM-03.4a | A | [Collectorlifecycle](agent-tasks/SIM-03_4a_COLLECTOR_LIFECYCLE.md): echter ConnectedPlayerView, bounded Lifecycle-/Detachfacts und Takepins ausschließlich in Sim vergeben. Runtimeabnahme, Sessionretirement und App-Wiring folgen. |
+| SIM-03.4a | A | [Collectorlifecycle](agent-tasks/SIM-03_4a_COLLECTOR_LIFECYCLE.md): Autorenlieferung eingefroren; Root-Kombinationschecks auf `e772564c` Debug/Release je369 und strictchecks grün,56 Source-/40 Evidence-/1215 Outside-Dateien unverändert. Unabhängiger Runtimereview läuft; noch unintegriert. Sessionretirement und App-Wiring folgen. |
 | NET-04.2c | T | [Sessionbindungsvertrag](agent-tasks/NET-04_2c_COLLECTOR_SESSION_BINDING_REVIEW.md): konkret und unabhängig CLEAN; echte Nativejoin-/SelfID-/Collectortracking-/Retirement-/Allocator-Verträge geprüft. SIM-03.4a als erster Producer vergeben; Session-/App-Runtime noch offen. |
 
 ## Agentenrollen, Board-Snapshot und Orchestrationsregeln
@@ -505,7 +505,7 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | Sessionagent `select_world_ticket` | NET-04.2c | Unabhängig CLEAN_CONTRACT; Auftrag abgeschlossen | Session-/App-Runtime folgt den tatsächlichen Sim-/Joinproducern. |
 | T3-Weltlieferung „GEN-05.7 originale Biomtemperatur in Rust“ | GEN-05.7 | Unabhängig CLEAN_RUNTIME als `40488324` integriert; Auftrag abgeschlossen | Whole-World/Coldallocation bestanden; historische Source-/Evidence-/Originalpins immutable. |
 | T3-Weltagent „GEN-05.8 stored biome resolver contract and original oracle“ | GEN-05.8 | Konkreter Vertrag und genuine Originaloracle in Vorbereitung | Eigener neuer Brief und `.codex-tmp/gen05_8/**`; Production readonly bis Rootreview. |
-| T3-Simagent „SIM-03.4a collector lifecycle“ | SIM-03.4a | Implementierung läuft | Exklusiv Sim, Lifecycle-/Detach-/Takepinproducer; Root prüft anschließend. |
+| T3-Reviewer „SIM-03.4a unabhängige Runtimeprüfung“ | SIM-03.4a | Autorenlieferung fertig, Rootchecks grün; unabhängige Codeprüfung läuft | Produktion readonly; eigene Reviewevidenz. Integration erst nach Ergebnis. |
 | T3-Storageagent „DUR-03.3 Storage Player+Block implementation“ | DUR-03.3 | Vertrag unabhängig CLEAN; Implementierung läuft | Exklusiv Storage und neue Runtimeevidenz; Format7 ohne automatische Migration. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen

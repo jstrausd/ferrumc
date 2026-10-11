@@ -165,6 +165,13 @@ Der nächste echte Simproducer ist als
 ConnectedPlayerView, bounded Lifecyclezellen, applied Detachfacts und
 reserved/retained Takepins. Session-/App-Wiring und der native Join folgen
 danach; heutiger Appjoin bleibt der Legacyplayerpfad mit eigener JoinGame-ID1.
+Die Autorenlieferung ist fertig und eingefroren. Root hat die Kombination im
+echten `e772564c`-Archiv geprüft: Debug/Release jeweils369, Workspace-Alltarget-
+Clippy, fmt und rustdoc grün;56 Source-/40 Evidence-Dateien sowie1215
+Außendateien unverändert. Die unabhängige Codeprüfung läuft in einer neuen
+Reviewrunde, nachdem die vorherige durch ein Providerlimit abbrach. Bis zu
+deren Ergebnis bleibt SIM-03.4a unintegriert; Sessionretirement und Appaktivierung
+bleiben eigene Verbraucher.
 
 GEN-05.6 ist unabhängig CLEAN als `34c8875e` integriert. Der konkrete
 GEN-05.7-Temperaturvertrag ist CLEAN auf Vertragsumfang. Die finale genuine
@@ -210,12 +217,23 @@ Der neue T3-Storageagent implementiert ausschließlich Storage-Format7 mit
 gemeinsamer Player-/Chunkrevision, echten Snapshotautoritäten und atomarer
 Inventory-/Blockwirkung. Runtimeabnahme steht aus; keine getrennten Legacywrites
 dürfen die gemeinsame Wirkung umgehen. DUR-03.3a, die explizite Offline-Migration
-Format6→7, folgt separat vor DUR-05. Aktuell laufen neben Root drei Childaufträge:
-GEN-05.8-Vertrag/Originaloracle, SIM-03.4a-Lifecycle und DUR-03.3-Storageimplementierung.
+Format6→7, folgt separat vor DUR-05.
+Die aktiven Aufträge wurden nach Providerabbrüchen mit ihrer bestehenden Arbeit
+wieder aufgenommen: GEN-05.8-Vertrag/Originaloracle, unabhängiger SIM-03.4a-
+Runtimereview und DUR-03.3-Storageimplementierung. Kein abgebrochener Auftrag
+wurde als abgenommen gewertet.
+Der nächste vorbereitete Anschluss ist der
+[native Driver-/Endpointworkorder NET-04.2d](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_TASK.md):
+tatsächlich konsumierter Receiver/Owner, Nativejoin und originale Detach-/
+Retirementfolge. Noch nicht vergeben; Produktionsänderungen folgen einem
+konkreten Vertragsreview und den tatsächlichen Voraussetzungstickets.
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:
 [Lauf38101579432](https://github.com/jstrausd/ferrumc/actions/runs/38101579432).
+Auch die vollständige CI für den veröffentlichten Integrationsstand
+`e772564c` mit GEN-05.7 ist erfolgreich:
+[Lauf38103410294](https://github.com/jstrausd/ferrumc/actions/runs/38103410294).
 Noch ungeprüfte Runtimeänderungen gehören nicht zu diesem CI-Nachweis.
 
 ITEM-SIZE-01 ist unabhängig CLEAN als `b5551395` integriert. Seine Größen- und
