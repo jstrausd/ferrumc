@@ -47,6 +47,11 @@ pub use redb_store::migration::{
     GenerationMigrationTable, LegacyGenerationDeclaration, PreparedGenerationMigration,
     MAX_MIGRATION_PLUGIN_ID_LEN,
 };
+pub use redb_store::ownership_migration::{
+    BoundedOwnershipMigration, OwnershipMigrationError, OwnershipMigrationFileRole,
+    OwnershipMigrationLimits, OwnershipMigrationOutcome, OwnershipMigrationOutputPaths,
+    OwnershipMigrationResume, OwnershipMigrationResumePaths, PreparedOwnershipMigration,
+};
 pub use redb_store::uuid_migration::{
     BackedUpUuidEntityMigration, CheckpointedUuidEntityMigration, PreparedUuidEntityMigration,
     UuidEntityMigrationBackup, UuidEntityMigrationError, UuidEntityMigrationLimits,

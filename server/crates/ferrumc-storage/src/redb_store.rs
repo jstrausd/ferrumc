@@ -56,6 +56,7 @@ use crate::{
 
 pub(crate) mod migration;
 mod ownership;
+pub(crate) mod ownership_migration;
 mod ownership_validation;
 mod uuid_entities;
 pub(crate) mod uuid_migration;

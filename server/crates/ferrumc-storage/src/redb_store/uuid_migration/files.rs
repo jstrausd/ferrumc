@@ -20,15 +20,15 @@ pub(super) const CACHE_BYTES: usize = 64 * 1024 * 1024;
 const BUFFER_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct FileIdentity {
-    pub(super) device: u64,
-    pub(super) inode: u64,
+pub(in crate::redb_store) struct FileIdentity {
+    pub(in crate::redb_store) device: u64,
+    pub(in crate::redb_store) inode: u64,
 }
 
 impl FileIdentity {
     // The non-Unix implementation must return an explicit platform refusal.
     #[allow(clippy::unnecessary_wraps)]
-    pub(super) fn of(meta: &Metadata) -> MigrationResult<Self> {
+    pub(in crate::redb_store) fn of(meta: &Metadata) -> MigrationResult<Self> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
@@ -47,7 +47,7 @@ impl FileIdentity {
 
 // The non-Unix implementation must return an explicit platform refusal.
 #[allow(clippy::unnecessary_wraps)]
-pub(super) fn nlink(meta: &Metadata) -> MigrationResult<u64> {
+pub(in crate::redb_store) fn nlink(meta: &Metadata) -> MigrationResult<u64> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -60,7 +60,7 @@ pub(super) fn nlink(meta: &Metadata) -> MigrationResult<u64> {
     }
 }
 
-pub(super) fn canonical_path(path: &Path) -> MigrationResult<PathBuf> {
+pub(in crate::redb_store) fn canonical_path(path: &Path) -> MigrationResult<PathBuf> {
     let name = path
         .file_name()
         .ok_or_else(|| Error::InvalidFile(path.to_owned()))?;
@@ -73,21 +73,24 @@ pub(super) fn canonical_path(path: &Path) -> MigrationResult<PathBuf> {
 }
 
 #[derive(Debug)]
-pub(super) struct DiskBudget {
+pub(in crate::redb_store) struct DiskBudget {
     kind: UuidEntityMigrationScratchKind,
     limit: u64,
     exceeded: AtomicBool,
 }
 
 impl DiskBudget {
-    pub(super) fn new(kind: UuidEntityMigrationScratchKind, limit: u64) -> Arc<Self> {
+    pub(in crate::redb_store) fn new(
+        kind: UuidEntityMigrationScratchKind,
+        limit: u64,
+    ) -> Arc<Self> {
         Arc::new(Self {
             kind,
             limit,
             exceeded: AtomicBool::new(false),
         })
     }
-    pub(super) fn check(&self, extent: Option<u64>) -> io::Result<()> {
+    pub(in crate::redb_store) fn check(&self, extent: Option<u64>) -> io::Result<()> {
         if extent.is_none_or(|n| n > self.limit) {
             self.exceeded.store(true, Ordering::Relaxed);
             return Err(io::Error::other(
@@ -96,7 +99,7 @@ impl DiskBudget {
         }
         Ok(())
     }
-    pub(super) fn error(&self) -> Option<Error> {
+    pub(in crate::redb_store) fn error(&self) -> Option<Error> {
         self.exceeded
             .load(Ordering::Relaxed)
             .then_some(Error::ScratchBudgetExceeded {
@@ -104,10 +107,14 @@ impl DiskBudget {
                 limit: self.limit,
             })
     }
-    pub(super) fn map(&self, operation: &'static str, e: impl Into<redb::Error>) -> Error {
+    pub(in crate::redb_store) fn map(
+        &self,
+        operation: &'static str,
+        e: impl Into<redb::Error>,
+    ) -> Error {
         self.error().unwrap_or_else(|| backend(operation, e))
     }
-    pub(super) fn admit(&self, n: u64) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn admit(&self, n: u64) -> MigrationResult<()> {
         self.check(Some(n))
             .map_err(|_| Error::ScratchBudgetExceeded {
                 kind: self.kind,
@@ -165,13 +172,13 @@ impl StorageBackend for SharedBackend {
     }
 }
 
-pub(super) struct LockedFile {
+pub(in crate::redb_store) struct LockedFile {
     backend: Arc<FileBackend>,
-    pub(super) file: File,
-    pub(super) path: PathBuf,
-    pub(super) identity: FileIdentity,
+    pub(in crate::redb_store) file: File,
+    pub(in crate::redb_store) path: PathBuf,
+    pub(in crate::redb_store) identity: FileIdentity,
     #[cfg(test)]
-    pub(super) fail_sync: Arc<AtomicBool>,
+    pub(in crate::redb_store) fail_sync: Arc<AtomicBool>,
 }
 impl fmt::Debug for LockedFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -183,17 +190,28 @@ impl fmt::Debug for LockedFile {
 }
 
 impl LockedFile {
-    pub(super) fn backend(&self) -> Arc<FileBackend> {
+    pub(in crate::redb_store) fn backend(&self) -> Arc<FileBackend> {
         Arc::clone(&self.backend)
     }
-    pub(super) fn open(
+    pub(in crate::redb_store) fn open(
         path: &Path,
         create_new: bool,
         checkpoint_links: bool,
     ) -> MigrationResult<Self> {
+        Self::open_mode(path, create_new, checkpoint_links, true)
+    }
+    pub(in crate::redb_store) fn open_readonly(path: &Path) -> MigrationResult<Self> {
+        Self::open_mode(path, false, false, false)
+    }
+    fn open_mode(
+        path: &Path,
+        create_new: bool,
+        checkpoint_links: bool,
+        writable: bool,
+    ) -> MigrationResult<Self> {
         #[cfg(not(unix))]
         {
-            let _ = (path, create_new, checkpoint_links);
+            let _ = (path, create_new, checkpoint_links, writable);
             return Err(Error::UnsupportedPlatform);
         }
         #[cfg(unix)]
@@ -210,7 +228,7 @@ impl LockedFile {
             }
             let file = OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(writable)
                 .create_new(create_new)
                 .open(&path)
                 .map_err(|e| {
@@ -263,7 +281,7 @@ impl LockedFile {
             result
         }
     }
-    pub(super) fn verify_path(&self) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn verify_path(&self) -> MigrationResult<()> {
         let meta =
             fs::symlink_metadata(&self.path).map_err(|e| io_error("verify path", &self.path, e))?;
         if meta.file_type().is_symlink()
@@ -274,7 +292,7 @@ impl LockedFile {
         }
         Ok(())
     }
-    pub(super) fn verify_single_link(&self) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn verify_single_link(&self) -> MigrationResult<()> {
         self.verify_path()?;
         if nlink(
             &self
@@ -287,22 +305,30 @@ impl LockedFile {
         }
         Ok(())
     }
-    pub(super) fn separate_from(&self, other: &Self) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn separate_from(&self, other: &Self) -> MigrationResult<()> {
         if self.identity == other.identity || self.path == other.path {
             return Err(Error::UnexpectedFileAlias(self.path.clone()));
         }
         Ok(())
     }
-    pub(super) fn len(&self) -> MigrationResult<u64> {
+    pub(in crate::redb_store) fn len(&self) -> MigrationResult<u64> {
         self.file
             .metadata()
             .map(|m| m.len())
             .map_err(|e| io_error("file length", &self.path, e))
     }
-    pub(super) fn open_database(
+    pub(in crate::redb_store) fn open_database(
         &self,
         fresh: bool,
         budget: Option<&Arc<DiskBudget>>,
+    ) -> MigrationResult<Database> {
+        self.open_database_with_cache(fresh, budget, CACHE_BYTES)
+    }
+    pub(in crate::redb_store) fn open_database_with_cache(
+        &self,
+        fresh: bool,
+        budget: Option<&Arc<DiskBudget>>,
+        cache_bytes: usize,
     ) -> MigrationResult<Database> {
         self.verify_single_link()?;
         if !fresh {
@@ -312,7 +338,7 @@ impl LockedFile {
             b.admit(self.len()?)?;
         }
         let mut builder = Database::builder();
-        builder.set_cache_size(CACHE_BYTES);
+        builder.set_cache_size(cache_bytes);
         builder.set_repair_callback(redb::RepairSession::abort);
         let shared = SharedBackend::new(Arc::clone(&self.backend), budget.cloned());
         #[cfg(test)]
@@ -330,15 +356,25 @@ impl LockedFile {
             }
         })
     }
-    pub(super) fn sync(&self) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn sync(&self) -> MigrationResult<()> {
         self.verify_path()?;
         self.file
             .sync_all()
             .map_err(|e| io_error("fsync file", &self.path, e))?;
         sync_parent(&self.path)
     }
-    pub(super) fn hash(&self) -> MigrationResult<(u64, [u8; 32])> {
+    pub(in crate::redb_store) fn hash(&self) -> MigrationResult<(u64, [u8; 32])> {
+        self.hash_expected_len(self.len()?)
+    }
+    /// Hash only the admitted closed extent and one byte of growth lookahead.
+    pub(in crate::redb_store) fn hash_expected_len(
+        &self,
+        expected: u64,
+    ) -> MigrationResult<(u64, [u8; 32])> {
         self.verify_path()?;
+        if self.len()? != expected {
+            return Err(Error::BackupMismatch);
+        }
         let mut reader = self
             .file
             .try_clone()
@@ -346,27 +382,32 @@ impl LockedFile {
         reader
             .seek(SeekFrom::Start(0))
             .map_err(|e| io_error("seek hash", &self.path, e))?;
-        let expected = self.len()?;
         let mut hash = Sha256::new();
         let mut buffer = vec![0; BUFFER_BYTES];
         let mut count = 0u64;
-        loop {
+        while count < expected {
+            let extent = (expected - count).min(BUFFER_BYTES as u64) as usize;
             let n = reader
-                .read(&mut buffer)
+                .read(&mut buffer[..extent])
                 .map_err(|e| io_error("read hash", &self.path, e))?;
             if n == 0 {
-                break;
+                return Err(Error::BackupMismatch);
             }
             count = count.checked_add(n as u64).ok_or(Error::CounterOverflow)?;
             hash.update(&buffer[..n]);
         }
-        if count != expected || self.len()? != expected {
+        if reader
+            .read(&mut buffer[..1])
+            .map_err(|e| io_error("read hash extent", &self.path, e))?
+            != 0
+            || self.len()? != expected
+        {
             return Err(Error::BackupMismatch);
         }
         self.verify_path()?;
         Ok((count, hash.finalize().into()))
     }
-    pub(super) fn read_exact<const N: usize>(&self) -> MigrationResult<[u8; N]> {
+    pub(in crate::redb_store) fn read_exact<const N: usize>(&self) -> MigrationResult<[u8; N]> {
         self.verify_path()?;
         if self.len()? != N as u64 {
             return Err(Error::InvalidFile(self.path.clone()));
@@ -384,7 +425,7 @@ impl LockedFile {
             .map_err(|e| io_error("read record", &self.path, e))?;
         Ok(bytes)
     }
-    pub(super) fn write_exact(&self, bytes: &[u8]) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn write_exact(&self, bytes: &[u8]) -> MigrationResult<()> {
         self.verify_single_link()?;
         let mut file = self
             .file
@@ -395,7 +436,7 @@ impl LockedFile {
         file.write_all(bytes)
             .map_err(|e| io_error("write record", &self.path, e))
     }
-    pub(super) fn rebind(&mut self, new_path: PathBuf) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn rebind(&mut self, new_path: PathBuf) -> MigrationResult<()> {
         let meta = fs::symlink_metadata(&new_path)
             .map_err(|e| io_error("verify published record", &new_path, e))?;
         if !meta.is_file() || FileIdentity::of(&meta)? != self.identity {
@@ -406,7 +447,7 @@ impl LockedFile {
     }
 }
 
-pub(super) fn sync_parent(path: &Path) -> MigrationResult<()> {
+pub(in crate::redb_store) fn sync_parent(path: &Path) -> MigrationResult<()> {
     let parent = path
         .parent()
         .ok_or_else(|| Error::InvalidFile(path.to_owned()))?;
@@ -415,7 +456,7 @@ pub(super) fn sync_parent(path: &Path) -> MigrationResult<()> {
         .map_err(|e| io_error("fsync directory", parent, e))
 }
 
-pub(super) fn require_clean_header(file: &File, path: &Path) -> MigrationResult<()> {
+pub(in crate::redb_store) fn require_clean_header(file: &File, path: &Path) -> MigrationResult<()> {
     const MAGIC: [u8; 9] = [b'r', b'e', b'd', b'b', 0x1a, 0x0a, 0xa9, 0x0d, 0x0a];
     let mut reader = file
         .try_clone()
@@ -489,13 +530,16 @@ fn validate_geometry(header: &[u8; 320], file_len: u64) -> MigrationResult<()> {
 }
 
 #[derive(Debug)]
-pub(super) struct TemporaryFile {
+pub(in crate::redb_store) struct TemporaryFile {
     file: Option<LockedFile>,
     path: PathBuf,
     identity: FileIdentity,
 }
 
-fn remove_owned_path(path: &Path, identity: FileIdentity) -> MigrationResult<()> {
+pub(in crate::redb_store) fn remove_owned_path(
+    path: &Path,
+    identity: FileIdentity,
+) -> MigrationResult<()> {
     let owned = fs::symlink_metadata(path)
         .is_ok_and(|m| m.is_file() && FileIdentity::of(&m).ok() == Some(identity));
     if !owned {
@@ -511,7 +555,7 @@ fn remove_owned_path(path: &Path, identity: FileIdentity) -> MigrationResult<()>
 }
 
 impl TemporaryFile {
-    pub(super) fn create(parent: &Path, prefix: &str) -> MigrationResult<Self> {
+    pub(in crate::redb_store) fn create(parent: &Path, prefix: &str) -> MigrationResult<Self> {
         for _ in 0..16 {
             let path = parent.join(format!(".{prefix}-{}.redb", Uuid::new_v4()));
             match LockedFile::open(&path, true, false) {
@@ -535,12 +579,12 @@ impl TemporaryFile {
             ),
         ))
     }
-    pub(super) fn file(&self) -> MigrationResult<&LockedFile> {
+    pub(in crate::redb_store) fn file(&self) -> MigrationResult<&LockedFile> {
         self.file
             .as_ref()
             .ok_or(Error::InvalidFile(self.path.clone()))
     }
-    pub(super) fn cleanup(mut self) -> MigrationResult<()> {
+    pub(in crate::redb_store) fn cleanup(mut self) -> MigrationResult<()> {
         self.remove()
     }
     fn remove(&mut self) -> MigrationResult<()> {
@@ -558,7 +602,7 @@ impl Drop for TemporaryFile {
     }
 }
 
-pub(super) fn copy_closed(
+pub(in crate::redb_store) fn copy_closed(
     source: &LockedFile,
     destination: &LockedFile,
     budget: &DiskBudget,
@@ -568,7 +612,7 @@ pub(super) fn copy_closed(
     destination.verify_single_link()?;
     destination.separate_from(source)?;
     budget.admit(expected.0)?;
-    if source.hash()? != expected {
+    if source.hash_expected_len(expected.0)? != expected {
         return Err(Error::BackupMismatch);
     }
     let mut reader = source
@@ -588,12 +632,13 @@ pub(super) fn copy_closed(
     let mut buffer = vec![0; BUFFER_BYTES];
     let mut total = 0u64;
     let mut hash = Sha256::new();
-    loop {
+    while total < expected.0 {
+        let extent = (expected.0 - total).min(BUFFER_BYTES as u64) as usize;
         let n = reader
-            .read(&mut buffer)
+            .read(&mut buffer[..extent])
             .map_err(|e| io_error("read physical copy", &source.path, e))?;
         if n == 0 {
-            break;
+            return Err(Error::BackupMismatch);
         }
         total = total.checked_add(n as u64).ok_or(Error::CounterOverflow)?;
         budget.admit(total)?;
@@ -602,13 +647,23 @@ pub(super) fn copy_closed(
             .map_err(|e| io_error("write physical copy", &destination.path, e))?;
         hash.update(&buffer[..n]);
     }
+    if reader
+        .read(&mut buffer[..1])
+        .map_err(|e| io_error("read physical copy extent", &source.path, e))?
+        != 0
+        || source.len()? != expected.0
+    {
+        return Err(Error::BackupMismatch);
+    }
     let actual: [u8; 32] = hash.finalize().into();
     if (total, actual) != expected {
         return Err(Error::BackupMismatch);
     }
     destination.sync()?;
     require_clean_header(&destination.file, &destination.path)?;
-    if destination.hash()? != expected || source.hash()? != expected {
+    if destination.hash_expected_len(expected.0)? != expected
+        || source.hash_expected_len(expected.0)? != expected
+    {
         return Err(Error::BackupMismatch);
     }
     Ok(())

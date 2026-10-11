@@ -50,7 +50,7 @@ pub(super) struct Reader<T, M> {
 }
 pub(super) type WriteReader<'a> =
     Reader<redb::Table<'a, &'static [u8], &'static [u8]>, redb::Table<'a, &'static str, u64>>;
-type ReadReader = Reader<
+pub(super) type ReadReader = Reader<
     redb::ReadOnlyTable<&'static [u8], &'static [u8]>,
     redb::ReadOnlyTable<&'static str, u64>,
 >;
@@ -130,7 +130,7 @@ pub(super) fn write_reader(
         capacity,
     })
 }
-fn read_reader(
+pub(super) fn read_reader(
     txn: &redb::ReadTransaction,
     capacity: OwnershipCapacity,
 ) -> OwnershipResult<ReadReader> {

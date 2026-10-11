@@ -297,3 +297,41 @@
   reservations, gameplay codecs/drop/pickup consumers, App activation,
   crossdimension ownership, capacity changes,5→6 migration, real Paper/client/
   plugin acceptance and process-kill/power-loss evidence remain separate.
+
+## Explicit offline ownership migration (DUR-03.2 / Format5 → Format6)
+
+- Preparation, bounded evidence creation and commit are separate move-only offline
+  authorities. Only exact complete Format5 plus an explicit fixed-width sorted
+  player-scope mapping is admitted; existing openers never upgrade automatically.
+- Preparation also requires an explicit caller scratch directory. It reuses the
+  existing bounded journal index after raw row/byte admission; there is no hidden
+  scratch path or quadratic receipt-overlap scan. The logical plan/count/ID budget
+  and physical index/copy extents are independent constraints, not RSS guarantees.
+- Every real source resource has one UUIDv4 ID recorded before the first Stage CAS.
+  Fresh snapshots and requests come from the actual private Format6 backend;
+  existing Singles CAS produces the only bootstrap headers and receipts. Opaque
+  player schemas, GameMode and payloads are retained, including legacy FCPS bytes.
+- Entity bootstrap advances each historical chunk epoch by exactly its actual
+  entity count. Checked overflow refuses before Stage CAS. Empty historical
+  epochs, including MAX+0, are retained. Each real receipt proves the exact serial
+  intermediate epoch in source-key order; no fabricated revision1 histories exist.
+- A complete independent original-plus-delta comparison and actual Stage close/
+  reopen precede sealing. All common/player/entity/locator/index bytes are exact;
+  the only source delta is three ownership tables, five agreement/count metadata
+  keys, declared epochs and marker6. Full fifteen-table validation and exact
+  target SHA occur in the same uncommitted actual Source writer transaction.
+- Immutable Stage/Backup originals are never redb-opened after checkpoint sealing.
+  Verification and import open only one identity-owned bounded physical copy at a
+  time, admitted before copy creation. Cleanup errors are typed; foreign replaced
+  paths survive. Published evidence is never overwritten or automatically removed.
+- The checkpoint binds exact caller-selected canonical Unix paths, inodes, closed
+  evidence hashes, source/target logical hashes, mapping/plan, limits and producer
+  contract pins. Checkpoint paths grant no filesystem authority. Resume receives
+  all paths explicitly and either proves original5 or exact committed6; it never
+  regenerates import IDs or executes a second bootstrap.
+- A real commit attempt or any subsequent copy cleanup/reopen/evidence failure is
+  CommitUncertain with checkpoint/target identity. Returned precommit failures
+  abort the actual Source transaction. Success closes/reopens and validates Source;
+  outcomes contain no database handle or live gameplay authority.
+- This producer does not migrate FCPS gameplay schemas, activate App/Sim drivers,
+  provide Java plugins, guarantee process-kill/power-loss behavior or claim Survival.

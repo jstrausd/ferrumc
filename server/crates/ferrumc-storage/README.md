@@ -480,3 +480,15 @@ source/event ordering was inspected; no Paper runtime, client/plugin differentia
 acceptance or process-kill/power-loss evidence is claimed. App/Sim activation,
 owned gameplay codecs, drop/pickup consumers, capacity changes and Format5→6
 migration remain separate tickets.
+
+The explicit synchronous Unix-only Format5→6 ownership migration additionally
+requires caller-selected source, mapping and scratch paths. Preparation fully
+validates source records and mapping, then `prepare_files` creates new Backup,
+Plan, Stage and Checkpoint evidence. Actual private Singles CAS generates the
+Stage histories before one atomic Source import. Source Player/Entity payloads
+remain opaque and byte-identical; historical entity epochs advance by their
+actual per-chunk entity counts. Resume requires all six paths and the exact
+capacity/limit agreement, and distinguishes original5 from exact committed6.
+This API returns offline evidence/outcomes only; it does not enable gameplay or
+migrate player gameplay codecs. See the DUR-03.2 brief for exact mapping/plan/
+checkpoint grammars and logical/physical resource bounds.
