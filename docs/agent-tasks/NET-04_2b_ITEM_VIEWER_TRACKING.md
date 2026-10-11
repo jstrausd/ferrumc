@@ -10,7 +10,9 @@ Sim-/App-/Storage-/Net-/Protokolländerungen und Rootboards sind readonly.
 Das vorhandene Routertracking betrifft Spieler, keine Item-Entities. Die
 neuen Pakettypen allein erzeugen weder sichtbare Drops noch automatische
 Aufnahme. Dieser Consumer erhält ausschließlich ausdrücklich veröffentlichte
-Itemfakten über die Bridge. Er hält keinen SimShard, EntityStore, Chunk oder
+Itemfakten über die Bridge. Der dafür fehlende Producer ist als separates
+[SIM-03.4-Ticket](SIM-03_4_ITEM_PUBLICATION_FACTS.md) konkret vorbereitet.
+Er hält keinen SimShard, EntityStore, Chunk oder
 DB-Handle und erzeugt keine dauerhafte Mutation oder Itemkopie im Inventar.
 
 Die bestehenden OwnershipIntents enthalten teils lokale Handles, keine

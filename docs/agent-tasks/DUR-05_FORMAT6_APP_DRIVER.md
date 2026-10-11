@@ -27,7 +27,11 @@ besitzen noch keinen entsprechenden autorisierten Consumer. **Vor vollständiger
 Appumschaltung** ist diese Simabhängigkeit in eigene Tickets aufzuteilen und
 zu implementieren. Blockplacement mit Inventarverbrauch verlangt zudem echte
 gemeinsame Player-/Chunkdurability; vorhandener Player+EntityCAS belegt das
-nicht. Legacyhandler dürfen die neue Ownerauthority nicht umgehen.
+nicht. Diese tatsächliche Storageabhängigkeit ist in
+[DUR-03.3](DUR-03_3_PLAYER_BLOCK_DURABILITY.md) vorbereitet, vor Runtime mit
+eigener Grammatik-/APIabnahme. Legacyhandler dürfen die neue Ownerauthority
+nicht umgehen. Sessionpublication benötigt zuerst den konkreten
+[SIM-03.4-Producer](SIM-03_4_ITEM_PUBLICATION_FACTS.md).
 
 ## Konkrete Driververträge
 
