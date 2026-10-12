@@ -257,8 +257,8 @@ Vertrag und Originalevidenz vor der Vergabe der Rust-Runtime.
 
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
-| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Vertrag und Originaloracle geliefert](agent-tasks/GEN-05_11_OVERWORLD_CARVERS.md), unabhängig in Prüfung. Canyon-Schrittgrenze auf 112 korrigiert und durch echte Originalmethoden bestätigt. Root-Intake: 427 Evidenzdateien und 1133 Input-Pins ohne Drift; das ist keine Vertrags- oder Runtimeabnahme. Reviewer `gen05_11_contract_review`; noch keine Runtimefreigabe. |
-| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Vorbereitung vergeben](agent-tasks/GEN-06_1_ORE_PLACEMENT_TASK.md) an `gen06_1_ore_preparation`: eigener Vertrag/Originalevidenz, Produktion readonly. Reihenfolge, Multichunk-Writes und RNG prüfen; Density-Erzadern aus GEN-05.4 bleiben ein anderer Produzent. |
+| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Review BLOCKING_CONTRACT](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVIEW.md): Originaloutputs unabhängig reproduziert, aber direkte Biomhistorie/Halo und kumulative Producerbudgets fehlen. [Zweite Vorbereitung beauftragt](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_TASK.md), Originalpfad verbindlich; keine Rust-Runtimefreigabe. |
+| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Vorbereitung geliefert](agent-tasks/GEN-06_1_ORE_PLACEMENT.md), unabhängiger Contract-/Oraclereview beauftragt. Inventar: 30 PlacedFeatures, 24 Konfigurationen und 25 Zielzustände; kontrollierte Originalproben sind keine whole-FEATURES-Abnahme. Density-Erzadern aus GEN-05.4 bleiben ein anderer Produzent. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
 
@@ -266,6 +266,16 @@ Die Direct-source-Biome des originalen Carver-Fix-ups und der vorgeschlagene
 Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
 Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
+
+Die drei aktuellen T3-Aufträge sind GEN-05.11 Vorbereitung Runde 2,
+GEN-06.1 unabhängiger Review und DUR-03.3 unabhängiger Storage-Review Runde 3.
+Der eingefrorene Storage-Kandidat Runde 6 zählt Block-Entities mit ihrer
+tatsächlichen Kodierlänge; Autorenchecks Debug/Release jeweils 354 grün.
+Root prüfte alle 91 Quelldateien bytegleich und stellte ein readonly Archiv
+des echten `c0b78c23` plus Kandidat bereit. Das ersetzt keine unabhängige
+Runtimeabnahme. Der neu dokumentierte R6-B2-Startup-Scan kann für große gültige
+Journale am Scanbudget scheitern; der Reviewer muss Grenze und Reopenwirkung
+bewerten. Storage bleibt bis zum Review unintegriert.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
