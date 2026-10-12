@@ -307,6 +307,9 @@ gepusht. Der CI-Lauf `38254637982` erreichte 3.067 von 3.070 Tests ohne gemeldet
 Testfehler und wurde am 30-Minuten-Joblimit abgebrochen. Das Joblimit wird auf
 60 Minuten erhöht; Tests, Debugprofil und anschließende Clientprüfungen bleiben
 vollständig erhalten. Dieser abgebrochene Lauf ist keine grüne CI-Abnahme.
+Der neue vollständige CI-Lauf `38260056240` auf `26d8bf8b` ist erfolgreich:
+Rust-, Java-, Daten-/Text- und alle unabhängigen Clientprüfungen sind grün.
+Der spätere Commit `b9f6335e` enthält ausschließlich Dokumentationsänderungen.
 
 [GEN-06.3](agent-tasks/GEN-06_3_ORE_ALGORITHM_ORACLE.md) hat einen eingefrorenen
 Originalchronologie-/Kernelvertragskandidaten geliefert: 101 kontrollierte Fälle
@@ -316,6 +319,15 @@ Root prüfte alle 3.878 Dateien/599.591.972 Bytes ohne Abweichung. Der
 prüft Instrumentierung, Schreib-/RNG-/Sectionreihenfolge und den vorgeschlagenen
 16-MiB-Regioncap. Besonders offen ist die Nutzbarkeit des unveränderten
 1-Mi-Arbeitsbudgets nach mindestens 914.945 Einheiten für Kopie und Validation.
+Der [Review Runde 1](agent-tasks/GEN-06_3_ORE_ALGORITHM_ORACLE_REVIEW.md) ist
+FINDINGS: CR63-B1 blockiert die Zusammensetzung im 1-Mi-Meter (Full30 benötigt
+mindestens 2.003.339/1.955.293 Einheiten; schon ein vollständiger Clayplan passt
+nicht). CR63-B2 zeigt eine akzeptierte wirksame Rechenmutation im Inverseprüfer;
+CR63-B3 zeigt nicht erkannte Branch-/Sphärenbitmutationen im Validator.
+Root hat alle 2.383 Reviewartefakte/2.773.901.576 Bytes frisch geprüft und
+verlangt die [Korrektur Revision 2](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION2_TASK.md)
+vor Runtime. Getrennte neue Compositionauthority und fehlerfeste Prüfwerkzeuge
+werden vorbereitet; vorhandene Primitive-/GEN-Limits bleiben unverändert.
 Noch keine Kernel-Runtimefreigabe oder Whole-FEATURES-Abnahme.
 
 [GEN-03.1](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_ORACLE.md) hat die
@@ -329,7 +341,7 @@ prüft Originalmethoden, vollständige IDs/Properties, Packing/Sentinels,
 Lifecyclegrenzen und neue Kapazitäts-/Workvorschläge. Diese Grenzen sind noch
 nicht angenommen. Statischer Registryproducer und Worldconsumer folgen als
 getrennte Runtimeaufträge nach Review. Die drei aktiven Children sind
-Carver-Runtime, Ore-Review und Blockstate-/Heightmap-Review; nur Carver schreibt
+Carver-Runtime, Ore-Korrektur und Blockstate-/Heightmap-Review; nur Carver schreibt
 produktive Worldquellen. Naturwelt-/Licht-/Appaktivierung bleibt offen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
