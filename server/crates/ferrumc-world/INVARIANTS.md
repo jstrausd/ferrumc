@@ -57,8 +57,61 @@
   `tests/fixtures/surface-rules-original-1.21.8` (unchanged 14 files) and
   `tests/fixtures/surface-rules-clay-1.21.8` (genuine `clay_bands_offset`
   values from the Root-authorized extended helper copy). Policy and malformed
-  tests never read original rows as expectations. No column driver, chunk
-  write, carver, feature or activation exists here.
+  tests never read original rows as expectations. The column driver is the
+  separate submodule below; no carver, feature or activation exists here.
+
+## Original overworld surface column driver
+
+- `surface_rules::column` is the only chunk writer of the SURFACE step and
+  writes only its own `SurfaceChunkBuffer`; it never touches a live `Chunk`,
+  neighbours, biomes, block entities, light or persistence.
+- `SeededSurfaceColumns::bind` derives the closed alphabet (policy D1) at bind
+  time from the GEN-05.4 material states (resolved through the material
+  producer from the settings' `default_block`/`default_fluid`), the template's
+  result states, the clay bands and the extension states (default block,
+  `snow_block`, `packed_ice`): 35 states for all three admitted settings. Air
+  is `air`/`cave_air`/`void_air` by name, fluid is the dense water/lava range,
+  the stone block is the default block's block; never solidity or fixture
+  flags. Reads outside `[-64, 319]` are `VOID_AIR`. Order: alphabet, bind
+  census (8320 Paper-basis noise slots + one per alphabet state), samplers,
+  retained-byte cap (measured 10816, cap 16 KiB).
+- `build_chunk` first marks the buffer `Empty`, then refuses, before any
+  column work: `InconsistentBinding` (seed, settings), `InconsistentMaterial`
+  (seed, settings, geometry `(-64, 384)` and complete arrays, chunk = resolver
+  centre), the GEN-05.9 session admission as `Rules(kind)`, and
+  `WorkBudgetExceeded` below `SURFACE_CHUNK_WORK` (policy D2). A defensive
+  failure inside the loop leaves the buffer `Empty`; only a completely driven
+  chunk is `Published` with its chunk, seed and settings (policy D3).
+- One fresh `SurfaceRuleSession` per chunk with
+  `SURFACE_RULE_OVERWORLD_CHUNK_WORK`; at most one `begin_column`, one uncached
+  minimum and 384 `evaluate` calls per column, so the session allowance cannot
+  be exceeded. Inputs are never cached across columns.
+- Column order `lx` outer, `lz` inner; `i4`/`i5` are the live height + 1
+  before/after the eroded prepass; the frozen postpass uses the stale `i4` and
+  `min_surface_level()`. Stone depth above resets only on air; the stone-below
+  search reads down to −65 (`VOID_AIR`); lava sets the water height. Only the
+  exact default block state is evaluated.
+- Every write lands inside `[-64, 319]` (others are dropped, the snow counter
+  still advances), sets the fluid flag for a fluid state and updates
+  `WORLD_SURFACE_WG` with the original `Heightmap.update` rule (raise on a
+  non-air write above the top, rescan on an air write exactly at the top).
+  The live heights are passed to every `evaluate`.
+- Eroded loops start at `min(floor, 319)`; the frozen loop runs from
+  `min(start, 320)` (320 reads `VOID_AIR`, review A4) down to
+  `max(min_surface, -64)`, one Paper `f32`-rounded draw per Y at most in Java
+  short-circuit order. A start above 320 is a defensive `Noise` refusal: those
+  iterations would draw above the build height.
+- The `PreliminarySurfaceCorners` input is caller-trusted (review A2): it must
+  be the GEN-05.3 corners of the material's chunk, seed and settings; the
+  driver cannot check them.
+- Work: `W_col = 1 + max(1155, 1159) + 1538 = 2698` driver units,
+  `R = 198,144 + 256 · W_col = 888,832`; the observed maximum on the fixture is
+  517 per column. The buffer holds exactly two boxes (measured 406592 bytes,
+  cap 448 KiB). `build_chunk` makes zero heap allocations (external probe).
+- `OCEAN_FLOOR_WG` and the post-processing order are not published (policy
+  D5). Original equality comes only from the unchanged
+  `tests/fixtures/surface-column-original-1.21.8` projection, checked against
+  its manifest digests before use.
 
 ## Borrowed stored-biome resolver
 

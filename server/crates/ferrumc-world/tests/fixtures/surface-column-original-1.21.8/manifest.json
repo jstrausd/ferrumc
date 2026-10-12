@@ -1,0 +1,60 @@
+{
+  "counts": {
+    "calls": 2318375,
+    "classes": {
+      "full": 70,
+      "refused:CentreOutsideDomain": 1,
+      "refused:InconsistentResolver(Source)": 1
+    },
+    "columns": 18432,
+    "eroded_writes": 139,
+    "frozen_writes": 9886,
+    "groups": 72,
+    "noise_rows": 2602,
+    "rule_writes": 1228568,
+    "vanilla_groups_with_final_difference": 25
+  },
+  "files": {
+    "biomes.tsv": "c5f417422d97558a115dad534688d33e61c7bd1950b66d3cce6bfd785e9af1b3",
+    "chunks.tsv": "5dfe33be775e7e49a0f3c7f8f79863bb17ec29be297b6a0bf755340fa92430aa",
+    "columns.tsv": "58ee33337a050ffe1e2230b803a531485e27b53db033deab30261f86585b7b55",
+    "groups.tsv": "d5d4392cc91d1f75c683079be8f630e506b746c8eeb62c28100e0c1c71828131",
+    "noises.tsv": "2ff5208fdfa5b8e95e6d0367c946c9c1b959ea24403ef22866394673cb2ef13f",
+    "states.tsv": "fa69b2bc79af611770c9fe5bd87bdcd3bdd70a587ad4e888d553d685b67f68cd",
+    "vanilla.tsv": "e8cf7aeee3b08c6b211f2e58174f1d666d572bf683df84c053c93f90a684ad6b"
+  },
+  "generator_sha256": "4239c9688ea7fc8b0ea461fb8ab8bdb8ad621584b6c1993666c60ccabd07d66f",
+  "labels": {
+    "derived": "class (policy table), eroded_writes/frozen_writes (genuine snapshot differences), digests",
+    "differential": "every cell is copied from genuine original output"
+  },
+  "policy_table": {
+    "centre_domain": [
+      -1874999,
+      1874998
+    ],
+    "order": "resolver source (P6) before centre domain",
+    "p4_domains": {
+      "stone": [
+        1,
+        4096
+      ],
+      "y": [
+        -64,
+        319
+      ]
+    },
+    "resolver_source_presets": [
+      "normal",
+      "large_biomes",
+      "amplified"
+    ]
+  },
+  "raw_manifest_sha256": "ddfb7e28f52038ba6ebef7172fed20b929811f3eca8e071dc760851e271c0fcf",
+  "replay": {
+    "full": "Drive the whole chunk from the GEN-05.4 material (must equal s0_columns_rle), the GEN-05.5 arrays (digests), the GEN-05.8 resolver and the GEN-05.3 corners; compare final_states_sha256, final_world_surface_wg, the fluid marks as the set of final_post_processing positions, and the cfg(test) per-column trace (biome, height_plus_1, eroded_writes, first_call_height_plus_1, surface_depth, every call input and outcome, steep call/result/heights, min_surface, frozen_writes) exactly",
+    "refused": "Expect exactly the typed refusal named by the class, an Empty output buffer and no publication; never compare original values of the group",
+    "vanilla": "Never an expectation; discriminating control for bit comparisons only"
+  },
+  "scope": "GEN-05.10 compact mechanical projection of genuine original SURFACE runs; Paper cells are the column-driver expectations, Vanilla cells are discriminating evidence only"
+}

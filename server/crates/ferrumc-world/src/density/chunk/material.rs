@@ -6,6 +6,7 @@ use super::{
     bytes, charge, fail, ChunkMaterialSamples, NoiseChunkError, NoiseChunkErrorKind,
     NoiseChunkLimit, NoiseChunkSession,
 };
+use crate::sample_work::SampleWork;
 use crate::BlockStateId;
 
 mod aquifer;
@@ -16,6 +17,37 @@ use aquifer::Aquifer;
 use blocks::MaterialBlocks;
 
 const HALO_LIMIT: i32 = 30_000_128;
+/// States of the closed GEN-05.4 material alphabet ([`material_alphabet`]).
+pub(crate) const MATERIAL_ALPHABET_STATES: usize = 10;
+/// Separate allowance of one alphabet resolution: two bounded definition
+/// resolutions (each at most 4096 bytes plus its JSON nodes) and ten lookups.
+const MATERIAL_ALPHABET_WORK: usize = 16_384;
+
+/// The closed set of states a GEN-05.4 material run can write, resolved through
+/// the same `MaterialBlocks` as [`MaterialRun::new`] from a settings
+/// `default_block` and `default_fluid` definition: `[default_block,
+/// default_fluid, air, lava, copper_ore, raw_copper_block, granite,
+/// deepslate_iron_ore, raw_iron_block, tuff]`. Read-only consumer path for the
+/// GEN-05.10 column driver; material sampling is unchanged.
+pub(crate) fn material_alphabet(
+    default_block: &str,
+    default_fluid: &str,
+) -> Result<[BlockStateId; MATERIAL_ALPHABET_STATES], NoiseChunkError> {
+    let mut work = SampleWork::new(MATERIAL_ALPHABET_WORK);
+    let blocks = MaterialBlocks::new(default_block, default_fluid, &mut work)?;
+    Ok([
+        blocks.default_block,
+        blocks.default_fluid,
+        blocks.air,
+        blocks.lava,
+        blocks.copper,
+        blocks.raw_copper,
+        blocks.granite,
+        blocks.iron,
+        blocks.raw_iron,
+        blocks.tuff,
+    ])
+}
 
 pub(super) struct MaterialRun {
     pub states: Vec<BlockStateId>,

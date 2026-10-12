@@ -11,14 +11,16 @@
 //! ([`SeededSurfaceRules`]) and evaluates one block position at a time against
 //! an explicit per-chunk, per-column and per-block context
 //! ([`SurfaceRuleSession`]). The column driver that produces stone depths,
-//! water heights and the heights view, and that writes blocks into chunks, is a
-//! separate later consumer. Nothing here generates, installs, persists or
-//! activates terrain.
+//! water heights and the heights view, and that writes one chunk's surface into
+//! a caller-owned buffer, is the GEN-05.10 submodule `column`
+//! ([`SeededSurfaceColumns`]). Nothing here installs, persists or activates
+//! terrain.
 //!
 //! Every lookup refusal is typed ([`SurfaceRuleErrorKind`]); there is no default
 //! block, Plains, nearest-chunk or fallback-temperature substitution.
 
 mod bind;
+mod column;
 mod compile;
 mod error;
 mod session;
@@ -26,6 +28,16 @@ mod session;
 use ferrumc_math::{BlockPos, ChunkPos};
 
 pub use bind::SeededSurfaceRules;
+pub use column::{
+    BindingMismatch, MaterialMismatch, SeededSurfaceColumns, SurfaceChunkBuffer, SurfaceChunkInput,
+    SurfaceChunkReport, SurfaceColumnBindBudget, SurfaceColumnError, SurfaceColumnErrorKind,
+    SurfaceColumnLimit, SurfaceColumnRefusalCategory, SurfaceColumnWorkBudget,
+    MAX_SURFACE_CHUNK_BUFFER_BYTES, MAX_SURFACE_COLUMN_ALPHABET, MAX_SURFACE_COLUMN_BINDING_BYTES,
+    MAX_SURFACE_COLUMN_BIND_WORK, MAX_SURFACE_COLUMN_WORK, SURFACE_CHUNK_FIXED_WORK,
+    SURFACE_CHUNK_FLUID_WORDS, SURFACE_CHUNK_STATES, SURFACE_CHUNK_WORK, SURFACE_COLUMN_BIOME_WORK,
+    SURFACE_COLUMN_ERODED_WORK, SURFACE_COLUMN_FROZEN_WORK, SURFACE_COLUMN_LOOP_WORK,
+    SURFACE_COLUMN_NOISE_BIND_WORK, SURFACE_COLUMN_WORK,
+};
 pub use compile::SurfaceRuleTemplate;
 pub use error::{
     ResolverMismatch, SurfaceRuleError, SurfaceRuleErrorKind, SurfaceRuleLimit,
@@ -231,8 +243,8 @@ impl SurfaceColumnPos {
 /// The four original preliminary surface levels of the centre surface cell.
 ///
 /// They are `NoiseChunk.preliminarySurfaceLevel` at block `(16cx, 16cz)`,
-/// `(16cx+16, 16cz)`, `(16cx, 16cz+16)` and `(16cx+16, 16cz+16)`, produced by
-/// the column driver through GEN-05.3. Every `i32` is admitted, including
+/// `(16cx+16, 16cz)`, `(16cx, 16cz+16)` and `(16cx+16, 16cz+16)`, produced
+/// through GEN-05.3 by the column driver's caller. Every `i32` is admitted, including
 /// `i32::MAX` ("no surface").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreliminarySurfaceCorners([i32; 4]);
@@ -275,6 +287,10 @@ impl WorldSurfaceHeights {
     }
     const fn at(&self, local_x: usize, local_z: usize) -> i32 {
         self.0[local_x][local_z]
+    }
+    /// Live update by the column driver (`Heightmap.update` result).
+    const fn set(&mut self, local_x: usize, local_z: usize, height: i32) {
+        self.0[local_x][local_z] = height;
     }
 }
 

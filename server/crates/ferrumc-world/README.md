@@ -308,8 +308,34 @@ the frozen original helper, runner, guards, projection and fixture generator,
 the Root-authorized clay extension (A5) and the allocation runner. Tests
 replay all 38,889 fixture rows under the declared `full`/`partial`/`refused`
 classes with 720 actual GEN-05.5 arrays. The column driver (stone depth, water
-height, bandlands/iceberg extras and block writes) is a separate ticket; no
-surface is generated or activated, and no performance claim is made.
+height, bandlands/iceberg extras and block writes) is the GEN-05.10 submodule
+below; no surface is activated, and no performance claim is made.
+
+## Original overworld surface column driver
+
+`surface_rules::column` (re-exported from `surface_rules`) is the original
+`SurfaceSystem.buildSurface` of the overworld SURFACE step for one centre
+chunk. `SeededSurfaceColumns::bind` derives, from a `SeededSurfaceRules`
+binding, the six extension noises (`badlands_*`, `iceberg_*`, Paper basis) and
+the closed 35-state alphabet (GEN-05.4 material states, rule results, clay
+bands, `snow_block`, `packed_ice`), classified by block name.
+`build_chunk` copies the GEN-05.4 material into a caller-owned
+`SurfaceChunkBuffer`, visits the columns in the original order with one fresh
+GEN-05.9 session per chunk, runs the eroded-badlands prepass and the
+frozen-ocean postpass with the original randoms, keeps `WORLD_SURFACE_WG` live
+for every `evaluate` and publishes all or nothing (states, heights, fluid
+flags). It refuses inconsistent bindings and materials, the session's resolver
+checks and a driver allowance below `SURFACE_CHUNK_WORK` before any column
+work, and does not allocate. The preliminary corners are caller-trusted.
+
+The [column reference](tests/reference/surface-column/README.md) holds the
+frozen GEN-05.10 helper, runner, guards, projection and fixture generator and
+the allocation runner. Tests replay all 70 admitted fixture chunks (17,920
+columns, 2,261,637 rule calls) from the genuine producers against the
+projected original trace, final digest, heights and fluid marks; the two
+refused groups expect only their typed producer or session refusal.
+`OCEAN_FLOOR_WG`, carvers, features, lighting, persistence and activation are
+out of scope; no performance claim is made.
 
 ## Invariants
 

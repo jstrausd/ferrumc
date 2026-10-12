@@ -20,6 +20,8 @@ mod fill;
 mod material;
 mod state;
 
+// GEN-05.10 derives its closed state alphabet from the material producer.
+pub(crate) use material::{material_alphabet, MATERIAL_ALPHABET_STATES};
 use state::{ChunkState, Lifecycle};
 
 /// Largest aggregate allowance for construction and all queries until reset.
@@ -236,6 +238,23 @@ impl ChunkMaterialSamples {
         let index = output_index(self.chunk, self.geometry, pos)?;
         let word = self.fluid_updates.get(index / 64)?;
         Some(word & (1_u64 << (index % 64)) != 0)
+    }
+}
+
+/// GEN-05.10 column-driver controls (test-only): a copy with replaced states,
+/// so driver tests can reach `MaterialMismatch::Geometry` and states outside
+/// the closed alphabet without a fabricated producer.
+#[cfg(test)]
+impl ChunkMaterialSamples {
+    pub(crate) fn with_states(&self, states: Box<[BlockStateId]>) -> Self {
+        Self {
+            seed: self.seed,
+            resource: self.resource,
+            chunk: self.chunk,
+            geometry: self.geometry,
+            states,
+            fluid_updates: self.fluid_updates.clone(),
+        }
     }
 }
 

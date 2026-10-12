@@ -233,7 +233,16 @@ Als nächster Worldschritt ist der SurfaceSystem-Columndriver GEN-05.10 in Runde
 unabhängig CLEAN_CONTRACT: echtes `buildSurface` mit und ohne aufzeichnenden
 Proxy in 72/72 Gruppen gleich, alle 51 Overworld-Oberflächenbiome, Icebergs und
 Badlands-Pfeiler. Die Runtime ist mit den Policies D1–D5 und den Auflagen A1–A6
-sowie RR-H1/RR-H2 [freigegeben](agent-tasks/GEN-05_10_SURFACE_COLUMN_DRIVER_RUNTIME_TASK.md).
+sowie RR-H1/RR-H2 [freigegeben](agent-tasks/GEN-05_10_SURFACE_COLUMN_DRIVER_RUNTIME_TASK.md)
+und nach der ersten Reviewrunde unabhängig CLEAN_RUNTIME integriert: Untermodul
+`surface_rules::column` mit `build_chunk`, eine frische GEN-05.9-Session je
+Chunk, Alles-oder-nichts-Veröffentlichung in einen wiederverwendbaren Puffer.
+Der Replay trifft 70 Gruppen, 17.920 Spalten und 2.261.637 Aufrufe exakt;
+`build_chunk` allokiert in Debug und Release nicht. Wegen A4 hat der Root
+`W_col` 2698 und `R` 888.832 angenommen (vorher 2697 und 888.576; Draws bleiben
+≤ 384). World Debug/Release je 383 und alle Worldverbraucher 1489 grün;
+Testlückenhinweise RR10-H1–H5 gehen an das nächste Worldticket.
+[Runtimeabnahme](agent-tasks/GEN-05_10_SURFACE_COLUMN_DRIVER_RUNTIME_REVIEW.md).
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
