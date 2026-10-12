@@ -457,6 +457,18 @@ Pfad ist wegen EINTR-Normalisierung ausgeschlossen; kein lokales unsafe oder
 Runtimeabhängigkeit. Adapter-, IO-, Plattform- und vollständige Registrychecks
 sind noch nicht abgenommen. Die originalen Byte-/Worklimits bleiben bestehen.
 
+GEN-03.1a [Round2-Lieferung](agent-tasks/GEN-03_1a_REGISTRY_STATE_FACTS_RUNTIME_ROUND2_DELIVERY.md)
+enthält den konkreten Registryproducer und geprüften consuming Closeadapter.
+Autorenchecks Registry Debug/Release72+14rustdoc, Producer22 je Profil und
+strikte Checks sind grün. G31A-OPEN-1 bleibt offen: std Unix open64 wiederholt
+EINTR intern; beide Producerprofile zeigen17 injizierte EINTR plus EIO als18
+native Versuche. Root hat den ganzen3745-Entry-/3075-Regular-/1.352.274.403-B-
+Freeze geprüft und alle66 Registryquellen plus Lock/Delivery readonly gesichert.
+Der neue [Round3-Korrekturauftrag](agent-tasks/GEN-03_1a_REGISTRY_ONE_SHOT_OPEN_CORRECTION_TASK.md)
+autorisiert ausschließlich nix0.31.3s Build-only-fs-Feature für eine sichere
+einmalige Unix-Dateiöffnung. Keine Budgeterhöhung oder Runtimeabnahme; Windows,
+native Attribution und unabhängiger Runtimereview bleiben offen.
+
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
 DUR-03.2 als `b9f15db8` integriert. Debug/Release jeweils347 Prüfungen und alle
