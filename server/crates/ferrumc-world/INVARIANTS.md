@@ -2,6 +2,64 @@
 
 > Rules that must hold for all code in this crate. Violating these is a bug.
 
+## Original overworld surface rules
+
+- `SurfaceRuleTemplate::compile_builtin` admits only `minecraft:overworld`,
+  `minecraft:large_biomes` and `minecraft:amplified` (FerrumC policy P3) with
+  `legacy_random_source = false`. It parses the pinned Registry settings export
+  once with the single checked definition JSON admission (128 KiB, 4096 nodes,
+  depth 32, 256 entries, 256 string bytes) and the density compiler's original
+  `Codec.DOUBLE`/Gson INT token decoding. There is no hand transcription.
+  The compiled table keeps the original preorder (a single-child `sequence`
+  keeps its node). Block, biome and noise identities stay distinct checked
+  types; quart and wire IDs never appear.
+- Refusal order: the census allowance (`bytes + JSON nodes + 428 + 202`), the
+  settings admission, source limits, JSON admission, settings fields, codec
+  shape, references (blocks, biomes, noises, random names), census caps, the
+  pinned tree census and the retained-byte cap. Unknown fields and lenient
+  block properties are refused (FerrumC admission policy). Failure publishes
+  nothing.
+- Every `vertical_gradient` named `minecraft:bedrock_floor`/`bedrock_roof`
+  compiles to `paper_optionally_flat_bedrock` (Paper's pinned resource patch).
+  Only `PaperFlatBedrock::Disabled` is admitted (P2), so it evaluates exactly as
+  the gradient. The projection before/after the substitution must equal the
+  committed `tree.tsv`/`tree-paper.tsv`.
+- `SeededSurfaceRules::bind` refuses `SurfaceNumericProfile::Vanilla` (P1),
+  then `PaperFlatBedrock::Enabled` (P2), then the bind census, before any
+  sampler exists. The binding is a second consumer of the Paper build 60 basis
+  next to the NoiseChunk session: its nine `NormalNoise` samplers are converted
+  with the crate-private `paper_build60_basis`, and the column draw is
+  `f64::from(next_double() as f32)`.
+- `SurfaceRuleSession::new` refuses resolver mismatches in the order seed,
+  settings, source (P6: `MultiNoise(minecraft:overworld)` only), geometry (the
+  settings' `noise.min_y/height`, i.e. the assumed level height `(-64, 384)`),
+  zoom semantics (P6: Paper only). `Poisoned` is the first check of every
+  fallible session method; `work_used` stays infallible.
+- `begin_column` costs 2 units, the column minimum 1 unit once, and `evaluate`
+  is admitted only with `467 + m` remaining (m = 1 iff the minimum is uncached).
+  P4 (`y` in `[-64, 319]`, stone depths `1..=4096`, water `≠ Some(i32::MIN)`)
+  is checked before work. Every refusal happens before any mutation; only a
+  defensive biome/temperature/noise/structure failure poisons. After
+  `WorkBudgetExceeded` the column is re-evaluated from its first block in a new
+  session; no half cache crosses sessions.
+- Per-column caches (threshold nodes, steep with the four heights it read,
+  hole, secondary, minimum surface) are reset only by `begin_column`; per-block
+  state (biome memo, temperature, lazily computed per-block nodes) only by an
+  admitted `evaluate`. The heights view counts only at the column's first
+  admitted steep test. Evaluation uses an explicit stack of depth ≤ 32, no
+  recursion and no heap; Java `int` wrapping and the Java `%` band index are
+  kept, a negative index is a defensive failure.
+- Caps: 512 nodes, depth 32, 64 sequence children, 256 biome references, 16 per
+  condition, 16 noises, 8 random names, 128 states; measured retained bytes:
+  template 6622 (cap 16 KiB), binding 19216 (cap 32 KiB), session 400 (cap
+  4 KiB). A cap change is a Root decision.
+- Original equality comes only from the committed mechanical projections
+  `tests/fixtures/surface-rules-original-1.21.8` (unchanged 14 files) and
+  `tests/fixtures/surface-rules-clay-1.21.8` (genuine `clay_bands_offset`
+  values from the Root-authorized extended helper copy). Policy and malformed
+  tests never read original rows as expectations. No column driver, chunk
+  write, carver, feature or activation exists here.
+
 ## Borrowed stored-biome resolver
 
 - `StoredBiomeNeighborhood` borrows 1..=9 complete sealed GEN-05.5
@@ -455,6 +513,8 @@
 - Public scalar/noise/Climate consumers retain Vanilla reference behavior.
   Only this Paper Build60 session privately copies Improved offsets through f32
   with unchanged permutations/draw order, and uses the widened i64 End radius.
+  The GEN-05.9 surface-rule binding (`SeededSurfaceRules`) is the second
+  consumer of the same crate-private Paper basis; nothing else uses it.
   No random streams are sampled during runtime density evaluation.
 - Original seed/mapAll/wrap chronology, record-equality partition, actual
   identity-bearing holder/noise/spline-array keys and mutable registration order

@@ -19,6 +19,7 @@ use serde_json::Value;
 
 mod admission;
 mod allocation;
+mod halo_order;
 mod oracle;
 
 const MANIFEST: &str =

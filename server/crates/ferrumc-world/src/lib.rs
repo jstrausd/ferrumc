@@ -30,6 +30,9 @@
 //! - [`stored_biome`] — borrowed complete 3×3 stored-biome neighborhoods with
 //!   the original quart lookup and the existing zoom selector; no generation,
 //!   surface rule, fallback biome or chunk installation.
+//! - [`surface_rules`] — the compiled original overworld surface-rule tree, its
+//!   Paper build 60 seed binding and the evaluation of one block position
+//!   against an explicit context; no column driver, chunk write or activation.
 //!
 //! The network encoder turns a [`Chunk`] into the wire bytes a 1.21.8 client
 //! expects: [`encode_chunk_section_data`] for the paletted section blob,
@@ -58,6 +61,7 @@ pub mod random;
 mod sample_work;
 pub mod spline;
 pub mod stored_biome;
+pub mod surface_rules;
 
 pub use block_entity::{
     is_chest_state, sign_kind_for_state, BlockEntity, ChestInventory, Sign, SignFace, SignKind,

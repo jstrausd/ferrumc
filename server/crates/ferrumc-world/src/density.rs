@@ -14,10 +14,14 @@ mod seeded;
 
 // GEN-05.8 stored lookup reuses the single accepted chunk-domain predicate.
 pub(crate) use chunk::admit_chunk;
+// GEN-05.9 surface rules reuse the single checked definition JSON admission and
+// this compiler's original Codec.DOUBLE / Gson INT token decoding.
 pub use chunk::{
     ChunkDensitySamples, ChunkMaterialSamples, NoiseChunkError, NoiseChunkErrorKind,
     NoiseChunkLimit, NoiseChunkSession, NoiseChunkWorkBudget, MAX_NOISE_CHUNK_WORK,
 };
+pub(crate) use compile::{integer as decode_int, number as decode_double};
+pub(crate) use json::{parse as parse_definition, Value as JsonValue, ValueKind as JsonValueKind};
 
 pub use seeded::{
     ClimateAxis, ClimateQuartPos, ClimateSample, DensityBatchBudget, DensityBindError,

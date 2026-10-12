@@ -1,0 +1,77 @@
+{
+  "counts": {
+    "biomes": 42,
+    "columns": 2619,
+    "groups": 80,
+    "kept_only_by_invalid_flat_picker": 2390,
+    "kept_rows": 38891,
+    "patterns": 243,
+    "raw_paper_rows": 765138,
+    "refused_by_tier_kind_case": {
+      "C/BlockOutsideGenerationHeight/end": 2016,
+      "C/BlockOutsideGenerationHeight/gradient": 43,
+      "C/InvalidStoneDepth/extreme": 6
+    },
+    "replay": {
+      "C/full": 5478,
+      "C/partial": 24626,
+      "C/partial_complete_prefix_with_refused_row": 2,
+      "C/refused": 2065,
+      "G/full": 2490,
+      "G/partial": 4230
+    },
+    "states": 29,
+    "steep_probe_groups": 3
+  },
+  "files": {
+    "arrays.tsv": "692a1883039b8ed407cfef7df1a5461b3a7a00d52518df2f11b06b5336bc3a1a",
+    "bands.tsv": "56e60143f39bc1e4eb583782784c7454d1b9b25f757a65fb4fd00797c38fa496",
+    "biomes.tsv": "ddff31ca1ce85cac52fa2131b0c1b70994b42daf6a83073956b2e6ebc45b6cfc",
+    "columns.tsv": "75cf8a009d18abe539ae638f83dbf2cc1e5d60e0efc90ca9009edfd21af7974a",
+    "groups.tsv": "0ecb503b749bb76e15a762e88888181e655c9c98bd48953554d9c8e675d222d7",
+    "paper-tree-substitution.json": "612fda92e9a4dba066d0c1434d204dfbacf99205ad2040fa6c41515c669f648c",
+    "patterns.tsv": "11a99428fdb87f4c51959f72b6b59e9f6d031be645a2b9f1f7467bf5b52141aa",
+    "replay.tsv": "da13c5469d68a81bda2f4c95c41d28e07caedb345d7300ddd484a0ef698db79f",
+    "rows.tsv": "0e3b106379c62d72a3e2b946289bd0fd193b9d90ca41d61d0f2ce60453b55b54",
+    "states.tsv": "5e632211d481698665064c4074c846500fed96c87f24f8bcded0b2386f40e994",
+    "steep-heights.tsv": "f0965ec18bb33d7627043e82146332b4e80edb19596980432cbb4fe103ad9cab",
+    "tree-paper.tsv": "7958cea8bc7427f527376527546406c59253b9385156ee88d69cff9024c240ac",
+    "tree.tsv": "13b2ad5732ff0188ba6028ebe8714618899f53b72361c0925636047625d7edaa"
+  },
+  "invalid_evidence": {
+    "paper_flat_bedrock": "ungültig, nicht maßgeblich (fabrizierter Kontext, Review B1): raw paper/rows.tsv column paper_flat_bedrock, paper/counts.tsv paper_flat_compared/paper_flat_differ and manifest report paper_flat_bedrock_true_vs_default were evaluated on a generateFlatBedrock=true context that never received updateXZ; they are not original outcomes for the stated position and are not projected here"
+  },
+  "p4_refusal_order": [
+    "BlockOutsideGenerationHeight (y outside [-64, 319])",
+    "InvalidStoneDepth (stone depth above outside 1..=4096, then below)",
+    "InvalidWaterHeight (Some(i32::MIN); unreachable from the fixture, whose water None is the original i32::MIN)"
+  ],
+  "paper_tree": "tree-paper.tsv is the Paper JAR tree (Paper data form); tree.tsv is the Vanilla JAR = bootstrap = FerrumC registry form; they differ exactly by paper-tree-substitution.json (node 2)",
+  "raw_sha256": {
+    "paper/arrays.tsv": "b9bfc8bc8d1fd151cdcf8717ced4b9395617c06235e62f842312c1c61145f24f",
+    "paper/groups.tsv": "f0cf40d0fb36d61c3b5650101a3b8dd495683a91a42623fd88141bf2ab4ce351",
+    "paper/rows.tsv": "ef85672c3cc550a9c24fdefc861a713ddd3dbc303fa5899d8161eb67aca6b394",
+    "paper/tree-jar.tsv": "53aa8238e9b0419b7e9ff13dfef344d151338b887808c0c6bb91423eef55c729",
+    "projection/paper-tree-substitution.json": "612fda92e9a4dba066d0c1434d204dfbacf99205ad2040fa6c41515c669f648c",
+    "projection/tree.tsv": "13b2ad5732ff0188ba6028ebe8714618899f53b72361c0925636047625d7edaa",
+    "vanilla/arrays.tsv": "1bd221c2004fffcaa4dae7fc2781c0524d7b6ad845d429d4de10a9d30850fafe",
+    "vanilla/groups.tsv": "073ce8ca47d142c9fbbadc01171efb0fbeadf0edec1013d5c1010e6ac648a77b",
+    "vanilla/rows.tsv": "57b66d8bd5c3cd7d0cab1fe724cb29b1e90fbec775687a6bb4c18df63c79152f"
+  },
+  "replay": {
+    "full": "every raw ordinal from run_start to this row is a fixture row and none of them is refused (the whole run prefix is admitted). Replay: begin_column at run_start, evaluate the run rows in ordinal order; result, surface depth, complete computed trace with sampler bits, singletons, steep heights, min surface, secondary and column cell must equal (original equality)",
+    "heights": "final = groups.tsv final_world_surface_wg (centre chunk after genuine buildSurface; controlled rows never write); steep-probe = steep-heights.tsv for that gid (synthetic stone chunk of the steep probe, copied from the y of the raw steep/lx,lz/top rows). validate re-checks every recorded steep_heights cell against the declared view",
+    "partial": "admitted row whose run prefix is incomplete or contains a refused row (the original filled per-column caches there with inputs the runtime refuses). Replay this row alone after begin_column; only result, surface depth, biome and the computed entries whose tree kind is per block (biome, vertical_gradient, paper_optionally_flat_bedrock, y_above, water, stone_depth) plus the temperature singleton must equal. Per-column entries (noise_threshold with noise bits, steep, hole, above, steep heights, min surface, secondary, column cell) are evidence only, because an earlier call outside the fixture may have filled those caches in the original",
+    "refused": "row outside the P4 admission domains. Replay this row alone after begin_column; evaluate must return exactly the refusal kind in column refusal (first failing check in the order y, stone depth above, stone depth below, water), with no partial result and no state change: work_used, the active column and every per-column cache stay as before the call. No original value of the row is an expectation; all of them stay evidence of the original outside the policy domains",
+    "run": "raw rows from one original updateXZ to the next on the recording context: starts at the raw row whose column_surface_noise_and_draw cell is set (fixture column != -), continues over consecutive raw ordinals with equal tier, group, update_xz, ctx_x and ctx_z"
+  },
+  "round": 3,
+  "scope": "Compact mechanical projection of genuine GEN-05.9 original outcomes (round 3); Paper rows are the production expectations for PaperFlatBedrock::Disabled only, Vanilla cells are discriminating evidence only; no expectation formula; no flat-bedrock expectation exists; rows outside the P4 policy domains expect the typed refusal only (replay class refused)",
+  "selection": {
+    "always": "diagnostic rows; Vanilla result/surface-depth/biome differences; end/steep/extreme/holecolumn controlled rows; genuine hole-column G rows; rows whose invalid round-1 flat cell differs (row picker only, kept for byte stability; their flat cell is not projected)",
+    "coverage_per_node_outcome": 32,
+    "sample_hash_first_byte_below": 8
+  },
+  "source_manifest_sha256": "15e4dbff186d8845143f72a0873f28bd35a87cbff4063dfe2e01d1e222969073",
+  "validate_invariants": "every kept G/C row: raw exception none, cross_trees \"=\" (C) or \"-\" (G, not cross-evaluated), biome_memo \"-\" or equal to biome_direct; every recorded Paper steep_heights cell equals the declared heights view"
+}

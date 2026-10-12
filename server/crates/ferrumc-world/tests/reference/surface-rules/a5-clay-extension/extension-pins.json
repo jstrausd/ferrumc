@@ -1,0 +1,11 @@
+{
+  "extended_helper_sha256": "69ac075032c8deac57ed3e0d106c5d4da374f05d2afde70ef650e4a8639f1696",
+  "frozen_helper_sha256": "eff09a3de94af1f76c9f470f94968b583185f51763ebfca4dc135d3057e189e5",
+  "frozen_input_pins_sha256": "fdfb8b2492053dc6544473f1493591e5a5c20234d81d31a61b19fb7c41ee67cf",
+  "runner_copies_sha256": {
+    "check_guards.py": "0065c6921df546e54d090ab3c399e3a8c3c62aa648b8676145acd531a530256a",
+    "project_originals.py": "3f4fff06417990be7b28af9338064a75df627319e9a7b566e02f968677a895a1",
+    "run_oracle.py": "8d898d68abcd41600b8593db1ed284fdbc8fa646d56e70971f9dee32cffd24bf"
+  },
+  "scope": "GEN-05.9 runtime A5: extended copy of the frozen original helper that additionally records genuine SurfaceSystem.clayBandsOffsetNoise.getValue(x, 0, z) in every observed genuine column; all other inputs are the frozen GEN-05.9 pins under .codex-tmp/gen05_9 (read-only)"
+}

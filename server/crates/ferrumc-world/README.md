@@ -290,6 +290,27 @@ all129588 genuine original labelled cases per mode, direct/fixed constructor
 and complete Frozen-grid evidence, explicit Vanilla cache/Paper offset
 differences, parser boundary tests and external allocation measurements.
 
+## Original overworld surface rules
+
+`surface_rules` compiles the original overworld `surface_rule` of the pinned
+Registry export (428 nodes; `large_biomes` and `amplified` are identical) into
+an immutable `SurfaceRuleTemplate` and binds it per seed as
+`SeededSurfaceRules`: Paper build 60 numerics only (the second consumer of the
+Paper `ImprovedNoise` basis next to the `NoiseChunk` session), Paper zoom
+semantics through the GEN-05.8 resolver and the Paper default flat-bedrock
+mode. `SurfaceRuleSession` evaluates one default-block position at a time
+against explicit corners, column, block inputs and a borrowed heights view,
+with typed refusals for policy domains, budgets and mismatched resolvers.
+Session calls do not allocate.
+
+The [surface-rule reference](tests/reference/surface-rules/README.md) holds
+the frozen original helper, runner, guards, projection and fixture generator,
+the Root-authorized clay extension (A5) and the allocation runner. Tests
+replay all 38,889 fixture rows under the declared `full`/`partial`/`refused`
+classes with 720 actual GEN-05.5 arrays. The column driver (stone depth, water
+height, bandlands/iceberg extras and block writes) is a separate ticket; no
+surface is generated or activated, and no performance claim is made.
+
 ## Invariants
 
 See `INVARIANTS.md` in this directory.

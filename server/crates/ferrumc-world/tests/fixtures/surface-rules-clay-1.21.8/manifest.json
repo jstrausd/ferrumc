@@ -1,0 +1,20 @@
+{
+  "column_set": "distinct (group, ctx_x, ctx_z) of the Paper G/C rows of the frozen round-2 raw paper/rows.tsv whose biome_direct is one of minecraft:badlands, minecraft:eroded_badlands, minecraft:wooded_badlands",
+  "counts": {
+    "columns": 3393,
+    "genuine_paper_vanilla_bits_differ": 3393
+  },
+  "extended_run_manifest_sha256": "8c0c30e74a9e06d3e361981111a7af40504488f34783d14d8c7b2e9ee20c6faa",
+  "files": {
+    "clay.tsv": "4c95743bfaad3cb73ba6d67414b670c9dfddf9544cf86158aecf2f1b43897a60"
+  },
+  "frozen_raw_manifest_sha256": "15e4dbff186d8845143f72a0873f28bd35a87cbff4063dfe2e01d1e222969073",
+  "pass_criterion": "every listed column: runtime Paper-basis clay_bands_offset.sample(x, 0, z) f64 bits == paper bits (genuine Paper SurfaceSystem.clayBandsOffsetNoise.getValue) and runtime Vanilla-basis bits == vanilla bits (genuine Vanilla value, control); any deviation means A5 is not met",
+  "raw_sha256": {
+    "extended/paper/clay.tsv": "9ca939a4913ebd3fa013595f0e054bf39360c77b5cb881158eca2920ead152c3",
+    "extended/vanilla/clay.tsv": "56c43547e1bee093be768ae1810a320d072dda6befcbc75186ad3ecee40a2f6c",
+    "frozen/paper/groups.tsv": "f0cf40d0fb36d61c3b5650101a3b8dd495683a91a42623fd88141bf2ab4ce351",
+    "frozen/paper/rows.tsv": "ef85672c3cc550a9c24fdefc861a713ddd3dbc303fa5899d8161eb67aca6b394"
+  },
+  "scope": "GEN-05.9 runtime A5: genuine Paper and Vanilla SurfaceSystem.clayBandsOffsetNoise.getValue(x, 0.0, z) recorded by the extended copy of the frozen original helper in every observed genuine column; mechanical projection only, no expectation formula"
+}

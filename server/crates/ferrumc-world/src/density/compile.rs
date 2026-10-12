@@ -888,7 +888,7 @@ fn array<'a, 'b>(
         Err(error(resource, field, Kind::WrongShape))
     }
 }
-fn number(
+pub(crate) fn number(
     value: &Value<'_>,
     resource: &'static str,
     field: &'static str,
@@ -922,7 +922,7 @@ fn float(
     }
     Ok(value)
 }
-fn integer(
+pub(crate) fn integer(
     value: &Value<'_>,
     resource: &'static str,
     field: &'static str,

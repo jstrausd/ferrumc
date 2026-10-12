@@ -1,0 +1,78 @@
+--- runner-orig/run_oracle.py	2026-10-11 23:54:31.072938812 +0200
++++ runner/run_oracle.py	2026-10-11 23:55:58.347412966 +0200
+@@ -9,8 +9,11 @@
+ sys.dont_write_bytecode = True
+ 
+ HERE = Path(__file__).resolve().parent
+-ROOT = HERE.parents[2]
++ROOT = HERE.parents[3]  # RUNTIME A5 PATCH: runner copy lives one level deeper
+ AREA = ROOT / '.codex-tmp/gen05_9'
++# RUNTIME A5 PATCH: private output area; every frozen input stays read-only under AREA.
++OUT_AREA = ROOT / '.codex-tmp/gen05_9-runtime/clay-oracle'
++EXTENSION_PINS = HERE / 'extension-pins.json'
+ JAVA_ENV = ('JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'JDK_JAVAC_OPTIONS', 'CLASSPATH')
+ HELPER_PREFIX = 'ferrumc/surfaceruleoracle/'
+ HELPER_CLASSES = {HELPER_PREFIX + n + '.class' for n in (
+@@ -49,7 +52,9 @@
+ 
+ 
+ def canonical_guard(source):
+-    require(Path(source).resolve() == AREA / 'oracle/SurfaceRulesOracle.java', 'Noncanonical helper source')
++    # RUNTIME A5 PATCH: the extended helper copy must be the one pinned by extension-pins.json.
++    pinned = json.loads(EXTENSION_PINS.read_text())['extended_helper_sha256']
++    require(Path(source).resolve().parent == HERE and Path(source).is_file() and digest(source) == pinned, 'Noncanonical helper source')
+ 
+ 
+ def shadow_guard(names, artifact):
+@@ -57,7 +62,7 @@
+ 
+ 
+ def output_guard(output):
+-    require(AREA in output.parents and not output.exists(), 'Output must be fresh inside authorized GEN05.9 area')
++    require(OUT_AREA in output.parents and not output.exists(), 'Output must be fresh inside authorized GEN05.9 area')  # RUNTIME A5 PATCH
+ 
+ 
+ def membership_guard(pins):
+@@ -83,7 +88,9 @@
+ def preflight(pins):
+     environment_guard(os.environ)
+     canonical_guard(HERE / 'SurfaceRulesOracle.java')
+-    require(str(Path(__file__).resolve()) in pins['inventory'], 'Canonical runner must be pinned')
++    require(str(AREA / 'oracle/run_oracle.py') in pins['inventory'], 'Canonical runner must be pinned')  # RUNTIME A5 PATCH
++    extension = json.loads(EXTENSION_PINS.read_text())  # RUNTIME A5 PATCH: runner copies pinned too
++    inventory_guard({str(HERE / name): value for name, value in extension['runner_copies_sha256'].items()})
+     inventory_guard(pins['inventory'])
+     membership_guard(pins)
+     for mode in ('vanilla', 'paper'):
+@@ -100,16 +107,16 @@
+ 
+ 
+ def java_args(pins, mode, run, out, inner, classes, centers):
+-    return [mode if run != 'scan' else 'scan', str(out), inner, str(classes), str(HERE / 'semantic-mappings.properties'),
+-            str(AREA / 'design'), str(HERE / (mode + '-library-origins.properties')), str(HERE / 'aliases.txt'),
+-            str(HERE / 'paper-aliases.txt'), str(centers)]
++    return [mode if run != 'scan' else 'scan', str(out), inner, str(classes), str(AREA / 'oracle/semantic-mappings.properties'),  # RUNTIME A5 PATCH: frozen originals
++            str(AREA / 'design'), str(AREA / 'oracle' / (mode + '-library-origins.properties')), str(AREA / 'oracle/aliases.txt'),
++            str(AREA / 'oracle/paper-aliases.txt'), str(centers)]
+ 
+ 
+ def main():
+     require(len(sys.argv) == 2, 'One fresh output directory required')
+     output = Path(sys.argv[1]).resolve()
+     output_guard(output)
+-    pins_path = HERE / 'input-pins.json'
++    pins_path = AREA / 'oracle/input-pins.json'  # RUNTIME A5 PATCH
+     pins = json.loads(pins_path.read_text())
+     pin_hash = digest(pins_path)
+     preflight(pins)
+--- runner-orig/check_guards.py	2026-10-11 23:54:31.074938825 +0200
++++ runner/check_guards.py	2026-10-11 23:54:49.117809227 +0200
+@@ -16,7 +16,7 @@
+     out = Path(sys.argv[1]).resolve()
+     reference = Path(sys.argv[2]).resolve()
+     output_guard(out)
+-    pins = json.loads((HERE / 'input-pins.json').read_text())
++    pins = json.loads((AREA / 'oracle/input-pins.json').read_text())  # RUNTIME A5 PATCH
+     preflight(pins)
+     require((reference / 'manifest.json').is_file(), 'Completed original reference required')
+     out.mkdir()

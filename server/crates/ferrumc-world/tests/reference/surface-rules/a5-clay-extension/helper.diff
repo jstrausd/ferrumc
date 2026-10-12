@@ -1,0 +1,40 @@
+--- runner-orig/SurfaceRulesOracle.java	2026-10-11 23:54:31.078938851 +0200
++++ runner/SurfaceRulesOracle.java	2026-10-11 23:54:31.105450165 +0200
+@@ -31,6 +31,9 @@
+     private static Object unsafe;
+     private static Method allocate;
+     private static BufferedWriter rows;
++    // GEN-05.9 RUNTIME A5 EXTENSION: genuine SurfaceSystem.clayBandsOffsetNoise values, side-effect-free reads only.
++    private static BufferedWriter clay;
++    private static String clayGroup;
+     private static MessageDigest allCalls;
+     private static long rowCount, gCalls, gRecorded, cRows, crossCompared, crossMismatch, flatCompared, flatDiffer, dRows;
+     private static String tryApplyName, testName;
+@@ -416,6 +419,8 @@
+             double value = (double) method("NormalNoise", "getValue", double.class, double.class, double.class).invoke(field("SurfaceSystem", "surfaceNoise", system), (double) bx, 0.0, (double) bz);
+             double draw = (double) method("RandomSource", "nextDouble").invoke(method("PositionalRandomFactory", "at", int.class, int.class, int.class).invoke(field("SurfaceSystem", "noiseRandom", system), bx, 0, bz));
+             column = doubleText(value) + ";" + doubleText(draw);
++            // A5 EXTENSION: the genuine clay noise object of this genuine SurfaceSystem, sampled exactly as getBand does.
++            if (clay != null) line(clay, clayGroup, bx, bz, doubleText((double) method("NormalNoise", "getValue", double.class, double.class, double.class).invoke(field("SurfaceSystem", "clayBandsOffsetNoise", system), (double) bx, 0.0, (double) bz)));
+         }
+         String minSurface = "-";
+         if (longField("Context", "lastMinSurfaceLevelUpdate", ctx) != minBefore) {
+@@ -940,13 +945,17 @@
+         require(groups.size() <= 96, "Declared group cap");
+         try (BufferedWriter r = Files.newBufferedWriter(output.resolve("rows.tsv"));
+              BufferedWriter arrays = Files.newBufferedWriter(output.resolve("arrays.tsv"));
+-             BufferedWriter columns = Files.newBufferedWriter(output.resolve("groups.tsv"))) {
++             BufferedWriter columns = Files.newBufferedWriter(output.resolve("groups.tsv"));
++             BufferedWriter clayOut = Files.newBufferedWriter(output.resolve("clay.tsv"))) {
+             rows = r;
++            clay = clayOut;
++            line(clayOut, "group", "x", "z", "clay_bands_offset");
+             line(r, "tier", "group", "case", "x", "y", "z", "ctx_x", "ctx_y", "ctx_z", "surface_depth", "stone_above", "stone_below", "water_height",
+                 "update_xz", "update_y", "result", "exception", "computed", "singletons", "steep_heights", "min_surface", "surface_secondary", "biome_memo", "column_surface_noise_and_draw", "biome_direct", "cross_trees", "paper_flat_bedrock");
+             line(arrays, "group", "cx", "cz", "roster_indices_qy_qx_qz");
+             line(columns, "group", "preset", "seed", "cx", "cz", "recording", "origin", "preliminary_corners", "final_world_surface_wg", "sea_level", "min_gen_y", "gen_depth", "clay_bands", "resolved_anchors");
+             for (Group g : groups) {
++                clayGroup = g.id;
+                 prepareGroup(g, arrays);
+                 genuineSurface(g);
+                 StringJoiner corners = new StringJoiner(",");

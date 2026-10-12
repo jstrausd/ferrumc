@@ -15,12 +15,12 @@ use ferrumc_registry::worldgen::{
 use super::{DensityCompileError, DensityCompileErrorKind as Kind, DensityLimit};
 
 #[derive(Debug)]
-pub(super) struct Value<'a> {
+pub(crate) struct Value<'a> {
     pub kind: ValueKind<'a>,
     pub span: Range<usize>,
 }
 #[derive(Debug)]
-pub(super) enum ValueKind<'a> {
+pub(crate) enum ValueKind<'a> {
     Null,
     Bool(bool),
     Number(&'a str),
@@ -29,12 +29,12 @@ pub(super) enum ValueKind<'a> {
     Object(BTreeMap<String, Value<'a>>),
 }
 #[derive(Debug, Default, Clone, Copy)]
-pub(super) struct Stats {
+pub(crate) struct Stats {
     pub nodes: usize,
     pub depth: usize,
 }
 
-pub(super) fn parse<'a>(
+pub(crate) fn parse<'a>(
     input: &'a str,
     resource: &'static str,
 ) -> Result<(Value<'a>, Stats), DensityCompileError> {

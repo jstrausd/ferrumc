@@ -223,7 +223,14 @@ Konflikt der Replayregel mit der eigenen Höhen-/Stone-Depth-Policy (jetzt
 eigene Klasse `refused`). Die Runtime ist
 [freigegeben](agent-tasks/GEN-05_9_SURFACE_RULES_RUNTIME_TASK.md), mit
 Pflicht zum direkten Bitvergleich von `clay_bands_offset` über eine erweiterte
-Kopie des Originalhelpers.
+Kopie des Originalhelpers. Die Worldruntime `surface_rules` ist unabhängig
+CLEAN_RUNTIME integriert: World Debug/Release je360 und 1426 Verbrauchertests
+grün; der Reviewer hat alle Replayklassen aus den 765.138 Rohzeilen neu
+abgeleitet, alle 720 Arrays gegen die Originalindizes und die Clay-Bits über
+20.480 Spalten selbst verglichen.
+[Runtimeabnahme](agent-tasks/GEN-05_9_SURFACE_RULES_RUNTIME_REVIEW.md).
+Als nächster Worldschritt folgt der SurfaceSystem-Columndriver; er übernimmt die
+Testauflagen RR-H1 und RR-H2.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
