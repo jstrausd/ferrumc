@@ -87,7 +87,8 @@ bei fälliger Eventgrenze benötigt der konkrete Driver eine typisierte begrenzt
 Dueentscheidung. Ungeklärte Commitauthority behält Pending statt Itemverlust.
 Ledgercap/+1, Generationoverflow und anhaltend verlorene Worker müssen einen
 konkreten Backpressure/Drainpfad erhalten. Eine dauerhafte Pause während DB-
-Pending wäre eine explizite Gameplayabweichung, keine native Timerparität.
+Pending wäre eine explizite Gameplayabweichung, keine native Timerparität; für
+quarantinierte Pendings ist genau diese Abweichung in §11 deklariert.
 Vor Runtime muss Root diese Pendingzeit-/Eventgrenzentscheidung prüfen.
 
 ## 4. Pickup/Save benutzt confirmed Before und aktuellen live Postimage
@@ -185,7 +186,7 @@ hinaus erweitern. Konkrete Defaults:
 |---|---:|---|
 | Retained-confirmed native FCIEbytes/Shard |16MiB /16MiB|vor Recordclone/Admission refuses unverändert|
 | Deferclaims pro gebundenem Item/Pending |1024 /1024|Tick1025 preflightrefusal, RecoveryRequired|
-| Private counter ledger entries |1 pro Entitypending, max1/Shard|keine zweite Entityoperation|
+| Private counter ledger entries |1 pro Entitypending; max1 aktiv gebunden/Shard, dazu eingefrorene quarantinierte bis zu den §11-Grenzen|keine zweite aktive Entityoperation|
 | Neue Entitysavejobs je Boundary |1 /1|kein weiterer candidate/clone|
 | Shared Pendingcharge |bestehende8MiB /8MiB|vor Postimage/Requestclone|
 | Entitysavecharge je Job |2MiB /2MiB|vor Postimage/Requestclone|
@@ -258,7 +259,9 @@ Behauptung identischer Paperentitytick-before-playerTouch-Integration.
 ### Strukturreservation, echte Counterclaims und Pending
 
 Keine breitere per-slot Reservation in `.2a`: weiterhin höchstens **eine**
-Entityoperation pro Shard. Die bestehende ganze Storestrukturreservation bleibt
+aktive Entityoperation pro Shard; eine quarantinierte gibt die Reservation am
+Ende ihres Quarantäneboundaries frei und zählt danach nicht mehr (§11). Die
+bestehende ganze Storestrukturreservation bleibt
 für Spawn/Remove/Stackreplace/ownerhandoff zuständig. Ein enger privater
 counter-only method darf ausschließlich Delay/Age/Dirtygeneration der **anderen**
 vorhandenen Slots ändern. Er verändert keine UUID-/wire-/bucket-/slotindex,
@@ -276,10 +279,11 @@ Bei Pickuprest-/Saveconfirmation wird zuerst genau Requestafter als genuine
 confirmed Record veröffentlicht. Danach wird die private Projection auf den
 Rest desselben Items angewandt und Dirtygeneration vorgeprüft erhöht. Bei
 Fullpickup/Despawnremove existiert kein Rest; Deferfortschritte gestatten weder
-Doppelspawn noch eine nachträgliche zweite Itemquelle. Definitiver No-start- oder
-Conflictrefusal wendet Projection auf das ursprüngliche tatsächliche Liveitem an
-und behält seine passende bestätigte Recordauthority. Conflict/Superseded bleibt
-quarantined und ermächtigt keine neue CAS gegen erfundene Erwartungen.
+Doppelspawn noch eine nachträgliche zweite Itemquelle. Definitiver No-start-
+Refusal wendet Projection auf das ursprüngliche tatsächliche Liveitem an und
+behält seine passende bestätigte Recordauthority. Conflict/Superseded bleibt
+quarantined und ermächtigt keine neue CAS gegen erfundene Erwartungen; die
+Projection wird eingefroren und nie angewandt, das Item abgeschirmt (§11).
 
 Die zusätzliche private Projection darf nicht als Receiptconfirmed Timefield
 oder Storagebefore benutzt werden. Jeder neue Transfer bindet last-confirmed
@@ -326,6 +330,9 @@ Items reporten. Falls genuine readonly Receipt fehlt, Pending bleibt retained;
 kein Autoabort, Itemdroprefund oder frisches IDreplan. Dauerhafte Uncertainty
 macht den Shard ausdrücklich recovery-required, nicht still stehengebliebene
 Items bei behaupteter erfolgreicher Weltzeit. Keine Wallclocktimeoutauthority.
+Eine Quarantäne ist keine Uncertainty: Sie bindet nach ihrem Quarantäneboundary
+keine Claims und führt nicht in diesen Modus; ihr Item ist typisiert
+abgeschirmt statt still stehengeblieben (§11).
 
 Das löst nicht perfekte ununterbrochene native Timerparität bei beliebig langer
 DBuncertainty; mit strikt unverändertem Requestafter ist sie ohne einen extra
@@ -357,8 +364,11 @@ Unload bleibt jeder betroffene Slot markiert; due mark entzieht Gameplay sofort,
 Deleteflush hat innerhalb der Prioritylane denselben fairen Cursor. Ein permanenter
 Stream von Prioritäten darf normale fällige Saves nicht vollständig verdrängen.
 
-Wenn schon Entitypending existiert: **keinen** neuen Savecandidate encodieren,
-keine Cursor-/Turnfortschritte, nur tatsächliche Counter-/Deferphase. Nach genuine
+Wenn schon ein aktives Entitypending die Storestruktur reserviert: **keinen**
+neuen Savecandidate encodieren, keine Cursor-/Turnfortschritte, nur tatsächliche
+Counter-/Deferphase. Ein quarantiniertes Entitypending reserviert ab seinem
+Folgeboundary nicht; die Auswahl läuft weiter und überspringt nur den
+abgeschirmten Slot (§11). Nach genuine
 Completion/Refusal kann derselbe Boundary wieder auswählen. Bei no-start Busy/
 Historycapacity bleibt der identische Pendingrequest unter derselben Query;
 kein Replan und kein Auswahlcursorreset. Der Savecursor steht schon hinter
@@ -433,11 +443,13 @@ Counterpreflight als auch erfolgreiche Counterphase besuchen pro tatsächlichem
 logicalTick sämtliche vorhandenen ownerlokalen, residenten berechtigten
 Itemslots bis zur bereits positiven Entityslotcap (max65536). Jeder bekommt
 exakt einen Step, gegebenenfalls in seine gebundene private Pendingprojection.
-Unloaded/offline erhalten0; RecoveryRequired meldet keinen erfolgreichen Tick.
+Unloaded/offline und quarantäneabgeschirmte Slots (§11) erhalten0;
+RecoveryRequired meldet keinen erfolgreichen Tick.
 64/max256 ist ausschließlich der budgetierte **Saveauswahlsweep**, niemals
 Activation-/Countereligibility oder Sampling nur64Items/Tick. Bei4096residenten
 Items werden in40erfolgreichen Ticks alle4096Delay40-Werte0, abgesehen vom
-explizit definierten späteren ersten Spawn-Tick. Die Kosten sind bounded O(N)
+explizit definierten späteren ersten Spawn-Tick und abgeschirmten Slots (§11).
+Die Kosten sind bounded O(N)
 pro logicalTick; kein Anspruch O(64) für4096tatsächliche Countersteps.
 
 **Readonly Preflight umfasst den zukünftigen Boundaryzustand.** Vor dem ersten
@@ -471,7 +483,9 @@ zu diesem readonly Plan. So darf weder auf dem alten Beforebody geprüft und
 anschließend ein maxgeneration Rest verwendet werden, noch ein neu sichtbarer
 Spawn außerhalb der Prüfmenge auftauchen. Definitive Refusals projizieren auf
 den erhaltenen ursprünglichen Body; uncertain/completionfehlende Items bleiben
-an die entsprechende private Projection gebunden.
+an die entsprechende private Projection gebunden. Ein bei Planbeginn
+quarantiniertes Pending bindet keine Projection; sein Item ist nicht eligible
+(§11).
 
 Danach klassifiziert derselbe readonly Boundaryplanner admitted Actions in
 FIFO. Item-restore zählt als potentiell neu sichtbarer Body und wird ebenfalls
@@ -601,8 +615,9 @@ weitere Confirmation-/Defergenerationen. Ist Publikation unmöglich, bleibt
 genuine Completion/Pending intakt mit typed GenerationExhausted; kein Saveack.
 Diese Regel ersetzt einen selektiven zweiten Autosavecursor-Shadow.
 
-CasConflict hält Quarantined Pending und sichtbaren reservierten Body strikt
-unverändert; nur private ursprüngliche Counterprojection wird weitergerechnet.
+CasConflict hält Quarantined Pending und sichtbaren Body strikt unverändert;
+die private ursprüngliche Counterprojection wird am Ende dieses Boundaries
+eingefroren und nicht weitergerechnet, die Reservation endet dort (§11).
 Kein fresh Retryauthority/Refund entsteht. Busyrefusal behält ihren intact
 Completioninput im Outcome und damit die genuine Lease: Retry im selben
 Boundary ist Reserved. Erst Drop dieses refused Inputs ermöglicht den echten
@@ -678,3 +693,84 @@ Pre-/Postfixdiff. Die SHA-Werte werden außerhalb dieses Dokuments an Root
 übergeben. Status ist **AUTHOR_CHECKS_PASS; unabhängiges CLEAN nicht behauptet**.
 Keine zusätzlichen Gameplay-/App-/Storage-/Paper-/RSS-/TPS-Zusagen folgen aus
 dieser geprüften borrowed-Größen-/Repräsentationsadoption.
+
+## 11. Nachtrag SIM-03.5 (Root): quarantinierte Item-Pendings sind abgeschirmt
+
+Gilt nur im Countermodus (`item_counters.is_some()`), in jedem normalen und
+completion-only Recovery-Boundary. Der DUR-04.1-Legacypfad ohne Counter bleibt
+unverändert: Dort hält ein Quarantined Pending die ganze Storereservation bis
+zum Neustart, und Reconcile bleibt zugelassen. Dafür angepasst sind §3
+(Abweichung deklariert), §7 Tabelle (Private counter ledger entries), §7
+„Strukturreservation“ (eine aktive Entityoperation; Conflict/Superseded), §7
+„Duegrenze“ (Quarantäne ist keine Uncertainty), §7 „Savefortsetzung“ (aktives
+Entitypending), §8 (Counterphase, Plan) und §9 (CasConflict). DUR-04.1 §3 und
+§6 verweisen hierher.
+
+1. **Quarantäne ist im Prozess terminal.** Ein Pending wird `Quarantined` durch
+   `Refused(CasConflict)` (Storage verweigert vor jedem Commit; es existiert kein
+   Receipt) oder durch einen echten Receipt, dessen Current-Read
+   `confirm_current` verfehlt. Danach gibt es weder Veröffentlichung noch
+   Freigabe: keine Completion (Status ≠ `InFlight`), kein Retry (Status ≠
+   `Prepared`). `Reconcile` wird mit `Ineligible("quarantined pending")`
+   verweigert, weil eine Receiptklärung einen CasConflict fälschlich als
+   `Uncertain` einstufen und Plan und Anwendung trennen würde. Das gilt für jede
+   Quarantäne im Countermodus, auch für reine Player-Pendings.
+2. **Projection eingefroren.** Die private `DeferredOwnedCounters` eines
+   quarantinierten Pendings behält ihren Wert vom Ende des quarantinierenden
+   Boundaries. Ab dem folgenden Boundary bindet der Plan sie nicht mehr; sie
+   zählt keine Claims und wird nie angewandt. Der quarantinierende Boundary zählt
+   wie bisher höchstens einen Claim. Überschreitet dieser `defer`, verweigert der
+   Normal-Boundary vor dem Drain, und der completion-only Recovery-Boundary
+   wendet die Completion an.
+3. **Item abgeschirmt.** Hält ein quarantiniertes Pending das Replace- oder
+   Remove-Postimage eines vorhandenen Items, ist dieses Item ab dem folgenden
+   Boundary nicht eligible: kein Counterstep und damit keine neue Duemarkierung,
+   keine Saveauswahl (der Cursor läuft weiter, kein `ItemSaveBlocked`). Pickup und
+   Save dieses Items werden vor jeder Kandidaten- oder Bodykopie mit
+   `Ineligible("quarantined item")` verweigert. Das gilt für Pickup schon im
+   quarantinierenden Boundary, weil Completions dort vor allen übrigen Inputs
+   angewandt werden; eine Save verweigert dort noch die bestehende Reservation
+   (`Reserved`). Eine
+   bereits gesetzte Duemarkierung bleibt ohne neuen Delete. Sichtbarer Körper,
+   Pending-Postimage und zuletzt bestätigte Recordauthority bleiben unverändert;
+   es entsteht keine CAS gegen die überholte Erwartung. Kein Altern, kein Despawn
+   und keine Aufnahme bis zum Neustart sind eine deklarierte Gameplayabweichung,
+   keine stille Pause: Der Boundary meldet für das Item keinen Schritt, und der
+   Status ist per Checkpoint abfragbar.
+4. **Reservation endet.** Am Ende des Boundaries (normal oder completion-only),
+   der das Pending quarantiniert hat, endet seine ganze Storereservation. Ab dem
+   folgenden Boundary zählt es im Plan nicht als reservierende Entityoperation.
+   „Höchstens eine Entityoperation pro Shard“ gilt für aktive, nicht
+   quarantinierte Pendings. Ein quarantiniertes Spawn- oder Drop-Pending (kein
+   vorhandener Körper) verliert ebenso die Reservation und schirmt nichts ab.
+   Checkpoint, Stop-Prädikat und Release-Gates bleiben unverändert.
+5. **Unverändert:** `Uncertain`, `NeedsRefresh`, `InFlight` und `Prepared` binden
+   ihre Projection und halten ihre Reservation weiter. Dauerhafte Uncertainty
+   führt nach `defer` Claims wie bisher zu `CounterRecoveryRequired` (§7). Diese
+   Abschirmung wird nicht auf `Uncertain` ausgedehnt.
+6. **Auflösung.** Ein quarantiniertes Pending endet nur mit dem Prozess. Der Shard
+   wird mit Quarantäne nie quiescent, Stop endet `Unresolved`, der zuletzt
+   bestätigte Durable-Stand bleibt maßgeblich, und ein Neustart lädt ihn über
+   Restore. Unbestätigter Timer- und Transformfortschritt des abgeschirmten Items
+   geht wie beim Crash verloren (§5). Eine In-Prozess-Übernahme des Durable-Stands
+   ist nicht Teil dieses Nachtrags.
+7. **Gebundene Ressourcen.** Jede Quarantäne behält bis zum Neustart ihren
+   Pendingplatz (`limits.pending`, höchstens 32) und ihre Pendingladung
+   `661 + 2*before + 5*after` in der gemeinsamen Ladung (`limits.pending_bytes`,
+   höchstens 8 MiB). Eine maximale Entitysaveladung von 1,835,669 Bytes passt
+   viermal hinein; die fünfte wird mit `Capacity("pending bytes")` verweigert.
+   Je nach Art bleiben außerdem gebunden: der abgeschirmte Körper mit Slot,
+   Live- und Confirmed-Bytes; bei Pickup und Drop der Spieler (Spielerplatz,
+   Spielerbytes, Lifecycle-Zelle; Release und Rejoin verweigert); bei Pickup,
+   Drop, Spawn und Despawn ein Publikationskredit und bei animiertem Take ein
+   Lifecycle-Pin; bei einer Save oder einem Despawn die verbrauchte Save-ID.
+   Erschöpfte Grenzen verweigern neue Pendings typisiert (`Capacity("pending
+   count")`, `Capacity("pending bytes")`, `Capacity("player count")`,
+   Publikations- oder Lifecyclekapazität). Eine Eskalationsschwelle legt DUR-05a
+   fest.
+
+Originalsemantik: Vanilla und Paper altern einen getickten Item-Körper je Tick
+und entfernen ihn an der Schwelle; eine Persistenz-Projection kennen sie nicht
+(Source-Review SIM-03.5 §3.3, kein Differenziallauf). Abnahme: SIM-03.5-Matrix
+M1–M15 und die Reviewproben R1–R4 auf Memory und redb mit echter
+Work/Completion.

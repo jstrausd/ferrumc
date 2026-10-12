@@ -229,6 +229,10 @@ niemals neu geplant. Eine zweite Operation desselben Players wird verweigert.
 Für `.1` wird konservativ höchstens **eine** Entityoperation pro Shard
 reserviert: Drop/Pickup/Itemspawn besitzen während Pending die tatsächliche
 EntityStore-Mutationsgrenze einschließlich Slotcapacity, IDs und Bytebudget.
+Im `.1`-Modus gilt das auch für ein Quarantined Pending bis zum Neustart. Nur im
+DUR-04.2-Countermodus endet die Reservation eines Quarantined Pending am Ende
+seines Quarantäneboundaries; sein vorhandenes Item bleibt danach für alle
+Storewriter abgeschirmt (DUR-04.2 §11).
 Receiptgestützte Player-only-Autosaves anderer Spieler können parallel planen.
 Vor Dispatch werden komplette spawn-/replace-/remove-Capacity-/FCIE-/Index-
 Preflights einschließlich fallible Slotvecreservation abgeschlossen. Keine
@@ -371,7 +375,9 @@ gehören zur unmittelbar anschließenden App-/SRV02-/Javaeventarbeit.
   encodedbytes, refuse-newest mit vollständiger Inputrückgabe. Ein Workbatch
   besteht nur aus zugelassenen Pendingrecords, höchstens32 und8MiB charged.
 - Eine Entityreservation pro Shard, ein coalescter Move pro zugelassenem
-  Player. Alle Tabellen/Buckets/IDs bleiben durch bestehende Entityslotcaps
+  Player; im DUR-04.2-Countermodus gilt das für aktive Pendings, quarantinierte
+  reservieren nach ihrem Quarantäneboundary nicht mehr (DUR-04.2 §11). Alle
+  Tabellen/Buckets/IDs bleiben durch bestehende Entityslotcaps
   und maximal16MiB native Entityencodedbytes begrenzt.
 - Diese Caps begrenzen geprüfte encodedbytes/counts und temporäre konkrete
   Clonepfade, nicht vollständige NBT-RSS oder eine Prozessspeicherzusage.

@@ -519,7 +519,8 @@ oder ausdrücklich umpriorisiert. Keine unbounded Agentenschlange.
 | T3-Sessionagent „NET-04.2e1 native endpoint session runtime“ | NET-04.2e1 | CLEAN_RUNTIME integriert; Auftrag abgeschlossen | Auflagen A1–A7 gehen an NET-04.2e2/f; keine Liveaktivierung. |
 | T3-Simagent „SIM-03.4b detached player release“ | SIM-03.4b | CLEAN_RUNTIME integriert; Auftrag abgeschlossen | Doku-Korrektur N1 im nächsten Simticket; H1/H3 an NET-04.2e2/f. |
 | T3-Simagent „SIM-03.4c selected slot view“ | SIM-03.4c | Unabhängig CLEAN_RUNTIME integriert; Auftrag abgeschlossen | `ConnectedOwnedPlayerView::selected()` liefert den Held-Slot-Producer; Verdrahtung in NET-04.2f. |
-| T3-Simagent „SIM-03.5 quarantine isolation contract“ | SIM-03.5 | Konkreter Vertrag in Vorbereitung | Eigener neuer Brief und `.codex-tmp/sim03_5/**`; Production readonly; Aktivierungsvoraussetzung R3-A5. |
+| T3-Simagent „SIM-03.5 quarantine isolation contract“ | SIM-03.5 | Vertrag V2 nach zwei Reviewrunden angenommen (N1 durch Root korrigiert); Auftrag abgeschlossen | DUR-04.2 §11 und DUR-04.1 per Nachtrag geändert. |
+| T3-Simagent „SIM-03.5 quarantine isolation runtime“ | SIM-03.5 | [Runtimeimplementierung freigegeben](agent-tasks/SIM-03_5_QUARANTINE_ISOLATION_RUNTIME_TASK.md) | Exklusiv `server/crates/ferrumc-sim/**` inkl. `INVARIANTS.md`, `.codex-tmp/sim03_5-runtime/**` und Deliverybrief; R3-A5 nur für `Quarantined`. |
 | T3-Storageagent „DUR-03.3 Storage Player+Block implementation“ | DUR-03.3 | Vertrag unabhängig CLEAN; Implementierung läuft | Exklusiv Storage und neue Runtimeevidenz; Format7 ohne automatische Migration. |
 
 Diese Rollenliste erfasst die Aufträge der laufenden Welle; die tatsächlichen

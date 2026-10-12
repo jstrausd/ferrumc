@@ -304,7 +304,16 @@ der Root hat §7.3 dazu um den Nachtrag V1 ergänzt. Session Debug/Release je244
 App375 und Testkit100 grün. Den fehlenden Sim-Producer für den Held-Slot-Resync
 liefert das unabhängig CLEAN_RUNTIME integrierte
 [SIM-03.4c](agent-tasks/SIM-03_4c_SELECTED_SLOT_VIEW_REVIEW.md); die Verdrahtung
-folgt in NET-04.2f.
+folgt in NET-04.2f. Für R3-A5 ist der Vertrag
+[SIM-03.5](agent-tasks/SIM-03_5_QUARANTINE_ISOLATION.md) nach zwei unabhängigen
+Reviewrunden angenommen: Ein quarantiniertes Item-Pending friert im
+Countermodus seine Projektion ein, schirmt sein Item ab und gibt die
+Storereservation frei, statt den Shard nach `defer` Claims in
+`CounterRecoveryRequired` zu treiben. Der Root hat den Nachtrag in DUR-04.2
+(§11) und DUR-04.1 übernommen; die
+[Simruntime](agent-tasks/SIM-03_5_QUARANTINE_ISOLATION_RUNTIME_TASK.md) ist
+freigegeben. Ein dauerhaft `Uncertain` gebliebenes Pending bleibt ein eigenes
+Ticket mit eigener Aktivierungsgrenze.
 DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge; die f-Auflagen stehen in
 den [Rootentscheidungen](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_ROOT_DECISIONS.md).
 
