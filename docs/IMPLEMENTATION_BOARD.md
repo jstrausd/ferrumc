@@ -337,11 +337,18 @@ kontrollierten EMPTY-ProtoChunks. Der vollständige Identitätsjoin meldet keine
 FerrumC-/Vanilla-/Paper-Abweichungen. Root prüfte alle 202 eingefrorenen
 Dateien/36.215.670 Bytes ohne Abweichung. Der
 [unabhängige Review](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_ORACLE_REVIEW_TASK.md)
-prüft Originalmethoden, vollständige IDs/Properties, Packing/Sentinels,
-Lifecyclegrenzen und neue Kapazitäts-/Workvorschläge. Diese Grenzen sind noch
-nicht angenommen. Statischer Registryproducer und Worldconsumer folgen als
-getrennte Runtimeaufträge nach Review. Die drei aktiven Children sind
-Carver-Runtime, Ore-Korrektur und Blockstate-/Heightmap-Review; nur Carver schreibt
+ist FINDINGS: G31-R1-B1 verlangt vollständige Rawimport-/Update-/Queryarbeit
+und konkrete Atomizität; G31-R1-B2 schließt den fehlenden Vollstateindex nicht
+in die Buildbilanz ein; G31-R1-M1 bestätigt akzeptierte zusätzliche Output-
+Verzeichnisse. Die echten Originaldaten wurden vollständig unabhängig reproduziert.
+Root hat alle 741 Reviewdateien/680.487.002 Bytes ohne Abweichung geprüft und
+beauftragt [Revision 2](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_REVISION2_TASK.md):
+bounded Update-Delta, vollständige Work-/Readerverträge, Blocknamen-/Radixjoin
+ohne großen Vollstateindex und exakte Outputtreeadmission. Die vorgeschlagenen
+Kapazitäts-/Workgrenzen bleiben unangenommen. Statischer Registryproducer und
+Worldconsumer folgen als getrennte Runtimeaufträge nach erneutem Review.
+Die drei aktiven Children sind
+Carver-Runtime, Ore-Korrektur und Blockstate-/Heightmap-Korrektur; nur Carver schreibt
 produktive Worldquellen. Naturwelt-/Licht-/Appaktivierung bleibt offen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
