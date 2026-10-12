@@ -251,14 +251,15 @@ Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 ### Weltgenerierung: Betreiberpriorität vom 12.10.2026
 
 Der Betreiber hat die Weltgenerierung als nächsten Schwerpunkt festgelegt.
-GEN-05.11 hat den exklusiven World-Runtimeauftrag; es wird kein zweiter
-schreibender Worldagent parallel gestartet. Der unabhängige Korrekturreview
+GEN-05.11 hat den exklusiven World-Runtimeauftrag abgeschlossen und den
+vollständigen Kandidaten eingefroren; es wird bis zur Reviewentscheidung kein
+zweiter schreibender Worldagent gestartet. Der unabhängige Korrekturreview
 ist CLEAN_CONTRACT/CLEAN_ORACLE. Root nimmt den privaten unsigned192-Meter-
 und exakten Fehlerpfadentwurf an; die Umsetzung und Runtimeabnahme folgen getrennt.
 
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
-| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. Root nimmt die korrigierte Vorbereitung und private Zähler-/Fehlerweitergabe an. [World-only Rust-Runtime beauftragt](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_TASK.md); vollständiges Surface→Carver-Replay und native Fehler-/Grenz-/Allokationsabnahme offen. Keine Appaktivierung. |
+| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. [Rust-Kandidat044 eingefroren](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_DELIVERY.md): Autorenchecks World Debug/Release jeweils415 bestanden,1550 Consumerprüfungen und strikte Checks grün. Root hat362 Quelldateien/579 Evidenzdateien vollständig bytegeprüft. [Unabhängiger Runtime-Review läuft](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_REVIEW_TASK.md); Integration und Appaktivierung offen. |
 | 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Revision2](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md) ist unabhängig [CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW.md), B1/B2/B3 auf Vorbereitungsebene geschlossen. Root nimmt 16-KiB-Katalog/16-KiB-Scratch/32-KiB-neuen Peak/49.152-B-mit-altem-Katalog und 512-B-Cursor als messpflichtige Designlimits an. [GEN-06.2 Rust-Primitive](agent-tasks/GEN-06_2_CLOSED_ORE_PLACEMENT_PRIMITIVES_RUNTIME_TASK.md) wartet auf den exklusiven Worldslot und frische akzeptierte Basis. [GEN-06.3 Originalchronologie/Algorithmusvertrag](agent-tasks/GEN-06_3_ORE_ALGORITHM_ORACLE_TASK.md) wird parallel readonly vorbereitet. H1-Reviewbeschreibung korrigiert; H2-Regioncap und whole-FEATURES bleiben offen. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
@@ -268,8 +269,8 @@ Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
 Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
-Die laufenden World-Aufträge sind GEN-05.11 Rust-Runtime und
-GEN-06.3 readonly Originalchronologie-/Algorithmusvorbereitung. Der unabhängige
+Die laufenden World-Aufträge sind GEN-05.11 unabhängiger Runtime-Review und
+GEN-06.3 readonly Originalchronologie-/Algorithmuskorrektur. Der unabhängige
 Storage-Review DUR-03.3b ist CLEAN_RUNTIME_REVIEW abgeschlossen. GEN-06.1 Review Runde 2
 ist fertig; Root hat alle 494 Dateien/307.996.259 Bytes erneut geprüft und nimmt
 nur die kontrollierte Vorbereitung an. Im Review erkannte shared-Worldänderungen
@@ -348,8 +349,17 @@ ohne großen Vollstateindex und exakte Outputtreeadmission. Die vorgeschlagenen
 Kapazitäts-/Workgrenzen bleiben unangenommen. Statischer Registryproducer und
 Worldconsumer folgen als getrennte Runtimeaufträge nach erneutem Review.
 Die drei aktiven Children sind
-Carver-Runtime, Ore-Korrektur und Blockstate-/Heightmap-Korrektur; nur Carver schreibt
-produktive Worldquellen. Naturwelt-/Licht-/Appaktivierung bleibt offen.
+Carver-Runtime-Review, Ore-Korrektur und Blockstate-/Heightmap-Korrektur; alle
+arbeiten ohne Änderungen an produktiven Worldquellen. Naturwelt-/Licht-/Appaktivierung
+bleibt offen. Root stellte für den Carverreview ein echtes readonly `356670f7`-
+Archiv bereit:1499 Dateien, alle Runtime-/Dependencybytes gleich der finalen
+Autorenbasis `47eadc4c`. Die vollständige erwartete Kombination enthält1538
+Dateien einschließlich362 eingefrorener Worlddateien und Delivery. Alle202
+bisherigen World-Fixture-/Referenzdateien und1166 Outside-Dateien der Autorenbasis
+sind unverändert. Die beobachteten null Allokationen/Deallokationen im kalten
+vorbereiteten Aufruf sind Autorenmessungen; unabhängige Runtimeabnahme und
+Live-Performance bleiben offen. Das nächste World-Runtimeticket GEN-06.2 bleibt
+bis zur Entscheidung über diesen Kandidaten ohne Ausführungsowner.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
