@@ -243,6 +243,9 @@ Der Replay trifft 70 Gruppen, 17.920 Spalten und 2.261.637 Aufrufe exakt;
 ≤ 384). World Debug/Release je 383 und alle Worldverbraucher 1489 grün;
 Testlückenhinweise RR10-H1–H5 gehen an das nächste Worldticket.
 [Runtimeabnahme](agent-tasks/GEN-05_10_SURFACE_COLUMN_DRIVER_RUNTIME_REVIEW.md).
+Der nächste Worldschritt sind die Overworld-Carver
+([GEN-05.11](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_TASK.md)), zuerst als Vertrag
+mit echter Originaloracle.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
