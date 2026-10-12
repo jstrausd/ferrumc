@@ -269,7 +269,8 @@ Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
 Die drei aktuellen T3-Aufträge sind GEN-05.11 Rust-Runtime,
-GEN-06.1 unabhängiger Review Runde 2 und die gezielte Storagekorrektur DUR-03.3b.
+GEN-06.1 unabhängiger Review Runde 2 und der unabhängige Runtime-Review
+der fertigen Storagekorrektur DUR-03.3b.
 Der eingefrorene Storage-Kandidat Runde 6 zählt Block-Entities mit ihrer
 tatsächlichen Kodierlänge; Autorenchecks Debug/Release jeweils 354 grün.
 Root prüfte alle 91 Quelldateien bytegleich und stellte ein readonly Archiv
@@ -281,8 +282,16 @@ Root verlangt die Korrektur vor Integration, ohne Grenzerhöhung oder Ausnahme.
 [DUR-03.3b](agent-tasks/DUR-03_3b_STARTUP_RECEIPT_REUSE_TASK.md) hält höchstens
 einen Receipt während seines zusammenhängenden Journalbereichs und beseitigt
 Mehrfachlesen/Hashen/Parsen bei vollständiger Zeilen- und Relationsprüfung.
-Die alten 91 Source- und 29 Reviewevidenz-Dateien sind erneut bytegeprüft;
-Storage bleibt bis neuer Prüfung unintegriert.
+Die [DUR-03.3b-Delivery](agent-tasks/DUR-03_3b_STARTUP_RECEIPT_REUSE_DELIVERY.md)
+ist eingefroren: 93 Quelldateien, 42 Evidenzartefakte; Autorenchecks
+Debug/Release jeweils 360 bestanden. Die ursprüngliche 1-GiB-Datenbank öffnet
+laut Autorenprobe wieder, drei unabhängig hergeleitete Scan-Grenzen sind geprüft.
+Root hat Kandidat, readonly Kopien und Evidenz vollständig bytegeprüft und
+stellt echtes `4225c21c` mit vollständigem Storageoverlay bereit. Außerhalb
+Storage unterscheiden sich Autorenbasis und aktuelles main nur in 11 Docpfaden.
+Der [neue unabhängige Reviewauftrag](agent-tasks/DUR-03_3b_STARTUP_RECEIPT_REUSE_REVIEW_TASK.md)
+prüft R6-B2 und alle erhaltenen Vertragsgrenzen. Storage bleibt bis dieser
+Runtimeabnahme unintegriert; DUR-03.3a bleibt vor DUR-05 erforderlich.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
