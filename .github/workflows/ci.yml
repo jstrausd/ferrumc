@@ -22,7 +22,9 @@ jobs:
   rust:
     name: rust workspace
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Full debug numerical oracles reached 3067/3070 passes at the former
+    # 30-minute cutoff; retain every suite and leave time for client checks.
+    timeout-minutes: 60
 
     defaults:
       run:

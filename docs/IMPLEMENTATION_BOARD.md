@@ -302,6 +302,28 @@ Der frische aktuelle Mainvergleich enthält außerhalb Storage nur Docänderunge
 alle Runtime-/Dependencybytes stimmen mit der geprüften Kombination überein.
 Keine Appaktivierung; DUR-03.3a bleibt vor DUR-05 erforderlich.
 
+Die vollständige Format7-Bibliothek ist als `47eadc4c` auf main integriert und
+gepusht. Der CI-Lauf `38254637982` erreichte 3.067 von 3.070 Tests ohne gemeldeten
+Testfehler und wurde am 30-Minuten-Joblimit abgebrochen. Das Joblimit wird auf
+60 Minuten erhöht; Tests, Debugprofil und anschließende Clientprüfungen bleiben
+vollständig erhalten. Dieser abgebrochene Lauf ist keine grüne CI-Abnahme.
+
+[GEN-06.3](agent-tasks/GEN-06_3_ORE_ALGORITHM_ORACLE.md) hat einen eingefrorenen
+Originalchronologie-/Kernelvertragskandidaten geliefert: 101 kontrollierte Fälle
+je Vanilla/Paper-Profil und drei zusätzliche Wrapper-Endzustandskontrollen.
+Root prüfte alle 3.878 Dateien/599.591.972 Bytes ohne Abweichung. Der
+[unabhängige Review](agent-tasks/GEN-06_3_ORE_ALGORITHM_ORACLE_REVIEW_TASK.md)
+prüft Instrumentierung, Schreib-/RNG-/Sectionreihenfolge und den vorgeschlagenen
+16-MiB-Regioncap. Besonders offen ist die Nutzbarkeit des unveränderten
+1-Mi-Arbeitsbudgets nach mindestens 914.945 Einheiten für Kopie und Validation.
+Noch keine Kernel-Runtimefreigabe oder Whole-FEATURES-Abnahme.
+
+[GEN-03.1](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_ORACLE_TASK.md) bereitet
+parallel echte Originalprädikate aller Blockzustände und Höhenkartentypen vor.
+Der spätere statische Registryproducer und Worldconsumer werden getrennt
+beauftragt. Die drei aktiven Children sind Carver-Runtime, Ore-Review und
+Blockstate-/Heightmap-Vorbereitung; nur Carver schreibt produktive Worldquellen.
+
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
 DUR-03.2 als `b9f15db8` integriert. Debug/Release jeweils347 Prüfungen und alle
