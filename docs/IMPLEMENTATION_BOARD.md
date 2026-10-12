@@ -229,8 +229,11 @@ grün; der Reviewer hat alle Replayklassen aus den 765.138 Rohzeilen neu
 abgeleitet, alle 720 Arrays gegen die Originalindizes und die Clay-Bits über
 20.480 Spalten selbst verglichen.
 [Runtimeabnahme](agent-tasks/GEN-05_9_SURFACE_RULES_RUNTIME_REVIEW.md).
-Als nächster Worldschritt folgt der SurfaceSystem-Columndriver; er übernimmt die
-Testauflagen RR-H1 und RR-H2.
+Als nächster Worldschritt ist der SurfaceSystem-Columndriver GEN-05.10 in Runde 1
+unabhängig CLEAN_CONTRACT: echtes `buildSurface` mit und ohne aufzeichnenden
+Proxy in 72/72 Gruppen gleich, alle 51 Overworld-Oberflächenbiome, Icebergs und
+Badlands-Pfeiler. Die Runtime ist mit den Policies D1–D5 und den Auflagen A1–A6
+sowie RR-H1/RR-H2 [freigegeben](agent-tasks/GEN-05_10_SURFACE_COLUMN_DRIVER_RUNTIME_TASK.md).
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
