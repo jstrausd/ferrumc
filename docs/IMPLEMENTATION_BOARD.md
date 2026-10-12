@@ -362,8 +362,21 @@ bounded Update-Delta, vollständige Work-/Readerverträge, Blocknamen-/Radixjoin
 ohne großen Vollstateindex und exakte Outputtreeadmission. Die vorgeschlagenen
 Kapazitäts-/Workgrenzen bleiben unangenommen. Statischer Registryproducer und
 Worldconsumer folgen als getrennte Runtimeaufträge nach erneutem Review.
+Die [GEN-03.1-Korrektur Revision2](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_REVISION2.md)
+ist jetzt eingefroren:688 reguläre Dateien/474.448.752 Bytes, insgesamt879
+Entries einschließlich167 Verzeichnissen,18 absichtlichen Symlinkmutanten und
+sechs FIFOs. Root hat Bytes, vollständige Membership, lstat-Typen/-Modi und
+Linktargets geprüft; FIFOs wurden nicht geöffnet. Alle4438 Originalpins,
+175 Referenzpins,1490 Archivdateien und202/741/366/494 historische Freeze-Dateien
+stimmen weiterhin. Der
+[neue unabhängige Korrekturreview](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_REVISION2_REVIEW_TASK.md)
+prüft G31-R1-B1/B2/M1 mit vollständigem Originalbrief und Antwortmatrix.
+Neue Reservationsmodelle36/491559/14163/4259119/14419/Query53 und eigene
+Preparation-Allowance2^23 bleiben unangenommen. Der pending Erz-Entwurf rechnet
+noch Query8; Root gab die konkrete Schnittstellen-/Budgetabweichung an beide
+Reviewer weiter. Keine stille Änderung eines Freeze oder zweiten Ore-Meters.
 Die drei aktiven Children sind
-Carver-Runtime-Review, Ore-Korrekturreview und Blockstate-/Heightmap-Korrektur; alle
+Carver-Runtime-Review, Ore-Korrekturreview und Blockstate-/Heightmap-Korrekturreview; alle
 arbeiten ohne Änderungen an produktiven Worldquellen. Naturwelt-/Licht-/Appaktivierung
 bleibt offen. Root stellte für den Carverreview ein echtes readonly `356670f7`-
 Archiv bereit:1499 Dateien, alle Runtime-/Dependencybytes gleich der finalen
