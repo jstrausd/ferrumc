@@ -258,7 +258,7 @@ Vertrag und Originalevidenz vor der Vergabe der Rust-Runtime.
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
 | 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Vorbereitung Runde 2 geliefert](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2.md): direkte lazy Biomhistorie/Halo, kumulative Zulassung und privater 192-Bit-Metervorschlag. [Unabhängiger Review Runde 2 beauftragt](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW_TASK.md); bisheriges BLOCKING_CONTRACT gilt bis Abschluss. Keine Rust-Runtimefreigabe. |
-| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Review BLOCKING_CONTRACT](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVIEW.md): Konstruktion/RNG-Übergabe konkretisieren, FeatureSorter-Semantik und Traceabdeckung korrigieren. [Vorbereitung Runde 2 beauftragt](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_TASK.md). Originalproben und Inventar 30/24/25 bestätigt; kontrollierte Proben bleiben keine whole-FEATURES-Abnahme. Density-Erzadern aus GEN-05.4 bleiben ein anderer Produzent. |
+| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Vorbereitung Runde 2 geliefert](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md): obligatorischer Bind-Debit, konkrete Scratchziele und exklusive Pending-RNG-Lease. [Unabhängiger Korrekturreview beauftragt](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW_TASK.md); B1/B2/B3 bleiben bis Abschluss Gates. Der historische Helper enthält abs(block>>4), entgegen dem ersten H1-Reviewtext; alte Bytes bleiben unverändert. Kontrollierte Proben sind keine whole-FEATURES-Abnahme. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
 
@@ -268,7 +268,7 @@ Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
 Die drei aktuellen T3-Aufträge sind GEN-05.11 unabhängiger Review Runde 2,
-GEN-06.1 Vorbereitung Runde 2 und die gezielte Storagekorrektur DUR-03.3b.
+GEN-06.1 unabhängiger Review Runde 2 und die gezielte Storagekorrektur DUR-03.3b.
 Der eingefrorene Storage-Kandidat Runde 6 zählt Block-Entities mit ihrer
 tatsächlichen Kodierlänge; Autorenchecks Debug/Release jeweils 354 grün.
 Root prüfte alle 91 Quelldateien bytegleich und stellte ein readonly Archiv
