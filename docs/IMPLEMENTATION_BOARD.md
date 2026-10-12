@@ -251,13 +251,14 @@ Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 ### Weltgenerierung: Betreiberpriorität vom 12.10.2026
 
 Der Betreiber hat die Weltgenerierung als nächsten Schwerpunkt festgelegt.
-Der bestehende GEN-05.11-Agent behält den exklusiven Worldauftrag; es wird
-kein zweiter schreibender Worldagent parallel gestartet. Root prüft dessen
-Vertrag und Originalevidenz vor der Vergabe der Rust-Runtime.
+GEN-05.11 hat den exklusiven World-Runtimeauftrag; es wird kein zweiter
+schreibender Worldagent parallel gestartet. Der unabhängige Korrekturreview
+ist CLEAN_CONTRACT/CLEAN_ORACLE. Root nimmt den privaten unsigned192-Meter-
+und exakten Fehlerpfadentwurf an; die Umsetzung und Runtimeabnahme folgen getrennt.
 
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
-| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Vorbereitung Runde 2 geliefert](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2.md): direkte lazy Biomhistorie/Halo, kumulative Zulassung und privater 192-Bit-Metervorschlag. [Unabhängiger Review Runde 2 beauftragt](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW_TASK.md); bisheriges BLOCKING_CONTRACT gilt bis Abschluss. Keine Rust-Runtimefreigabe. |
+| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. Root nimmt die korrigierte Vorbereitung und private Zähler-/Fehlerweitergabe an. [World-only Rust-Runtime beauftragt](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_TASK.md); vollständiges Surface→Carver-Replay und native Fehler-/Grenz-/Allokationsabnahme offen. Keine Appaktivierung. |
 | 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Vorbereitung Runde 2 geliefert](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md): obligatorischer Bind-Debit, konkrete Scratchziele und exklusive Pending-RNG-Lease. [Unabhängiger Korrekturreview beauftragt](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW_TASK.md); B1/B2/B3 bleiben bis Abschluss Gates. Der historische Helper enthält abs(block>>4), entgegen dem ersten H1-Reviewtext; alte Bytes bleiben unverändert. Kontrollierte Proben sind keine whole-FEATURES-Abnahme. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
@@ -267,7 +268,7 @@ Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
 Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
-Die drei aktuellen T3-Aufträge sind GEN-05.11 unabhängiger Review Runde 2,
+Die drei aktuellen T3-Aufträge sind GEN-05.11 Rust-Runtime,
 GEN-06.1 unabhängiger Review Runde 2 und die gezielte Storagekorrektur DUR-03.3b.
 Der eingefrorene Storage-Kandidat Runde 6 zählt Block-Entities mit ihrer
 tatsächlichen Kodierlänge; Autorenchecks Debug/Release jeweils 354 grün.
