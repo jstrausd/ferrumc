@@ -529,11 +529,32 @@
   `StaleHandle`/`SnapshotOnly`/`Draining`/`NotInitialized`) and change nothing.
   Success removes the PlayerState and its confirmed bytes from player accounting
   in the same step; the receipt carries only PlayerId and freed bytes. One call
-  visits at most one player entry, 32 inputs, 32 pendings, 256 retained groups
-  and 384 lifecycle cells and allocates nothing. There is no automatic eviction.
+  visits at most one player entry, 32 inputs, 32 pendings in each of three
+  passes (Take pins, item reservation, other pending), 256 retained groups and
+  384 lifecycle cells, 769 entry visits within the contract bound of 833, plus
+  one keyed pending lookup per queued Retry/Reconcile, and allocates nothing.
+  There is no automatic eviction.
 - A bootstrap pending can only exist for a PlayerId without PlayerState, so it
   never coexists with a releasable handle; a queued Bootstrap/Restore/Rejoin
   read of the same PlayerId refuses as a queued input. Chunk tickets carry no
   PlayerId; the only chunk-bound player reservation is the pair/entity pending.
 - `ferrumc_sim` re-exports `OwnershipTransferId` and `OwnershipReceiptQuery`
   as plain identity values for consumers without a storage dependency.
+
+## Selected hotbar slot in the connected view (SIM-03.4c)
+
+- `ConnectedOwnedPlayerView::selected` returns the typed `HotbarSlot` (`0..=8`)
+  of exactly the viewed admission. Its only source is the owner's private
+  `OwnedPlayerInventory::selected`: an accepted `select_hotbar` writes it when
+  applied, and every native save materializes `NativePlayerSnapshot::selected`
+  from it. Bootstrap, restore and rejoin seed it from the admitted durable
+  snapshot. There is no Session-side or second Sim copy.
+- The view checks the field once at creation, under the same shared shard
+  borrow that keeps it unchanged for the view's lifetime; the accessor is a
+  `const` copy without allocation. A field above `8` would refuse view creation
+  with `Malformed`, which no admitted writer can produce.
+- A selection deferred behind a pending save, or refused (out of range,
+  detached, stale or foreign handle), is not visible, exactly like position,
+  look and mode. Detached, stale, foreign, stopped and `SnapshotOnly` handles
+  still produce no view. The Session held-slot resync and its driver wiring
+  remain NET-04.2f.

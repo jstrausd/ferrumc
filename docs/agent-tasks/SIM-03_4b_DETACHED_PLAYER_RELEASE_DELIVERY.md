@@ -86,7 +86,7 @@ Wirkung: `players.remove` und `player_bytes -= confirmed.len()` (checked, vor
 der Mutation berechnet) im selben Schritt. Die Zelle ist seit der Ack frei;
 Pendingbytes, Inputbytes, Publication- und Lifecyclecredits betreffen den
 Spieler nachweislich nicht mehr (Gates 6–11). Arbeit je Aufruf: ein
-Map-Eintrag, ≤32 Inputs, 2×≤32 Pendings, ≤256 retained Gruppen, ≤384 Zellen;
+Map-Eintrag, ≤32 Inputs, 3×≤32 Pendings, ≤256 retained Gruppen, ≤384 Zellen;
 keine Allokation; keine automatische Verdrängung. Release ist `&mut self`
 zwischen Boundaries, der nächste Plan sieht nur die verringerte Spielerzahl.
 
@@ -208,3 +208,11 @@ und entfernen sie (wie die bestehenden DUR-04.2-Tests). Logs und Summary unter
 Session-Retention und Release-Caller (NET-04.2e2), App-Driver und Stop-Deadline
 (DUR-05a, R3-A3), Isolierung quarantinierter Pendings (R3-A5), Live-Aktivierung,
 Survival-, Paper- und Performanceaussagen.
+
+## Root-Korrekturvermerk (12.10.2026)
+
+Befund N1 des [Runtime-Reviews](SIM-03_4b_DETACHED_PLAYER_RELEASE_REVIEW.md):
+Die Pending-Map wird dreimal durchlaufen, nicht zweimal. Die Arbeitsangabe oben
+ist entsprechend auf „3×≤32 Pendings“ korrigiert, zusammen 1 + 32 + 3×32 + 256 +
+384 = 769 Besuche innerhalb der Grenze von 833. Code-Kommentare und INVARIANTS
+sind mit SIM-03.4c korrigiert; das Verhalten ist unverändert.

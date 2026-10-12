@@ -320,6 +320,9 @@ impl NativePlayerSnapshot {
         self.game_mode
     }
     /// Returns the selected hotbar index; admission requires `0..=8`.
+    ///
+    /// A snapshot materialized from an admitted player carries that player's
+    /// applied selection, which `ConnectedOwnedPlayerView::selected` reads live.
     pub const fn selected(&self) -> u8 {
         self.selected
     }
@@ -338,6 +341,32 @@ impl NativePlayerSnapshot {
     /// Reads FCPS3 only; explicit legacy JSON migration belongs to the driver.
     pub fn try_from_record(record: &PlayerRecord) -> Result<Self, PlayerOwnershipError> {
         codec::decode(record)
+    }
+}
+
+/// One of the nine native hotbar slots, the index of the selected hand.
+///
+/// Values above `8` are refused rather than wrapped; window-0 slot `36 + index`
+/// holds the selected stack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct HotbarSlot(u8);
+
+impl HotbarSlot {
+    /// Number of hotbar slots.
+    pub const COUNT: u8 = 9;
+
+    /// Validates a hotbar index, returning `None` above `8`.
+    pub const fn new(index: u8) -> Option<Self> {
+        if index < Self::COUNT {
+            Some(Self(index))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the hotbar index `0..=8`, the encoding of `NativePlayerSnapshot::selected`.
+    pub const fn index(self) -> u8 {
+        self.0
     }
 }
 

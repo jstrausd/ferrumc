@@ -298,7 +298,10 @@ zum Release, Leave-Save-Zustandsmaschine mit typisierter Quarantäne, Release nu
 Runde 1 fand einen Driverabbruch beim Stop-Final-Save, einen nie endenden
 zurückgehaltenen Disconnect und einen Vertragsfehler in der Wiederholungszählung;
 der Root hat §7.3 dazu um den Nachtrag V1 ergänzt. Session Debug/Release je244,
-App375 und Testkit100 grün. Der Held-Slot-Resync wartet auf einen Sim-Producer.
+App375 und Testkit100 grün. Den fehlenden Sim-Producer für den Held-Slot-Resync
+liefert das unabhängig CLEAN_RUNTIME integrierte
+[SIM-03.4c](agent-tasks/SIM-03_4c_SELECTED_SLOT_VIEW_REVIEW.md); die Verdrahtung
+folgt in NET-04.2f.
 DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge; die f-Auflagen stehen in
 den [Rootentscheidungen](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_ROOT_DECISIONS.md).
 

@@ -4,8 +4,8 @@ use super::{PendingKind, SimShard};
 use crate::collector_lifecycle::{CollectorLifecycleState, LifecycleCellKey};
 use crate::{
     CollectorLifecycleError, CollectorLifecycleLimits, CollectorLifecycleStatus,
-    CollectorLifecycleTicket, CollectorLifecycleView, ConnectedOwnedPlayerView, OwnedPlayerHandle,
-    PlayerLocalGeneration, PlayerOwnershipError,
+    CollectorLifecycleTicket, CollectorLifecycleView, ConnectedOwnedPlayerView, HotbarSlot,
+    OwnedPlayerHandle, PlayerLocalGeneration, PlayerOwnershipError,
 };
 
 impl SimShard {
@@ -65,13 +65,20 @@ impl SimShard {
             return Err(PlayerOwnershipError::Draining);
         }
         let player = self.actual_player(handle)?;
-        if player.owned.as_ref().is_none_or(|o| !o.connected) {
-            return Err(PlayerOwnershipError::Ineligible("detached player"));
-        }
+        let owned = match &player.owned {
+            Some(owned) if owned.connected => owned,
+            _ => return Err(PlayerOwnershipError::Ineligible("detached player")),
+        };
+        // Every writer stores only `0..=8` (FCPS3 encode/decode, select
+        // validation), so this refusal is unreachable; it keeps the typed
+        // accessor infallible without trusting that invariant silently.
+        let selected = HotbarSlot::new(owned.selected)
+            .ok_or(PlayerOwnershipError::Malformed("selected hotbar slot"))?;
         Ok(ConnectedOwnedPlayerView {
             player,
             state,
             id: handle.player,
+            selected,
         })
     }
 

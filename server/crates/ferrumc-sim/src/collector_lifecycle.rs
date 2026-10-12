@@ -7,7 +7,9 @@ use std::num::NonZeroUsize;
 use ferrumc_core::{GameMode, PlayerId};
 use ferrumc_math::Vec3;
 
-use crate::{GenerationBinding, ItemCollectorBinding, OwnedPlayerHandle, PlayerLocalGeneration};
+use crate::{
+    GenerationBinding, HotbarSlot, ItemCollectorBinding, OwnedPlayerHandle, PlayerLocalGeneration,
+};
 
 /// Hard ceiling for the checked scalar lifecycle outer layout, not an RSS bound.
 pub const MAX_COLLECTOR_LIFECYCLE_BYTES: usize = 1024 * 1024;
@@ -84,6 +86,9 @@ pub struct ConnectedOwnedPlayerView<'a> {
     pub(crate) player: &'a crate::shard::PlayerState,
     pub(crate) state: &'a crate::player::PlayerOwnershipState,
     pub(crate) id: PlayerId,
+    /// Checked copy of the borrowed admission's `OwnedPlayerInventory::selected`;
+    /// the shared shard borrow `'a` keeps it equal to that field.
+    pub(crate) selected: HotbarSlot,
 }
 impl ConnectedOwnedPlayerView<'_> {
     /// Returns the actual player's UUID identity.
@@ -105,6 +110,18 @@ impl ConnectedOwnedPlayerView<'_> {
     /// Returns the actual native mode, including fresh-bootstrap Survival.
     pub const fn game_mode(&self) -> GameMode {
         self.player.game_mode
+    }
+    /// Returns the applied selected hotbar slot of exactly this admission.
+    ///
+    /// The value is the owner's single `selected` field: an accepted
+    /// `select_hotbar` writes it when applied, and every native player pending
+    /// (autosave, leave-save, drop, pickup, click) materializes
+    /// `NativePlayerSnapshot::selected` from it. A
+    /// selection still deferred behind a pending save or refused input is not
+    /// visible, exactly like position, look and mode. Bootstrap, restore and
+    /// rejoin seed it from the admitted durable snapshot.
+    pub const fn selected(&self) -> HotbarSlot {
+        self.selected
     }
     /// Uses the existing World `BiomeZoomSeed` producer on the actual world seed.
     pub fn hashed_seed(&self) -> i64 {
@@ -198,6 +215,7 @@ impl CollectorLifecycleView<'_> {
             player: v.player,
             state: v.state,
             id: v.id,
+            selected: v.selected,
         })
     }
     /// Borrows the exact retained fact minted by native Disconnect apply.

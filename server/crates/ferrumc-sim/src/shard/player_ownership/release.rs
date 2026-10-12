@@ -3,8 +3,11 @@
 //! Release runs only between boundaries, never inside a counter or recovery
 //! boundary. Every gate is a borrowed scan that precedes the single mutation,
 //! so a refusal leaves the shard unchanged. One call visits at most the
-//! player map entry, 32 queued inputs, 32 pendings (twice), 256 retained
-//! publication groups and 384 lifecycle cells; it never allocates.
+//! player map entry, 32 queued inputs, 32 pendings in each of three passes
+//! (Take pins, item reservation, other pending), 256 retained publication
+//! groups and 384 lifecycle cells: 1 + 32 + 3 × 32 + 256 + 384 = 769 entry
+//! visits, within the contract bound of 833. A queued `Retry` or `Reconcile`
+//! adds one keyed pending lookup. It never allocates.
 
 use ferrumc_core::PlayerId;
 use ferrumc_storage::OwnershipTransferId;
