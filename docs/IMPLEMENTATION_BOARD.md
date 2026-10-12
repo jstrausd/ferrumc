@@ -268,14 +268,20 @@ Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
 Die drei aktuellen T3-Aufträge sind GEN-05.11 Vorbereitung Runde 2,
-GEN-06.1 unabhängiger Review und DUR-03.3 unabhängiger Storage-Review Runde 3.
+GEN-06.1 unabhängiger Review und die gezielte Storagekorrektur DUR-03.3b.
 Der eingefrorene Storage-Kandidat Runde 6 zählt Block-Entities mit ihrer
 tatsächlichen Kodierlänge; Autorenchecks Debug/Release jeweils 354 grün.
 Root prüfte alle 91 Quelldateien bytegleich und stellte ein readonly Archiv
 des echten `c0b78c23` plus Kandidat bereit. Das ersetzt keine unabhängige
-Runtimeabnahme. Der neu dokumentierte R6-B2-Startup-Scan kann für große gültige
-Journale am Scanbudget scheitern; der Reviewer muss Grenze und Reopenwirkung
-bewerten. Storage bleibt bis zum Review unintegriert.
+Runtimeabnahme. Der [Storage-Review Runde 3](agent-tasks/DUR-03_3_PLAYER_BLOCK_DURABILITY_RUNTIME_REVIEW_ROUND3.md)
+bestätigt B1 und 23 gezielte Tests, bleibt aber wegen R6-B2 FINDINGS: ein gültiger
+1024-Effekt-Commit lässt sich mit derselben 1-GiB-Scanallowance nicht wieder öffnen.
+Root verlangt die Korrektur vor Integration, ohne Grenzerhöhung oder Ausnahme.
+[DUR-03.3b](agent-tasks/DUR-03_3b_STARTUP_RECEIPT_REUSE_TASK.md) hält höchstens
+einen Receipt während seines zusammenhängenden Journalbereichs und beseitigt
+Mehrfachlesen/Hashen/Parsen bei vollständiger Zeilen- und Relationsprüfung.
+Die alten 91 Source- und 29 Reviewevidenz-Dateien sind erneut bytegeprüft;
+Storage bleibt bis neuer Prüfung unintegriert.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
