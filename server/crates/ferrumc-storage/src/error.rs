@@ -34,6 +34,10 @@ pub enum PersistentEntityCursorRejection {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StorageError {
+    /// Typed Format7 cumulative validation adapter, without string classification.
+    #[error("Format7 validation: {0}")]
+    BlockValidation(Box<crate::BlockDurabilityError>),
+
     /// This backend has not explicitly adopted UUID entity persistence.
     #[error("UUID entity persistence is not supported by this storage mode")]
     PersistentEntitiesUnsupported,
@@ -378,6 +382,7 @@ impl From<StorageError> for ServerError {
     fn from(err: StorageError) -> Self {
         let message = err.to_string();
         match err {
+            StorageError::BlockValidation(e) => (*e).into(),
             // Every bound rejection is a capacity-class failure: the request
             // asked for more than a bounded resource permits.
             StorageError::KeyTooLong { .. }

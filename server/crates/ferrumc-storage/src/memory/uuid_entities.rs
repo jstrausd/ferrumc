@@ -21,7 +21,11 @@ impl PersistentEntityStore for InMemoryStore {
         key: PersistentEntityKey,
         expected: GenerationIdentity,
     ) -> Result<Option<PersistentEntityRecord>> {
-        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            crate::generation::GenerationMode::Ownership
+                | crate::generation::GenerationMode::BlockDurability
+        ) {
             return Ok(
                 crate::PlayerEntityOwnershipStore::load_owned_entity(self, key, expected)
                     .await?
@@ -149,7 +153,26 @@ impl PersistentEntityStore for InMemoryStore {
         cursor: Option<PersistentEntityCursor>,
         limit: NonZeroU16,
     ) -> Result<PersistentEntityPage> {
-        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+        if self.block_config.is_some() {
+            return self
+                .read_owned_worker(move |r, owner| {
+                    Ok(engine::page(
+                        &crate::ownership::engine::EntityAdapter(r),
+                        owner,
+                        chunk,
+                        expected,
+                        cursor.as_ref(),
+                        limit,
+                    )?)
+                })
+                .await
+                .map_err(Into::into);
+        }
+        if matches!(
+            self.generation_mode,
+            crate::generation::GenerationMode::Ownership
+                | crate::generation::GenerationMode::BlockDurability
+        ) {
             return self
                 .owned_uuid_page(chunk, expected, cursor.as_ref(), limit)
                 .map_err(Into::into);

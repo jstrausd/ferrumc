@@ -1041,10 +1041,28 @@ def negated_claim(clause: str, match: re.Match[str]) -> bool:
     )
 
 
+# Closed noun grammar: a denial may govern an enumeration, but never a
+# predicate, condition, or a second positive claim inside that enumeration.
+CLAIM_NOUN = (
+    r"(?:full\s+)?(?:Survival|compatibility|"
+    r"(?:Paper|client|plugin|server|API|ABI|protocol)"
+    r"(?:/(?:Paper|client|plugin|server|API|ABI|protocol))*\s+compatibility|"
+    r"performance(?:/RSS)?|RSS|migration|process-kill(?:/power-loss)?|"
+    r"power-loss|App(?:/Sim)?\s+activation|Sim\s+activation)"
+)
+DENIED_CLAIM_LIST = re.compile(
+    rf"There\s+is\s+no\s+{CLAIM_NOUN}"
+    rf"(?:,\s*{CLAIM_NOUN})+"
+    rf"(?:,?\s+(?:or|and)\s+{CLAIM_NOUN})?\s+claims?[.]?",
+    re.I,
+)
+
+
 def claim_segments(text: str) -> list[str]:
     return [
         segment.strip()
         for clause in clauses(text)
+        if DENIED_CLAIM_LIST.fullmatch(clause) is None
         for segment in LOCAL_BOUNDARY.split(clause)
         if segment.strip()
     ]
@@ -1063,6 +1081,12 @@ def neutral_compatibility(clause: str, match: re.Match[str]) -> bool:
         if re.search(r"\bdyn-\s*$", prefix, re.I) and re.match(
             r"\s+[A-Z][A-Za-z0-9_]*(?:Store|Trait)\s+(?:has|provides)\s+",
             suffix,
+        ):
+            return True
+        # An explicitly quoted Rust technical term is a mention, not a
+        # promise. Require mention grammar, a closing quote, and no product noun.
+        if re.search(r'\b(?:zum|der)\s+Rust-Fachbegriff\s+„dyn-$', prefix) and re.match(
+            r'“(?=\s*(?:[.,(]|$))', suffix
         ):
             return True
         if re.match(r"\s+additions?\b", suffix, re.I):
@@ -1810,6 +1834,116 @@ def self_test(repo_root: Path) -> None:
                     "dyn-compatible-plugin-claim",
                     {"README.md": "FerrumC offers dyn-compatible plugins.\n"},
                     "unqualified-compatibility",
+                ),
+                (
+                    'rust-term-review',
+                    {"docs/storage.md": 'Treffer zum Rust-Fachbegriff „dyn-compatible“ (Rustdoc).\n'},
+                    None,
+                ),
+                (
+                    'rust-term-review-round2',
+                    {"docs/storage.md": 'Nur der Rust-Fachbegriff „dyn-compatible“ (wie Runde 1).\n'},
+                    None,
+                ),
+                (
+                    'rust-term-plugin-object',
+                    {"docs/storage.md": 'Treffer zum Rust-Fachbegriff „dyn-compatible“ plugins are supported.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'rust-term-server-object',
+                    {"docs/storage.md": 'Treffer zum Rust-Fachbegriff „dyn-compatible“ servers are supported.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'rust-term-plugin-promise',
+                    {"docs/storage.md": 'Treffer zum Rust-Fachbegriff „dyn-compatible“, FerrumC guarantees plugin compatibility.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'rust-term-server-promise',
+                    {"docs/storage.md": 'Treffer zum Rust-Fachbegriff „dyn-compatible“ and FerrumC is server-compatible.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'rust-term-target-in-quote',
+                    {"docs/storage.md": 'Treffer zum Rust-Fachbegriff „dyn-compatible with plugins“.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list',
+                    {"docs/storage.md": 'There is no full Survival, Paper/client/plugin compatibility, performance/RSS, migration, process-kill/power-loss, or App/Sim activation claim.\n'},
+                    None,
+                ),
+                (
+                    'denied-claim-list-and',
+                    {"docs/storage.md": 'There is no migration, plugin compatibility, and App activation claim.\n'},
+                    None,
+                ),
+                (
+                    'denied-claim-list-comma-positive',
+                    {"docs/storage.md": 'There is no full Survival, Paper/client/plugin compatibility claim, FerrumC is compatible.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-coordinated-positive',
+                    {"docs/storage.md": 'There is no full Survival, Paper/client/plugin compatibility claim and FerrumC is compatible.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-not-only',
+                    {"docs/storage.md": 'There is not only full Survival, Paper/client/plugin compatibility, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-not-merely',
+                    {"docs/storage.md": 'There is not merely full Survival, Paper/client/plugin compatibility, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-conditional-prefix',
+                    {"docs/storage.md": 'If enabled, there is no full Survival, Paper/client/plugin compatibility, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-conditional-suffix',
+                    {"docs/storage.md": 'There is no full Survival, Paper/client/plugin compatibility, migration claim if enabled.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-conditional-promise',
+                    {"docs/storage.md": 'FerrumC is compatible if there is no full Survival, Paper/client/plugin compatibility, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-embedded-quality',
+                    {"docs/storage.md": 'There is no full Survival, Paper/client/plugin compatibility is guaranteed, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-embedded-predicate',
+                    {"docs/storage.md": 'There is no full Survival, FerrumC is compatible, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-embedded-guarantee',
+                    {"docs/storage.md": 'There is no full Survival, FerrumC guarantees compatibility, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-positive-noun',
+                    {"docs/storage.md": 'There is full Survival, Paper/client/plugin compatibility, migration claim.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-positive-next-sentence',
+                    {"docs/storage.md": 'There is no full Survival, Paper/client/plugin compatibility, migration claim. FerrumC is compatible.\n'},
+                    'unqualified-compatibility',
+                ),
+                (
+                    'denied-claim-list-marketing',
+                    {"docs/storage.md": 'There is no migration, plugin compatibility claim. FerrumC promises no data loss.\n'},
+                    'marketing-claim',
                 ),
                 (
                     "neutral-uuid-storage-pages",

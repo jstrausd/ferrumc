@@ -99,6 +99,15 @@ pub enum OwnershipError {
         /// Persisted digest.
         stored: OwnershipRequestIdentity,
     },
+    /// A Format7 read requested the other receipt family.
+    #[error("receipt kind mismatch: {id:?}")]
+    ReceiptKindMismatch {
+        /// Operation identity.
+        id: OwnershipTransferId,
+    },
+    /// Explicit typed Format7 byte/work/runtime adapter.
+    #[error("Format7 ownership adapter: {0}")]
+    Block(Box<crate::BlockDurabilityError>),
     /// Canonical bytes exceed the hard or persisted admission bound.
     #[error("ownership request is {len} bytes (maximum {max})")]
     RequestBytesExceeded {

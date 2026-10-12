@@ -24,7 +24,7 @@ use crate::{
     MAX_PLUGIN_KEY_LEN, MAX_PLUGIN_VALUE_LEN, MAX_UUID_STORE_PLUGIN_ID_LEN,
 };
 
-const TABLES: [TableDefinition<'_, &[u8], &[u8]>; 14] = [
+pub(super) const TABLES: [TableDefinition<'_, &[u8], &[u8]>; 14] = [
     GENERATION_TABLE,
     CHUNK_TABLE,
     CHUNK_OVERLAY_TABLE,
@@ -40,7 +40,7 @@ const TABLES: [TableDefinition<'_, &[u8], &[u8]>; 14] = [
     ENTITY_OWNER,
     RECEIPT,
 ];
-const TABLE_NAMES: [&str; 14] = [
+pub(super) const TABLE_NAMES: [&str; 14] = [
     "ferrumc:generation",
     "ferrumc:chunk",
     "ferrumc:chunk_overlay",
@@ -210,7 +210,7 @@ fn journal_error(e: super::uuid_migration::UuidEntityMigrationError) -> Ownershi
         other => backend(other),
     }
 }
-fn common_row(
+pub(super) fn common_row(
     reader: &impl EntityRead,
     name: &'static str,
     key: &[u8],
@@ -358,7 +358,7 @@ fn scan_metadata(
     budget.end(0);
     Ok(watermark)
 }
-fn owned_player_row(
+pub(super) fn owned_player_row(
     reader: &impl engine::Read,
     name: &'static str,
     key: &[u8],
@@ -381,7 +381,11 @@ fn owned_player_row(
     engine::player_state(reader, ScopedPlayerKey::new(header.scope, id), expected)?;
     Ok(())
 }
-fn owned_entity_row(reader: &impl engine::Read, key: &[u8], value: &[u8]) -> OwnershipResult<()> {
+pub(super) fn owned_entity_row(
+    reader: &impl engine::Read,
+    key: &[u8],
+    value: &[u8],
+) -> OwnershipResult<()> {
     let header = raw::entity_header(key, value)?;
     let (_, uuid) = crate::persistent_entity::raw::decode_locator_key(key)?;
     let expected =
@@ -835,6 +839,7 @@ mod tests {
                 generation_mode: crate::generation::GenerationMode::Ownership,
                 entity_incarnation: std::sync::Arc::new(()),
                 ownership_runtime: None,
+                block_config: None,
             };
             assert_eq!(snapshot(&wrapper), before, "case{case}");
         }

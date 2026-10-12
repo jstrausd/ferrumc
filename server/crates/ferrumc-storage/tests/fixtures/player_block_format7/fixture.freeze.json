@@ -1,0 +1,49 @@
+{
+  "kind": "fixed independent contract fixtures, no runtime output",
+  "files": {
+    "make_fixtures.py": {
+      "bytes": 6564,
+      "sha256": "6ef39fcb71708a094d46fbac03a4402000a00c4e32ad5877358b896a8c4c6905"
+    },
+    "before17.tsv": {
+      "bytes": 9188,
+      "sha256": "4ce333d50b4d7869d6bbeab82bfe0ad027e7600b433a9e136444d9400f8b13af"
+    },
+    "after17.tsv": {
+      "bytes": 167664,
+      "sha256": "6c9777c3f14c86c7cbd31e8a57fe3e2968d29658648a924b1a36644b0dfa58f7"
+    },
+    "stack8.fcis": {
+      "bytes": 57,
+      "sha256": "f1d8d324fb9a0f5b56089f46fc40bb74734da63929792e4a0981a5cbfe0d04b5"
+    },
+    "before.fcps3": {
+      "bytes": 2908,
+      "sha256": "67589f3fbbf68928827744023e3876e8663a3483a7372dcb43774b8c8cf06446"
+    },
+    "after.fcps3": {
+      "bytes": 2908,
+      "sha256": "27f6c2a5d00401d64aec253c3a0d56841faf625d575f8cea90139dfc698d3aa7"
+    },
+    "chest8.entity": {
+      "bytes": 1651,
+      "sha256": "85fef326f8ae77f2c70c9ff5443539481e16d59579ed9b5f7f21eab019c22810"
+    },
+    "seed.fcbq": {
+      "bytes": 288,
+      "sha256": "26e3361c9a26eb7c10887119877326e45a8f47ffa449a897ee6855ed19b0b28c"
+    },
+    "seed.fcbr": {
+      "bytes": 377,
+      "sha256": "890d55c7eeabf89b18199de471a35e6e5d77b84ee95f5dd3719fff9fd4df52d7"
+    },
+    "joint.fcbq": {
+      "bytes": 42578,
+      "sha256": "09c9752d59dc5ccd433462c7f30b4080338b6cbc906779c59a9a57fc6cf2fbc7"
+    },
+    "joint.fcbr": {
+      "bytes": 42667,
+      "sha256": "f2dc1206d827a3ed7d6288a06cc2d1d6b6798788508ad9fd7d424585f1261435"
+    }
+  }
+}

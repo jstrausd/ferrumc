@@ -28,6 +28,7 @@ use crate::{
     MAX_GENERATION_IDENTITIES,
 };
 
+mod blocks;
 mod ownership;
 mod uuid_entities;
 
@@ -46,6 +47,9 @@ struct MutationJournalState {
     receipts: HashMap<JournalBatchId, CommittedJournalBatch>,
 }
 
+/// Each plugin's private namespace, nested so one lookup reaches one plugin only.
+type PluginMaps = HashMap<PluginId, HashMap<StorageKey, Vec<u8>>>;
+
 /// An in-memory store implementing [`WorldStore`], [`PlayerStore`], and
 /// [`PluginStore`].
 ///
@@ -55,25 +59,58 @@ struct MutationJournalState {
 #[derive(Debug, Default)]
 pub struct InMemoryStore {
     generation_mode: GenerationMode,
-    generations: RwLock<HashMap<GenerationKey, GenerationIdentity>>,
+    generations: Arc<RwLock<HashMap<GenerationKey, GenerationIdentity>>>,
     /// Exclusive initialization sees all world maps at one mutation boundary.
-    mutation_boundary: RwLock<()>,
-    chunks: RwLock<HashMap<ChunkKey, ChunkRecord>>,
+    mutation_boundary: Arc<RwLock<()>>,
+    chunks: Arc<RwLock<HashMap<ChunkKey, ChunkRecord>>>,
     /// Per-chunk overlays (only player-modified sections), keyed independently of
     /// the full-chunk map above.
-    overlays: RwLock<HashMap<ChunkKey, ChunkOverlayRecord>>,
+    overlays: Arc<RwLock<HashMap<ChunkKey, ChunkOverlayRecord>>>,
     /// The append-only block-mutation journal and its storage-owned sequence.
-    mutation_log: RwLock<MutationJournalState>,
-    entities: RwLock<HashMap<EntityKey, EntityRecord>>,
-    uuid_entities: RwLock<crate::persistent_entity::engine::MemoryState>,
+    mutation_log: Arc<RwLock<MutationJournalState>>,
+    entities: Arc<RwLock<HashMap<EntityKey, EntityRecord>>>,
+    uuid_entities: Arc<RwLock<crate::persistent_entity::engine::MemoryState>>,
     entity_incarnation: Arc<()>,
-    players: RwLock<HashMap<PlayerId, PlayerRecord>>,
-    ownership_state: RwLock<ownership::State>,
+    players: Arc<RwLock<HashMap<PlayerId, PlayerRecord>>>,
+    ownership_state: Arc<RwLock<ownership::State>>,
     ownership_runtime: Option<Arc<crate::ownership::Runtime>>,
+    block_config: Option<crate::BlockDurabilityConfig>,
     /// Each plugin id maps to its own private key-value namespace. Nesting the
     /// maps is what enforces cross-plugin isolation: a lookup can only ever
     /// reach one plugin's inner map.
-    plugins: RwLock<HashMap<PluginId, HashMap<StorageKey, Vec<u8>>>>,
+    plugins: Arc<RwLock<PluginMaps>>,
+}
+
+impl InMemoryStore {
+    /// Format7 refuses every blind block writer before validation or scheduling.
+    fn refuse_blind_block_writer(&self) -> Result<()> {
+        if self.generation_mode == GenerationMode::BlockDurability {
+            return Err(crate::BlockDurabilityError::Unsupported.into());
+        }
+        Ok(())
+    }
+    /// Shares every map and the same backend incarnation with one blocking worker.
+    ///
+    /// Deliberately crate-private: a public `Clone` would let callers alias one
+    /// store's authority implicitly instead of sharing it through `Arc`.
+    pub(crate) fn share(&self) -> Self {
+        Self {
+            generation_mode: self.generation_mode,
+            generations: Arc::clone(&self.generations),
+            mutation_boundary: Arc::clone(&self.mutation_boundary),
+            chunks: Arc::clone(&self.chunks),
+            overlays: Arc::clone(&self.overlays),
+            mutation_log: Arc::clone(&self.mutation_log),
+            entities: Arc::clone(&self.entities),
+            uuid_entities: Arc::clone(&self.uuid_entities),
+            entity_incarnation: Arc::clone(&self.entity_incarnation),
+            players: Arc::clone(&self.players),
+            ownership_state: Arc::clone(&self.ownership_state),
+            ownership_runtime: self.ownership_runtime.clone(),
+            block_config: self.block_config,
+            plugins: Arc::clone(&self.plugins),
+        }
+    }
 }
 
 impl InMemoryStore {
@@ -239,11 +276,15 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn load_chunk(&self, key: ChunkKey) -> Result<Option<ChunkRecord>> {
+        if self.generation_mode == GenerationMode::BlockDurability {
+            return Ok(self.block_load_full(key).await?);
+        }
         let map = self.chunks.read().map_err(|_| poisoned("chunk"))?;
         Ok(map.get(&key).cloned())
     }
 
     async fn save_chunk(&self, key: ChunkKey, record: ChunkRecord) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if key.pos() != record.chunk().pos() {
             return Err(StorageError::ChunkPositionMismatch {
                 expected: key.pos(),
@@ -260,6 +301,7 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn save_chunks(&self, chunks: Vec<(ChunkKey, ChunkRecord)>) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if chunks.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: chunks.len(),
@@ -289,6 +331,7 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn delete_chunk(&self, key: ChunkKey) -> Result<bool> {
+        self.refuse_blind_block_writer()?;
         let _boundary = self.mutation_guard()?;
 
         let mut map = self.chunks.write().map_err(|_| poisoned("chunk"))?;
@@ -296,6 +339,9 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn load_chunk_overlay(&self, key: ChunkKey) -> Result<Option<ChunkOverlayRecord>> {
+        if self.generation_mode == GenerationMode::BlockDurability {
+            return Ok(self.block_load_overlay(key).await?);
+        }
         let map = self.overlays.read().map_err(|_| poisoned("overlay"))?;
         Ok(map.get(&key).cloned())
     }
@@ -304,6 +350,7 @@ impl WorldStore for InMemoryStore {
         &self,
         overlays: Vec<(ChunkKey, ChunkOverlayRecord)>,
     ) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if overlays.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: overlays.len(),
@@ -333,6 +380,7 @@ impl WorldStore for InMemoryStore {
     }
 
     async fn append_block_mutations(&self, mutations: Vec<BlockMutationLogRecord>) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if mutations.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: mutations.len(),
@@ -364,6 +412,7 @@ impl WorldStore for InMemoryStore {
         batch_id: JournalBatchId,
         mutations: Vec<BlockMutationLogRecord>,
     ) -> Result<JournalAppendReceipt> {
+        self.refuse_blind_block_writer()?;
         if mutations.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: mutations.len(),
@@ -422,7 +471,9 @@ impl WorldStore for InMemoryStore {
     async fn load_entity(&self, key: EntityKey) -> Result<Option<EntityRecord>> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -433,7 +484,9 @@ impl WorldStore for InMemoryStore {
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -447,7 +500,9 @@ impl WorldStore for InMemoryStore {
     async fn save_entities(&self, entities: Vec<(EntityKey, EntityRecord)>) -> Result<()> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -472,7 +527,9 @@ impl WorldStore for InMemoryStore {
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -486,7 +543,10 @@ impl WorldStore for InMemoryStore {
 #[async_trait]
 impl PlayerStore for InMemoryStore {
     async fn load_player(&self, id: PlayerId) -> Result<Option<PlayerRecord>> {
-        if self.generation_mode == GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::Ownership | GenerationMode::BlockDurability
+        ) {
             return Err(crate::OwnershipError::Unsupported.into());
         }
         let map = self.players.read().map_err(|_| poisoned("player"))?;
@@ -494,7 +554,10 @@ impl PlayerStore for InMemoryStore {
     }
 
     async fn save_player(&self, id: PlayerId, record: PlayerRecord) -> Result<()> {
-        if self.generation_mode == GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::Ownership | GenerationMode::BlockDurability
+        ) {
             return Err(crate::OwnershipError::Unsupported.into());
         }
         let _boundary = self.mutation_guard()?;
@@ -505,7 +568,10 @@ impl PlayerStore for InMemoryStore {
     }
 
     async fn delete_player(&self, id: PlayerId) -> Result<bool> {
-        if self.generation_mode == GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::Ownership | GenerationMode::BlockDurability
+        ) {
             return Err(crate::OwnershipError::Unsupported.into());
         }
         let _boundary = self.mutation_guard()?;

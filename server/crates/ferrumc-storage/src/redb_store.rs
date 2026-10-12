@@ -54,6 +54,8 @@ use crate::{
     MAX_GENERATION_IDENTITIES,
 };
 
+mod block_validation;
+mod blocks;
 pub(crate) mod migration;
 mod ownership;
 pub(crate) mod ownership_migration;
@@ -305,6 +307,9 @@ fn world_state_is_empty(txn: &redb::WriteTransaction) -> Result<bool> {
             }
         }
     }
+    if !blocks::state_is_empty(txn)? {
+        return Ok(false);
+    }
     Ok(true)
 }
 
@@ -477,6 +482,7 @@ pub struct RedbStore {
     generation_mode: GenerationMode,
     entity_incarnation: Arc<()>,
     ownership_runtime: Option<Arc<crate::ownership::Runtime>>,
+    block_config: Option<crate::BlockDurabilityConfig>,
 }
 
 impl fmt::Debug for RedbStore {
@@ -487,6 +493,13 @@ impl fmt::Debug for RedbStore {
 }
 
 impl RedbStore {
+    /// Format7 refuses every blind block writer before validation or scheduling.
+    fn refuse_blind_block_writer(&self) -> Result<()> {
+        if self.generation_mode == GenerationMode::BlockDurability {
+            return Err(crate::BlockDurabilityError::Unsupported.into());
+        }
+        Ok(())
+    }
     /// Opens the database at `path`, creating it if it does not exist.
     ///
     /// On a fresh file the metadata and data tables are created and the
@@ -566,6 +579,7 @@ impl RedbStore {
             generation_mode: mode,
             entity_incarnation: Arc::new(()),
             ownership_runtime: None,
+            block_config: None,
         })
     }
 
@@ -577,7 +591,9 @@ impl RedbStore {
             GenerationMode::Legacy => STORE_FORMAT_VERSION,
             GenerationMode::Metadata => GENERATION_STORE_FORMAT_VERSION,
             GenerationMode::UuidEntities => 5,
-            GenerationMode::Ownership => return Err(crate::OwnershipError::Unsupported.into()),
+            GenerationMode::Ownership | GenerationMode::BlockDurability => {
+                return Err(crate::OwnershipError::Unsupported.into())
+            }
         };
         {
             // The format marker is the gate for every table and record below.
@@ -710,6 +726,9 @@ impl WorldStore for RedbStore {
     }
 
     async fn load_chunk(&self, key: ChunkKey) -> Result<Option<ChunkRecord>> {
+        if self.generation_mode == GenerationMode::BlockDurability {
+            return Ok(self.block_load_full(key).await?);
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Option<ChunkRecord>> {
             let txn = db.begin_read().map_err(backend_err)?;
@@ -732,6 +751,7 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_chunk(&self, key: ChunkKey, record: ChunkRecord) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if key.pos() != record.chunk().pos() {
             return Err(StorageError::ChunkPositionMismatch {
                 expected: key.pos(),
@@ -763,6 +783,7 @@ impl WorldStore for RedbStore {
     }
 
     async fn save_chunks(&self, chunks: Vec<(ChunkKey, ChunkRecord)>) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if chunks.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: chunks.len(),
@@ -807,6 +828,7 @@ impl WorldStore for RedbStore {
     }
 
     async fn delete_chunk(&self, key: ChunkKey) -> Result<bool> {
+        self.refuse_blind_block_writer()?;
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<bool> {
             let txn = db.begin_write().map_err(backend_err)?;
@@ -823,6 +845,9 @@ impl WorldStore for RedbStore {
     }
 
     async fn load_chunk_overlay(&self, key: ChunkKey) -> Result<Option<ChunkOverlayRecord>> {
+        if self.generation_mode == GenerationMode::BlockDurability {
+            return Ok(self.block_load_overlay(key).await?);
+        }
         let db = Arc::clone(&self.db);
         let join = tokio::task::spawn_blocking(move || -> Result<Option<ChunkOverlayRecord>> {
             let txn = db.begin_read().map_err(backend_err)?;
@@ -848,6 +873,7 @@ impl WorldStore for RedbStore {
         &self,
         overlays: Vec<(ChunkKey, ChunkOverlayRecord)>,
     ) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if overlays.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: overlays.len(),
@@ -892,6 +918,7 @@ impl WorldStore for RedbStore {
     }
 
     async fn append_block_mutations(&self, mutations: Vec<BlockMutationLogRecord>) -> Result<()> {
+        self.refuse_blind_block_writer()?;
         if mutations.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: mutations.len(),
@@ -963,6 +990,7 @@ impl WorldStore for RedbStore {
         batch_id: JournalBatchId,
         mutations: Vec<BlockMutationLogRecord>,
     ) -> Result<JournalAppendReceipt> {
+        self.refuse_blind_block_writer()?;
         if mutations.len() > MAX_SAVE_BATCH {
             return Err(StorageError::BatchTooLarge {
                 len: mutations.len(),
@@ -1071,7 +1099,9 @@ impl WorldStore for RedbStore {
     async fn load_entity(&self, key: EntityKey) -> Result<Option<EntityRecord>> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -1091,7 +1121,9 @@ impl WorldStore for RedbStore {
     async fn save_entity(&self, key: EntityKey, record: EntityRecord) -> Result<()> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -1121,7 +1153,9 @@ impl WorldStore for RedbStore {
     async fn save_entities(&self, entities: Vec<(EntityKey, EntityRecord)>) -> Result<()> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -1162,7 +1196,9 @@ impl WorldStore for RedbStore {
     async fn delete_entity(&self, key: EntityKey) -> Result<bool> {
         if matches!(
             self.generation_mode,
-            GenerationMode::UuidEntities | GenerationMode::Ownership
+            GenerationMode::UuidEntities
+                | GenerationMode::Ownership
+                | GenerationMode::BlockDurability
         ) {
             return Err(StorageError::WireEntityPersistenceUnsupported.into());
         }
@@ -1185,7 +1221,10 @@ impl WorldStore for RedbStore {
 #[async_trait]
 impl PlayerStore for RedbStore {
     async fn load_player(&self, id: PlayerId) -> Result<Option<PlayerRecord>> {
-        if self.generation_mode == GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::Ownership | GenerationMode::BlockDurability
+        ) {
             return Err(crate::OwnershipError::Unsupported.into());
         }
         let db = Arc::clone(&self.db);
@@ -1202,7 +1241,10 @@ impl PlayerStore for RedbStore {
     }
 
     async fn save_player(&self, id: PlayerId, record: PlayerRecord) -> Result<()> {
-        if self.generation_mode == GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::Ownership | GenerationMode::BlockDurability
+        ) {
             return Err(crate::OwnershipError::Unsupported.into());
         }
         let mode = self.generation_mode;
@@ -1225,7 +1267,10 @@ impl PlayerStore for RedbStore {
     }
 
     async fn delete_player(&self, id: PlayerId) -> Result<bool> {
-        if self.generation_mode == GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            GenerationMode::Ownership | GenerationMode::BlockDurability
+        ) {
             return Err(crate::OwnershipError::Unsupported.into());
         }
         let db = Arc::clone(&self.db);

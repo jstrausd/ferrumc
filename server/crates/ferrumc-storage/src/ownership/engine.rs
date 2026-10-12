@@ -25,6 +25,22 @@ pub(crate) enum Table {
 pub(crate) trait Read: EntityRead {
     fn owned(&self, table: Table, key: &[u8]) -> OwnershipResult<Option<Self::Bytes<'_>>>;
     fn counts(&self) -> OwnershipResult<(u64, u64)>;
+    fn block_budget(&self) -> Option<crate::block_durability::engine::Budget> {
+        None
+    }
+    fn block_config(&self) -> Option<crate::BlockDurabilityConfig> {
+        None
+    }
+    fn block(
+        &self,
+        _table: crate::block_durability::engine::Table,
+        _key: &[u8],
+    ) -> OwnershipResult<Option<Self::Bytes<'_>>> {
+        Err(OwnershipError::Unsupported)
+    }
+    fn block_counts(&self) -> OwnershipResult<crate::block_durability::engine::Counts> {
+        Err(OwnershipError::Unsupported)
+    }
 }
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct State {
@@ -147,6 +163,18 @@ fn last_receipt(
     let bytes = reader
         .owned(Table::Receipt, &header.receipt.0)?
         .ok_or_else(|| raw::bad(raw::RECEIPT, "owner last-changing receipt missing"))?;
+    if reader.block_config().is_some() && bytes.as_ref().starts_with(b"FCBR") {
+        if resource != OwnershipResource::Player {
+            return Err(raw::bad(raw::RECEIPT, "Entity cannot point to FCBR"));
+        }
+        return crate::block_durability::engine::player_last(
+            reader,
+            header,
+            key,
+            expected,
+            bytes.as_ref(),
+        );
+    }
     let r = raw::receipt(&header.receipt.0, bytes.as_ref())?;
     if r.scope != header.scope || r.identity != expected {
         return Err(raw::bad(
@@ -311,6 +339,22 @@ pub(crate) fn load_pair(
         entity: load_entity(reader, owner, entity, expected)?,
     })
 }
+/// Validates one Format7 FCBR row and its relations under the shared call budget.
+fn block_receipt_digest(
+    reader: &impl Read,
+    id: &[u8; 16],
+    bytes: &[u8],
+) -> OwnershipResult<[u8; 32]> {
+    let config = reader.block_config().ok_or(OwnershipError::Unsupported)?;
+    let mut budget = reader
+        .block_budget()
+        .unwrap_or_else(|| crate::block_durability::engine::Budget::runtime(config));
+    let receipt = crate::block_durability::raw::frame(id, bytes, &mut budget)
+        .map_err(crate::block_durability::ownership_adapter)?;
+    crate::block_durability::engine::receipt_relations(reader, &receipt, &mut budget)
+        .map_err(crate::block_durability::ownership_adapter)?;
+    Ok(receipt.query.sha256())
+}
 pub(crate) fn lookup_receipt(
     reader: &impl Read,
     query: OwnershipReceiptQuery,
@@ -318,6 +362,10 @@ pub(crate) fn lookup_receipt(
     let Some(bytes) = reader.owned(Table::Receipt, &query.id.0)? else {
         return Ok(None);
     };
+    if reader.block_config().is_some() && bytes.as_ref().starts_with(b"FCBR") {
+        block_receipt_digest(reader, &query.id.0, bytes.as_ref())?;
+        return Err(OwnershipError::ReceiptKindMismatch { id: query.id });
+    }
     let r = raw::receipt(&query.id.0, bytes.as_ref())?;
     if r.query.identity != query.identity {
         return Err(OwnershipError::ReceiptCollision {
@@ -522,6 +570,27 @@ fn prepare_entity(
     };
     Ok(EntityChange { plan, header })
 }
+/// Format7 v1 receipts charge 272 shared retained bytes, refused before Player/Entity history.
+fn admit_shared_receipt_bytes(reader: &impl Read) -> OwnershipResult<()> {
+    let Some(config) = reader.block_config() else {
+        return Ok(());
+    };
+    let max = config.capacity.receipt_bytes;
+    if reader
+        .block_counts()?
+        .receipt_bytes
+        .checked_add(272)
+        .is_none_or(|n| n > max)
+    {
+        return Err(crate::block_durability::ownership_adapter(
+            crate::BlockDurabilityError::HistoryCapacity {
+                resource: "receipt bytes",
+                max,
+            },
+        ));
+    }
+    Ok(())
+}
 pub(crate) fn prepare(
     reader: &impl Read,
     owner: &Arc<()>,
@@ -530,7 +599,25 @@ pub(crate) fn prepare(
 ) -> OwnershipResult<Prepared> {
     r.admission(capacity.request)?;
     let query = r.query();
+    if reader.block_config().is_some() {
+        // Format7 checks the shared agreement before resolving either receipt family.
+        reader.counts()?;
+        reader.block_counts()?;
+    }
     // An old expectation or full admission history cannot hide an already committed retry.
+    // Cross-kind reuse is a collision against the validated stored FCBR digest.
+    if reader.block_config().is_some() {
+        if let Some(bytes) = reader.owned(Table::Receipt, &query.id.0)? {
+            if bytes.as_ref().starts_with(b"FCBR") {
+                let stored = block_receipt_digest(reader, &query.id.0, bytes.as_ref())?;
+                return Err(OwnershipError::ReceiptCollision {
+                    id: query.id,
+                    expected: query.identity,
+                    stored: super::OwnershipRequestIdentity(stored),
+                });
+            }
+        }
+    }
     if let Some(receipt) = lookup_receipt(reader, query)? {
         return Ok(Prepared::Replay(Box::new(receipt)));
     }
@@ -578,6 +665,7 @@ pub(crate) fn prepare(
             max: capacity.receipts,
         });
     }
+    admit_shared_receipt_bytes(reader)?;
     if revision_count > capacity.revisions {
         return Err(raw::bad("ferrumc:meta", "revision count exceeds capacity"));
     }

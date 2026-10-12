@@ -28,6 +28,7 @@ pub(super) struct State {
     pub(super) receipts: BTreeMap<Vec<u8>, Vec<u8>>,
     pub(super) receipt_count: u64,
     pub(super) revision_count: u64,
+    pub(super) blocks: super::blocks::State,
 }
 impl State {
     pub(super) fn is_empty(&self) -> bool {
@@ -38,6 +39,7 @@ impl State {
             && self.receipts.is_empty()
             && self.receipt_count == 0
             && self.revision_count == 0
+            && self.blocks.is_empty()
     }
     /// Hooks are infallible during application: readers hold this same lock boundary.
     fn apply(&mut self, plan: engine::Plan, mut after: impl FnMut()) {
@@ -76,6 +78,8 @@ impl State {
 pub(super) struct Reader<'a> {
     pub(super) state: &'a State,
     pub(super) uuid: MemoryRead<'a>,
+    pub(super) config: Option<crate::BlockDurabilityConfig>,
+    pub(super) budget: Option<crate::block_durability::engine::Budget>,
 }
 impl EntityRead for Reader<'_> {
     type Bytes<'a>
@@ -87,12 +91,23 @@ impl EntityRead for Reader<'_> {
         table: RawTable,
         key: &[u8],
     ) -> std::result::Result<Option<Self::Bytes<'_>>, StorageError> {
-        self.uuid.get(table, key)
+        let v = self.uuid.get(table, key)?;
+        if let Some(mut budget) = self.budget.clone() {
+            budget
+                .bytes(key.len() as u64 + v.map_or(0, <[u8]>::len) as u64)
+                .map_err(|e| StorageError::BlockValidation(Box::new(e)))?;
+        }
+        Ok(v)
     }
     fn identity(
         &self,
         key: GenerationKey,
     ) -> std::result::Result<Option<GenerationIdentity>, StorageError> {
+        if let Some(mut budget) = self.budget.clone() {
+            budget
+                .bytes(35)
+                .map_err(|e| StorageError::BlockValidation(Box::new(e)))?;
+        }
         self.uuid.identity(key)
     }
     fn index_rows(
@@ -100,7 +115,16 @@ impl EntityRead for Reader<'_> {
         lower: Bound<Vec<u8>>,
         upper: Bound<Vec<u8>>,
     ) -> std::result::Result<RawRows<'_, Self::Bytes<'_>>, StorageError> {
-        self.uuid.index_rows(lower, upper)
+        let rows = self.uuid.index_rows(lower, upper)?;
+        let budget = self.budget.clone();
+        Ok(Box::new(rows.map(move |row| {
+            let (k, v) = row?;
+            if let Some(mut b) = budget.clone() {
+                b.bytes((k.len() + v.len()) as u64)
+                    .map_err(|e| StorageError::BlockValidation(Box::new(e)))?;
+            }
+            Ok((k, v))
+        })))
     }
 }
 impl engine::Read for Reader<'_> {
@@ -111,7 +135,33 @@ impl engine::Read for Reader<'_> {
             engine::Table::EntityHeader => &self.state.entity_headers,
             engine::Table::Receipt => &self.state.receipts,
         };
-        Ok(map.get(key).map(Vec::as_slice))
+        let v = map.get(key).map(Vec::as_slice);
+        if let Some(mut b) = self.budget.clone() {
+            b.bytes(key.len() as u64 + v.map_or(0, <[u8]>::len) as u64)
+                .map_err(crate::block_durability::ownership_adapter)?;
+        }
+        Ok(v)
+    }
+    fn block_budget(&self) -> Option<crate::block_durability::engine::Budget> {
+        self.budget.clone()
+    }
+    fn block_config(&self) -> Option<crate::BlockDurabilityConfig> {
+        self.config
+    }
+    fn block(
+        &self,
+        table: crate::block_durability::engine::Table,
+        key: &[u8],
+    ) -> OwnershipResult<Option<Self::Bytes<'_>>> {
+        let v = self.state.blocks.map(table).get(key).map(Vec::as_slice);
+        if let Some(mut b) = self.budget.clone() {
+            b.bytes(key.len() as u64 + v.map_or(0, <[u8]>::len) as u64)
+                .map_err(crate::block_durability::ownership_adapter)?;
+        }
+        Ok(v)
+    }
+    fn block_counts(&self) -> OwnershipResult<crate::block_durability::engine::Counts> {
+        Ok(self.state.blocks.counts)
     }
     fn counts(&self) -> OwnershipResult<(u64, u64)> {
         Ok((self.state.receipt_count, self.state.revision_count))
@@ -129,15 +179,27 @@ impl InMemoryStore {
     pub(super) fn ownership_runtime(&self) -> OwnershipResult<&Arc<Runtime>> {
         self.ownership_runtime
             .as_ref()
-            .filter(|_| self.generation_mode == crate::generation::GenerationMode::Ownership)
+            .filter(|_| {
+                matches!(
+                    self.generation_mode,
+                    crate::generation::GenerationMode::Ownership
+                        | crate::generation::GenerationMode::BlockDurability
+                )
+            })
             .ok_or(OwnershipError::Unsupported)
     }
-    fn read_owned<T>(
+    pub(super) fn read_owned<T>(
         &self,
         f: impl FnOnce(&Reader<'_>) -> OwnershipResult<T>,
     ) -> OwnershipResult<T> {
         let runtime = self.ownership_runtime()?;
         let _permit = runtime.permit()?;
+        self.read_owned_inner(f)
+    }
+    fn read_owned_inner<T>(
+        &self,
+        f: impl FnOnce(&Reader<'_>) -> OwnershipResult<T>,
+    ) -> OwnershipResult<T> {
         let _boundary = self.mutation_guard()?;
         let generations = self
             .generations
@@ -148,6 +210,10 @@ impl InMemoryStore {
             .read()
             .map_err(|_| poisoned("ownership"))?;
         let reader = Reader {
+            config: self.block_config,
+            budget: self
+                .block_config
+                .map(crate::block_durability::engine::Budget::runtime),
             state: &state,
             uuid: MemoryRead {
                 state: &state.uuid,
@@ -169,6 +235,16 @@ impl InMemoryStore {
         let runtime = self.ownership_runtime()?;
         request.admission(runtime.config.capacity().max_request_bytes())?;
         let _permit = runtime.permit()?;
+        self.write_owned_inner(request, before, after_row, after)
+    }
+    fn write_owned_inner(
+        &self,
+        request: Request,
+        before: impl FnOnce() -> OwnershipResult<()>,
+        after_row: impl FnMut(),
+        after: impl FnOnce() -> OwnershipResult<()>,
+    ) -> OwnershipResult<OwnershipCommitOutcome> {
+        let runtime = self.ownership_runtime()?;
         let _boundary = self.mutation_guard()?;
         let generations = self
             .generations
@@ -179,6 +255,10 @@ impl InMemoryStore {
             .write()
             .map_err(|_| poisoned("ownership"))?;
         let reader = Reader {
+            config: self.block_config,
+            budget: self
+                .block_config
+                .map(crate::block_durability::engine::Budget::runtime),
             state: &state,
             uuid: MemoryRead {
                 state: &state.uuid,
@@ -197,7 +277,13 @@ impl InMemoryStore {
                 OwnershipCommitDisposition::Replayed,
             )),
             engine::Prepared::Commit(plan) => {
+                if let Some(config) = self.block_config {
+                    super::blocks::admit_v1_bytes(state.blocks.counts.receipt_bytes, config)?;
+                }
                 before()?;
+                if self.block_config.is_some() {
+                    state.blocks.counts.receipt_bytes += 272;
+                }
                 let receipt = plan.receipt.clone();
                 state.apply(*plan, after_row);
                 after().map_err(|e| OwnershipError::ExecutionUncertain {
@@ -211,6 +297,48 @@ impl InMemoryStore {
                 ))
             }
         }
+    }
+    pub(super) async fn read_owned_worker<T: Send + 'static>(
+        &self,
+        f: impl FnOnce(&Reader<'_>, &Arc<()>) -> OwnershipResult<T> + Send + 'static,
+    ) -> OwnershipResult<T> {
+        if self.block_config.is_none() {
+            return self.read_owned(|r| f(r, &self.entity_incarnation));
+        }
+        let permit = self.ownership_runtime()?.permit()?;
+        let store = self.share();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            store.read_owned_inner(|r| f(r, &store.entity_incarnation))
+        })
+        .await
+        .map_err(|e| OwnershipError::Backend(e.to_string()))?
+    }
+    async fn write_owned_worker(
+        &self,
+        request: Request,
+    ) -> OwnershipResult<OwnershipCommitOutcome> {
+        if self.block_config.is_none() {
+            return self.write_owned(request);
+        }
+        request.admission(
+            self.ownership_runtime()?
+                .config
+                .capacity()
+                .max_request_bytes(),
+        )?;
+        let permit = self.ownership_runtime()?.permit()?;
+        let query = request.query();
+        let store = self.share();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            store.write_owned_inner(request, || Ok(()), || {}, || Ok(()))
+        })
+        .await
+        .map_err(|e| OwnershipError::ExecutionUncertain {
+            query,
+            cause: e.to_string(),
+        })?
     }
     pub(super) fn owned_uuid_page(
         &self,
@@ -238,14 +366,16 @@ impl PlayerEntityOwnershipStore for InMemoryStore {
         key: ScopedPlayerKey,
         expected: GenerationIdentity,
     ) -> OwnershipResult<OwnedPlayerSnapshot> {
-        self.read_owned(|r| engine::load_player(r, &self.entity_incarnation, key, expected))
+        self.read_owned_worker(move |r, o| engine::load_player(r, o, key, expected))
+            .await
     }
     async fn load_owned_entity(
         &self,
         key: PersistentEntityKey,
         expected: GenerationIdentity,
     ) -> OwnershipResult<OwnedEntitySnapshot> {
-        self.read_owned(|r| engine::load_entity(r, &self.entity_incarnation, key, expected))
+        self.read_owned_worker(move |r, o| engine::load_entity(r, o, key, expected))
+            .await
     }
     async fn load_owned_pair(
         &self,
@@ -253,33 +383,33 @@ impl PlayerEntityOwnershipStore for InMemoryStore {
         entity: PersistentEntityKey,
         expected: GenerationIdentity,
     ) -> OwnershipResult<OwnedPlayerEntitySnapshot> {
-        self.read_owned(|r| {
-            engine::load_pair(r, &self.entity_incarnation, player, entity, expected)
-        })
+        self.read_owned_worker(move |r, o| engine::load_pair(r, o, player, entity, expected))
+            .await
     }
     async fn commit_player_entity_transfer(
         &self,
         request: PlayerEntityTransferRequest,
     ) -> OwnershipResult<OwnershipCommitOutcome> {
-        self.write_owned(request.0)
+        self.write_owned_worker(request.0).await
     }
     async fn compare_exchange_owned_player(
         &self,
         request: PlayerOwnershipCasRequest,
     ) -> OwnershipResult<OwnershipCommitOutcome> {
-        self.write_owned(request.0)
+        self.write_owned_worker(request.0).await
     }
     async fn compare_exchange_owned_entity(
         &self,
         request: EntityOwnershipCasRequest,
     ) -> OwnershipResult<OwnershipCommitOutcome> {
-        self.write_owned(request.0)
+        self.write_owned_worker(request.0).await
     }
     async fn load_ownership_receipt(
         &self,
         query: OwnershipReceiptQuery,
     ) -> OwnershipResult<Option<OwnershipReceipt>> {
-        self.read_owned(|r| engine::lookup_receipt(r, query))
+        self.read_owned_worker(move |r, _| engine::lookup_receipt(r, query))
+            .await
     }
 }
 

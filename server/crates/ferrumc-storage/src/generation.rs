@@ -68,6 +68,7 @@ pub(crate) enum GenerationMode {
     Metadata,
     UuidEntities,
     Ownership,
+    BlockDurability,
 }
 
 pub(crate) fn decode_identity(

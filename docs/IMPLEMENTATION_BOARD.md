@@ -268,9 +268,9 @@ Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
 Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
-Die drei aktuellen T3-Aufträge sind GEN-05.11 Rust-Runtime,
-GEN-06.3 readonly Originalchronologie-/Algorithmusvorbereitung und der unabhängige
-Runtime-Review der fertigen Storagekorrektur DUR-03.3b. GEN-06.1 Review Runde 2
+Die laufenden World-Aufträge sind GEN-05.11 Rust-Runtime und
+GEN-06.3 readonly Originalchronologie-/Algorithmusvorbereitung. Der unabhängige
+Storage-Review DUR-03.3b ist CLEAN_RUNTIME_REVIEW abgeschlossen. GEN-06.1 Review Runde 2
 ist fertig; Root hat alle 494 Dateien/307.996.259 Bytes erneut geprüft und nimmt
 nur die kontrollierte Vorbereitung an. Im Review erkannte shared-Worldänderungen
 gehören dem aktiven Carverwriter und sind keine akzeptierte Basis. GEN-06.3 nutzt
@@ -293,9 +293,14 @@ laut Autorenprobe wieder, drei unabhängig hergeleitete Scan-Grenzen sind geprü
 Root hat Kandidat, readonly Kopien und Evidenz vollständig bytegeprüft und
 stellt echtes `4225c21c` mit vollständigem Storageoverlay bereit. Außerhalb
 Storage unterscheiden sich Autorenbasis und aktuelles main nur in 11 Docpfaden.
-Der [neue unabhängige Reviewauftrag](agent-tasks/DUR-03_3b_STARTUP_RECEIPT_REUSE_REVIEW_TASK.md)
-prüft R6-B2 und alle erhaltenen Vertragsgrenzen. Storage bleibt bis dieser
-Runtimeabnahme unintegriert; DUR-03.3a bleibt vor DUR-05 erforderlich.
+Der [neue unabhängige Runtime-Review](agent-tasks/DUR-03_3b_STARTUP_RECEIPT_REUSE_RUNTIME_REVIEW.md)
+ist CLEAN_RUNTIME_REVIEW: R6-B2 geschlossen, 25 eigene Prüfungen grün,
+ursprüngliche 1-GiB-Datenbank real wieder geöffnet. Root hat alle 1.544
+Reviewartefakte sowie 93 Sourcebytes erneut geprüft und nimmt die
+[Format7-Bibliothek zur Integration an](agent-tasks/DUR-03_3_ROOT_RUNTIME_ACCEPTANCE.md).
+Der frische aktuelle Mainvergleich enthält außerhalb Storage nur Docänderungen;
+alle Runtime-/Dependencybytes stimmen mit der geprüften Kombination überein.
+Keine Appaktivierung; DUR-03.3a bleibt vor DUR-05 erforderlich.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
@@ -314,10 +319,10 @@ Der konkrete DUR-03.3-Vertrag ist unabhängig CLEAN abgenommen:
 1224 Archiv-, 461 Dependency-, 45 redb-, 82 Paper- und 16 Freeze-Dateien ohne
 Drift;216 unabhängige Grammatik-Arithmetikfälle bestanden.
 [Vertragsreview](agent-tasks/DUR-03_3_PLAYER_BLOCK_DURABILITY_REVIEW.md).
-Der neue T3-Storageagent implementiert ausschließlich Storage-Format7 mit
-gemeinsamer Player-/Chunkrevision, echten Snapshotautoritäten und atomarer
-Inventory-/Blockwirkung. Runtimeabnahme steht aus; keine getrennten Legacywrites
-dürfen die gemeinsame Wirkung umgehen. DUR-03.3a, die explizite Offline-Migration
+Storage-Format7 mit gemeinsamer Player-/Chunkrevision, echten Snapshotautoritäten
+und atomarer Inventory-/Blockwirkung ist nach unabhängiger Runtimeabnahme
+angenommen. Keine getrennten Legacywrites dürfen die gemeinsame Wirkung umgehen;
+der produktive App-/Sim-Verbraucher bleibt separat. DUR-03.3a, die explizite Offline-Migration
 Format6→7, folgt separat vor DUR-05.
 Die aktiven Aufträge wurden nach Providerabbrüchen mit ihrer bestehenden Arbeit
 wieder aufgenommen: GEN-05.8-Vertrag/Originaloracle, DUR-03.3-

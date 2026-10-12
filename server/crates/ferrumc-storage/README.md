@@ -492,3 +492,36 @@ capacity/limit agreement, and distinguishes original5 from exact committed6.
 This API returns offline evidence/outcomes only; it does not enable gameplay or
 migrate player gameplay codecs. See the DUR-03.2 brief for exact mapping/plan/
 checkpoint grammars and logical/physical resource bounds.
+
+## Opt-in joint Player/Block durability (Format7)
+
+[`PlayerBlockDurabilityStore`] binds one Live Player and 1..=8 complete Chunk
+full/overlay/block-entity images to one atomic operation. Enable it explicitly
+with `InMemoryStore::with_player_block_durability` or
+`RedbStore::open_with_player_block_durability(path, config, scratch_directory)`;
+every other mode refuses its five methods with `Unsupported`, and existing
+format3..6 files return `MigrationRequired` (the offline Format6→7 migration is a
+separate ticket). Callers load an `OwnedBlockSnapshot`, derive complete
+postimages plus guards and ordered `ScopedBlockEffect`s from it, and submit a
+`PlayerBlockRequest`, `BlockMutationRequest` or `ChunkImageCasRequest`. The
+backend replays the effects on the resolved original and compares every cell
+and block entity with the postimage; commits are Immediate, replay is byte-exact
+by operation ID, and uncertain outcomes are resolved only through
+`load_block_receipt` or an exact retry. Format7 refuses all blind chunk/overlay/
+journal writers. Reads prove each touched column's own history entry (whole
+receipts are re-derived by lookup, replay and reopen), so any 1..=8-column union
+fits the hard cell budget whatever its history. A receipt shared by a call's
+columns is read and digested once per call, and block entities are charged their
+exact canonical encoding length (16 KiB is only their form bound). Unions of a few
+distinct maximal receipts (from three effect-dense ones) can still exhaust the
+512 MiB byte cap, which refuses typed. The redb opener checks its
+scratch directory before touching the database path; a refused fresh create
+leaves no file. See `INVARIANTS.md` for the complete contract and its limits.
+
+Format7's scoped Journal startup pass holds one borrowed redb receipt row and its
+parsed Q for the current contiguous operation range. It reads/hashes/parses that
+receipt once, then validates every row against the retained frame. It drops the
+row before advancing to the next operation. Full receipt endpoint proofs, both
+relation directions, counters, raw table scanning and the disposable range index
+remain unchanged. Scan limits still charge distinct operations and all other
+actual work cumulatively; they do not promise admission for arbitrary history.

@@ -38,6 +38,12 @@ tokio = { workspace = true }
 # `BlockMutationLogRecord` journal entry. Already a workspace dependency;
 # pure-Rust, no native deps.
 uuid = { workspace = true }
+# Exact, non-allocating size preflight of one persisted item stack
+# (`persisted_stack_size`), so Format7 validation charges a chest entity's real
+# canonical encoding length before encoding it instead of the 16 KiB form bound.
+# Already in the workspace and lockfile (ferrumc-world depends on it); previously
+# a dev-dependency here, so the dependency graph gains no new crate.
+ferrumc-items = { workspace = true }
 # Structured `warn!` when a persisted block entity is skipped on chunk load
 # (corrupt/incompatible payload or an unplaceable position): the storage layer is
 # the right place to report a corrupt on-disk record, and skipping rather than
@@ -48,8 +54,8 @@ tracing = { workspace = true }
 # Backs the `RedbStore` round-trip/persistence tests with a throwaway on-disk
 # database under a temp directory. Test-only; not linked into the library.
 tempfile = { workspace = true }
-# Verify exact authoritative item/NBT component persistence across both backends.
-ferrumc-items = { workspace = true }
+# Verify exact authoritative item/NBT component persistence across both backends
+# (ferrumc-items itself is a normal dependency above).
 ferrumc-nbt = { workspace = true }
 
 [lints]

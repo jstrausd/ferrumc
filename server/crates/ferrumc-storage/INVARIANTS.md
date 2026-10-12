@@ -335,3 +335,131 @@
   outcomes contain no database handle or live gameplay authority.
 - This producer does not migrate FCPS gameplay schemas, activate App/Sim drivers,
   provide Java plugins, guarantee process-kill/power-loss behavior or claim Survival.
+
+## Explicit joint Player/Block durability (DUR-03.3 / Format7)
+
+- `PlayerBlockDurabilityStore` is a separate dyn-compatible authority. Defaults,
+  Legacy/Metadata/UUID/Format6 instances refuse every method with `Unsupported`.
+  Only `InMemoryStore::with_player_block_durability` and
+  `RedbStore::open_with_player_block_durability` enable it. Format6 semantics,
+  its fifteen tables and the FCTR1 grammar stay unchanged in Format6.
+- Write authority exists only inside an `OwnedBlockSnapshot` issued by one actual
+  read boundary of the same live backend incarnation (private `Weak`). Specs,
+  stamps, receipts, digests, decoded views and another/reopened backend issue
+  none. Requests consume a genuine snapshot; joint requests need a Live Player.
+- Every Format7 block writer goes through one Chunk history: joint gameplay,
+  scoped gameplay without Player and image-CAS. Old full/overlay save/delete and
+  both unscoped journal appends refuse before validation, even when empty.
+  Chunk/overlay reads validate encountered history through unified state: each
+  touched column's last receipt has its relations checked (union, outcome stamps,
+  Player/Chunk headers and postimages, exact journal ordinals) at most once per
+  call, plus the endpoint proof of that column's own entry, whose resolved
+  postimage is the returned view. Player reads check only the relations of the
+  Player's last receipt. Lookup, replay and Reopen re-derive whole receipts.
+- Gameplay requests execute their ordered effect chain privately on the resolved
+  original and compare all 98,304 cells and the complete canonical entity map of
+  each column with the proposed postimage. The union is exactly the chunks of
+  guards, effects and Replace/Erase proposals. Storage cannot infer undeclared
+  physics/support dependencies; the caller must declare them as guards.
+- Resolution: full record as base, otherwise the exact FCGI flat-r1/1.21.8/Overworld
+  generator for the actual seed; a section-carrying overlay replaces the base
+  entity map before apply, a zero-section overlay merges entities.
+- Player and Chunk advance at most once per operation and only on a real raw change
+  or (Chunk) a journaled effect; guard-only/raw-equal/Keep preserve stamp and last
+  pointer even at MAX. A real change at MAX, an absent Erase, scoped sequence
+  overflow or any retained row/byte capacity refuses the whole operation.
+- FCTR and FCBR share one operation-ID namespace, one worker admission and one
+  receipt row/byte account (FCTR charges 272, FCBR and FCBL exact key+value bytes).
+  Cross-kind reuse is `ReceiptCollision`; old lookups of FCBR are
+  `ReceiptKindMismatch`. Replay compares the retained Q byte for byte.
+- Format7 has exactly seventeen typed tables and fifteen mandatory meta keys plus
+  optional `last_mutation_id`/`last_scoped_mutation_id`. Fresh creation writes all
+  of them in one Immediate transaction. Existing7 opens validate without any
+  logical write; existing3..6 return `MigrationRequired` (DUR-03.3a is separate);
+  refused opens leave every table, row and metadata value unchanged.
+- The opener first creates its scratch index (typed `ScratchUnavailable`/
+  `ScratchCapacity`), before any database path is touched. A fresh create that is
+  still refused removes only the file this call created (same inode) and only
+  while it provably holds no table; existing or foreign files are never removed.
+  A table-free file left by an earlier version is refused with a guiding
+  `CatalogMismatch`. A failed open, initialization or scan reports its own error;
+  a scratch-index cleanup that fails as well is logged (`warn`) instead of
+  replacing it, and is the reported error only when nothing else failed.
+- Residual (shared DUR-03.2 file machinery, unchanged): owned-path removal proves
+  the regular file and inode via `symlink_metadata`, then unlinks by path. A party
+  with write access to that directory renaming another file onto the path inside
+  this window would lose that file.
+- Reopen streams all seventeen tables under raw row/byte and separate relation
+  byte/cell budgets, checks both relation directions (Chunk header↔pair↔last
+  receipt, FCBR↔scoped journal ordinal, counters/watermarks) and range
+  nonoverlap in one bounded disposable disk index. Nothing is repaired.
+- The scoped Journal startup pass retains one borrowed owning redb receipt guard and
+  the charged `frame_q` result for exactly that operation's contiguous range. It
+  drops both before loading the next operation: no Q copy, owner/borrow cycle,
+  historical map or budget reset. For a nonempty range with n chunks, Q bytes and
+  m effects, this branch reads/hashes/parses `87 + 9*n + 2*Q` receipt bytes once,
+  plus every Journal key/value row; it no longer multiplies that receipt term by m.
+  Every row still proves scope, operation, ordinal, sequence and exact effect.
+  Checked first+count and first+ordinal arithmetic, exact start/end and global
+  contiguous IDs refuse truncation, overrun, interleaving and old-operation reuse.
+  Full FCBR endpoint proofs, reverse relations, counters and the range disk index
+  remain independent authority. Distinct operations and all other scan work cost
+  real cumulative bytes/cells; no fixed local allowance admits every database.
+- Runtime calls charge every inspected/encoded byte and cell access to one
+  cumulative budget (≤512 MiB, ≤16,777,216 cells) and snapshot output (≤32 MiB)
+  before work/copy. These are logical admission bounds, not RSS or redb
+  allocation guarantees.
+- Runtime cell work: composing a pair costs one column (98,304) for its base
+  plus, with an overlay, two more (decode, apply) and 2 per replaced base entity;
+  a gameplay column proof adds 2 per guard, 4 per effect, a two-sided whole-column
+  comparison and one per entity on each side; sizing a view costs one column plus
+  one per entity. Under the hard shape caps (4096 entities/guards, 1024 effects)
+  one column proof is at most 823,296, a snapshot column 925,696, so the maximum
+  8-column snapshot needs at most 7,405,568 and a commit (8 history plus 8 request
+  proofs) at most 13,172,736 cells, whatever each column's last receipt is.
+- Runtime validation bytes: each physical row access is charged once, key plus
+  value bytes, by the budgeted reader that performs it; decoding a stored image or
+  record charges its bytes, digesting an FCBR charges its Q body, and encodings
+  charge their bytes. A block entity's encoding is charged its exact canonical
+  length, derived borrowed before encoding (sign fields; chest slots via the item
+  codec's non-allocating size preflight); 16 KiB is its form bound and is charged
+  only where no exact length exists (an entity kind unknown to Storage, or a stack
+  the encoder refuses). An effect's entity bytes are charged twice for the
+  canonical check and the new entity once more when applied. FCBR frames are
+  parsed borrowed. A call keeps a cache of at most eight borrowed last-receipt
+  rows, one per column it reads, so a receipt shared by several columns is read,
+  digested and parsed once per call (Player last-receipt checks reuse the same one
+  parse). The cache holds only borrowed rows and parsed frames, loads before any
+  work on them, and is dropped with the call. Lookup, replay, the Reopen FCBR-table pass and the v1
+  receipt digest parse a frame's Q a second time for the relations and charge it.
+  The Reopen scoped Journal pass reuses its one charged `frame_q` parse.
+- Only a receipt returned to a caller (lookup, replay, commit) is copied, into its
+  one retained buffer, charged before the copy. Snapshot output copies (raw pairs,
+  the Player envelope and record, views) count only toward the 32 MiB output cap.
+- A snapshot without Player needs 419 bytes (identity row, counter reads) plus,
+  per column, its Full/Overlay/Header reads (48 bytes of keys, the 31-byte header
+  and its rows), the decode of its proved before/after pair and the canonical
+  encodings of its view's entities, plus, per distinct last receipt, 16 + FCBR + Q
+  and its relations (identity 35, then each entry's Header, Full and Overlay reads
+  and each journal row, read with its 8-byte key and re-encoded). A gameplay
+  column proof adds both entity sets' encodings and its effects' entity charges.
+- Entity encodings alone never exhaust the hard byte cap: a chunk's entity tail
+  is at most 2 MiB, so a snapshot encodes at most 8 · 3 · 2 MiB and a commit at
+  most 16 · 2 · 2 MiB of entities. E.g. 4096 empty chests (301 bytes each) per
+  column over 3 or 8 columns are admitted at the hard defaults.
+- Residual: the hard 512 MiB cap can refuse unions of distinct large last
+  receipts. Per distinct receipt at the 32 MiB Q bound a snapshot needs at least
+  16 + R + Q (eight always refuse: 512 MiB + 1,272 bytes), about 3 Q for an
+  image-CAS whose after images are all current (six always refuse), and about 7 Q
+  for a receipt whose up to 1019 effects toggle form-bound entities (three
+  refuse, two are admitted). A commit adds its own request, about 6 Q0 for images
+  or 8 Q0 for such effects: with a maximal image request four image histories
+  refuse; with a maximal effect-dense request one effect-dense history is admitted
+  and two refuse. Every refusal is `ValidationCapacity("bytes")` before any write
+  and without a partial result; maximum shape does not guarantee admission.
+- redb commits use `Durability::Immediate`. A failed commit is `CommitUncertain`,
+  a failed started worker or lost reply `ExecutionUncertain`; neither proves an
+  abort or authorizes a new ID. Memory applies infallibly under its single state
+  lock after preflight; readers cannot observe a partial Player/world image.
+- Not provided here: offline Format6→7 migration, App/Sim activation, gameplay
+  policy, process-kill/power-loss evidence or Paper/client comparison.

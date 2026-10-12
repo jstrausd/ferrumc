@@ -193,7 +193,11 @@ impl PersistentEntityStore for RedbStore {
         key: PersistentEntityKey,
         expected: GenerationIdentity,
     ) -> Result<Option<PersistentEntityRecord>> {
-        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            crate::generation::GenerationMode::Ownership
+                | crate::generation::GenerationMode::BlockDurability
+        ) {
             return Ok(
                 crate::PlayerEntityOwnershipStore::load_owned_entity(self, key, expected)
                     .await?
@@ -284,7 +288,11 @@ impl PersistentEntityStore for RedbStore {
         cursor: Option<PersistentEntityCursor>,
         limit: NonZeroU16,
     ) -> Result<PersistentEntityPage> {
-        if self.generation_mode == crate::generation::GenerationMode::Ownership {
+        if matches!(
+            self.generation_mode,
+            crate::generation::GenerationMode::Ownership
+                | crate::generation::GenerationMode::BlockDurability
+        ) {
             return self
                 .owned_uuid_page(chunk, expected, cursor, limit)
                 .await

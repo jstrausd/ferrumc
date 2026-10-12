@@ -47,6 +47,9 @@ pub(super) struct Reader<T, M> {
     pub(super) receipts: T,
     pub(super) meta: M,
     pub(super) capacity: OwnershipCapacity,
+    pub(super) block_config: Option<crate::BlockDurabilityConfig>,
+    pub(super) blocks: Option<[T; 4]>,
+    pub(super) budget: Option<crate::block_durability::engine::Budget>,
 }
 pub(super) type WriteReader<'a> =
     Reader<redb::Table<'a, &'static [u8], &'static [u8]>, redb::Table<'a, &'static str, u64>>;
@@ -66,12 +69,21 @@ impl<T: ReadableTable<&'static [u8], &'static [u8]>, M: ReadableTable<&'static s
         table: RawTable,
         key: &[u8],
     ) -> std::result::Result<Option<Self::Bytes<'_>>, StorageError> {
-        self.uuid.get(table, key)
+        let v = self.uuid.get(table, key)?;
+        if let Some(mut b) = self.budget.clone() {
+            b.bytes(key.len() as u64 + v.as_ref().map_or(0, |v| v.as_ref().len()) as u64)
+                .map_err(|e| StorageError::BlockValidation(Box::new(e)))?;
+        }
+        Ok(v)
     }
     fn identity(
         &self,
         key: GenerationKey,
     ) -> std::result::Result<Option<GenerationIdentity>, StorageError> {
+        if let Some(mut b) = self.budget.clone() {
+            b.bytes(35)
+                .map_err(|e| StorageError::BlockValidation(Box::new(e)))?;
+        }
         self.uuid.identity(key)
     }
     fn index_rows(
@@ -79,7 +91,16 @@ impl<T: ReadableTable<&'static [u8], &'static [u8]>, M: ReadableTable<&'static s
         lower: Bound<Vec<u8>>,
         upper: Bound<Vec<u8>>,
     ) -> std::result::Result<RawRows<'_, Self::Bytes<'_>>, StorageError> {
-        self.uuid.index_rows(lower, upper)
+        let rows = self.uuid.index_rows(lower, upper)?;
+        let budget = self.budget.clone();
+        Ok(Box::new(rows.map(move |row| {
+            let (k, v) = row?;
+            if let Some(mut b) = budget.clone() {
+                b.bytes((k.as_ref().len() + v.as_ref().len()) as u64)
+                    .map_err(|e| StorageError::BlockValidation(Box::new(e)))?;
+            }
+            Ok((k, v))
+        })))
     }
 }
 impl<T: ReadableTable<&'static [u8], &'static [u8]>, M: ReadableTable<&'static str, u64>>
@@ -92,7 +113,46 @@ impl<T: ReadableTable<&'static [u8], &'static [u8]>, M: ReadableTable<&'static s
             engine::Table::EntityHeader => &self.entity_headers,
             engine::Table::Receipt => &self.receipts,
         };
-        Ok(t.get(key).map_err(backend)?.map(uuid_entities::RawGuard))
+        let v = t.get(key).map_err(backend)?.map(uuid_entities::RawGuard);
+        if let Some(mut b) = self.budget.clone() {
+            b.bytes(key.len() as u64 + v.as_ref().map_or(0, |v| v.as_ref().len()) as u64)
+                .map_err(crate::block_durability::ownership_adapter)?;
+        }
+        Ok(v)
+    }
+    fn block_budget(&self) -> Option<crate::block_durability::engine::Budget> {
+        self.budget.clone()
+    }
+    fn block_config(&self) -> Option<crate::BlockDurabilityConfig> {
+        self.block_config
+    }
+    fn block(
+        &self,
+        table: crate::block_durability::engine::Table,
+        key: &[u8],
+    ) -> OwnershipResult<Option<Self::Bytes<'_>>> {
+        use crate::block_durability::engine::Table;
+        let tables = self.blocks.as_ref().ok_or(OwnershipError::Unsupported)?;
+        let index = match table {
+            Table::Full => 0,
+            Table::Overlay => 1,
+            Table::Header => 2,
+            Table::Journal => 3,
+        };
+        let v = tables[index]
+            .get(key)
+            .map_err(backend)?
+            .map(uuid_entities::RawGuard);
+        if let Some(mut b) = self.budget.clone() {
+            b.bytes(key.len() as u64 + v.as_ref().map_or(0, |v| v.as_ref().len()) as u64)
+                .map_err(crate::block_durability::ownership_adapter)?;
+        }
+        Ok(v)
+    }
+    fn block_counts(&self) -> OwnershipResult<crate::block_durability::engine::Counts> {
+        let config = self.block_config.ok_or(OwnershipError::Unsupported)?;
+        super::blocks::counts(&self.meta, config)
+            .map_err(crate::block_durability::ownership_adapter)
     }
     fn counts(&self) -> OwnershipResult<(u64, u64)> {
         let value = |key| {
@@ -104,7 +164,7 @@ impl<T: ReadableTable<&'static [u8], &'static [u8]>, M: ReadableTable<&'static s
                     "missing ownership metadata",
                 ))
         };
-        if value(super::META_FORMAT_KEY)? != 6 {
+        if value(super::META_FORMAT_KEY)? != if self.block_config.is_some() { 7 } else { 6 } {
             return Err(OwnershipError::CatalogMismatch("wrong ownership format"));
         }
         if value(REQUEST_LIMIT)? != self.capacity.max_request_bytes() as u64
@@ -128,6 +188,9 @@ pub(super) fn write_reader(
         receipts: txn.open_table(RECEIPT).map_err(backend)?,
         meta: txn.open_table(META_TABLE).map_err(backend)?,
         capacity,
+        block_config: None,
+        blocks: None,
+        budget: None,
     })
 }
 pub(super) fn read_reader(
@@ -154,6 +217,9 @@ pub(super) fn read_reader(
         receipts: txn.open_table(RECEIPT).map_err(backend)?,
         meta: txn.open_table(META_TABLE).map_err(backend)?,
         capacity,
+        block_config: None,
+        blocks: None,
+        budget: None,
     })
 }
 
@@ -165,7 +231,7 @@ pub(super) enum Cutpoint {
     BeforeCommit,
     AfterCommit,
 }
-fn row(
+pub(super) fn row(
     txn: &redb::WriteTransaction,
     table: TableDefinition<'_, &[u8], &[u8]>,
     key: &[u8],
@@ -181,7 +247,7 @@ fn row(
     }
     hook(Cutpoint::AfterRow)
 }
-fn apply(
+pub(super) fn apply(
     txn: &redb::WriteTransaction,
     plan: engine::Plan,
     hook: &mut impl FnMut(Cutpoint) -> OwnershipResult<()>,
@@ -353,12 +419,19 @@ impl RedbStore {
             generation_mode: crate::generation::GenerationMode::Ownership,
             entity_incarnation: Arc::new(()),
             ownership_runtime: Some(Arc::new(Runtime::new(config))),
+            block_config: None,
         })
     }
     fn runtime(&self) -> OwnershipResult<&Arc<Runtime>> {
         self.ownership_runtime
             .as_ref()
-            .filter(|_| self.generation_mode == crate::generation::GenerationMode::Ownership)
+            .filter(|_| {
+                matches!(
+                    self.generation_mode,
+                    crate::generation::GenerationMode::Ownership
+                        | crate::generation::GenerationMode::BlockDurability
+                )
+            })
             .ok_or(OwnershipError::Unsupported)
     }
     async fn read_owned<T: Send + 'static>(
@@ -368,12 +441,17 @@ impl RedbStore {
         let runtime = self.runtime()?;
         let permit = runtime.permit()?;
         let capacity = runtime.config.capacity();
+        let block_config = self.block_config;
         let db = self.db.clone();
         let owner = self.entity_incarnation.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let txn = db.begin_read().map_err(backend)?;
-            f(&read_reader(&txn, capacity)?, &owner)
+            let mut reader = read_reader(&txn, capacity)?;
+            if let Some(c) = block_config {
+                super::blocks::extend_read(&txn, &mut reader, c)?;
+            }
+            f(&reader, &owner)
         })
         .await
         .map_err(backend)?
@@ -390,12 +468,17 @@ impl RedbStore {
         request.admission(runtime.config.capacity().max_request_bytes())?;
         let permit = runtime.permit()?;
         let capacity = runtime.config.capacity();
+        let block_config = self.block_config;
         let db = self.db.clone();
         let owner = self.entity_incarnation.clone();
         let query = request.query();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            commit(&db, &owner, capacity, request, hook)
+            if let Some(c) = block_config {
+                super::blocks::commit_v1(&db, &owner, c, request, hook)
+            } else {
+                commit(&db, &owner, capacity, request, hook)
+            }
         })
         .await
         .map_err(|e| OwnershipError::ExecutionUncertain {
@@ -1043,6 +1126,7 @@ pub(super) mod tests {
             generation_mode: crate::generation::GenerationMode::Ownership,
             entity_incarnation: Arc::new(()),
             ownership_runtime: Some(Arc::new(Runtime::new(config()))),
+            block_config: None,
         };
         store
             .ensure_generation_identity(scope(), identity())

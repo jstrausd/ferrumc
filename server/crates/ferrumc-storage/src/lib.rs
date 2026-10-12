@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+mod block_durability;
 mod codec;
 mod error;
 mod generation;
@@ -64,3 +65,18 @@ pub use store::{
     PlayerStore, PluginStore, WorldStore, MAX_PLUGIN_VALUE_LEN, MAX_SAVE_BATCH,
     MAX_UUID_STORE_PLUGIN_ID_LEN,
 };
+
+pub use block_durability::{
+    BlockCommitOutcome, BlockDurabilityCapacity, BlockDurabilityConfig, BlockDurabilityError,
+    BlockDurabilityLimits, BlockMutationRequest, BlockReceipt, BlockReceiptQuery, BlockResult,
+    BlockSnapshotSpec, ChunkImage, ChunkImageAction, ChunkImageCasRequest, ChunkImageChange,
+    OwnedBlockColumn, OwnedBlockSnapshot, PlayerBlockDurabilityStore, PlayerBlockRequest,
+    ScopedBlockCause, ScopedBlockEffect, MAX_BLOCK_CHUNKS, MAX_BLOCK_EFFECTS, MAX_BLOCK_GUARDS,
+    MAX_BLOCK_REQUEST_BYTES,
+};
+
+#[cfg(test)]
+extern crate self as ferrumc_storage;
+#[cfg(test)]
+#[path = "../tests/block_support/mod.rs"]
+pub(crate) mod block_test_support;

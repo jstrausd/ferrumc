@@ -60,6 +60,7 @@ pub(crate) fn validate_uuid_plugin_scope(
         mode,
         crate::generation::GenerationMode::UuidEntities
             | crate::generation::GenerationMode::Ownership
+            | crate::generation::GenerationMode::BlockDurability
     ) && len > MAX_UUID_STORE_PLUGIN_ID_LEN
     {
         return Err(StorageError::UuidStorePluginIdTooLong {
