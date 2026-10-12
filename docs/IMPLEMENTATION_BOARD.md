@@ -248,6 +248,25 @@ Der nächste Worldschritt sind die Overworld-Carver
 mit echter Originaloracle.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
+### Weltgenerierung: Betreiberpriorität vom 12.10.2026
+
+Der Betreiber hat die Weltgenerierung als nächsten Schwerpunkt festgelegt.
+Der bestehende GEN-05.11-Agent behält den exklusiven Worldauftrag; es wird
+kein zweiter schreibender Worldagent parallel gestartet. Root prüft dessen
+Vertrag und Originalevidenz vor der Vergabe der Rust-Runtime.
+
+| Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
+| --- | --- | --- |
+| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | Vertrag und echte Vanilla-/Paper-Referenzläufe in Arbeit. Root hat vor der Abnahme eine falsche Canyon-Schrittgrenze gefunden: f32-Rundung kann den Distanzfaktor auf 1.0 runden und damit 112 Schritte erzeugen. Die Schranke und ihre Randprobe werden korrigiert; noch keine Runtimefreigabe. |
+| 2 | GEN-06: Erze und Vegetation, danach weitere konfigurierte Features | An den Carverschritt anschließen; Reihenfolge, Multichunk-Writes und RNG gegen Originalausgaben prüfen. Noch nicht vergeben. |
+| 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
+| 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
+
+Die Direct-source-Biome des originalen Carver-Fix-ups und der vorgeschlagene
+Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
+Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
+Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
+
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
 DUR-03.2 als `b9f15db8` integriert. Debug/Release jeweils347 Prüfungen und alle
