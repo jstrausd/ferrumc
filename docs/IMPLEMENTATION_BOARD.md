@@ -259,7 +259,7 @@ und exakten Fehlerpfadentwurf an; die Umsetzung und Runtimeabnahme folgen getren
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
 | 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. Root nimmt die korrigierte Vorbereitung und private Zähler-/Fehlerweitergabe an. [World-only Rust-Runtime beauftragt](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_TASK.md); vollständiges Surface→Carver-Replay und native Fehler-/Grenz-/Allokationsabnahme offen. Keine Appaktivierung. |
-| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Vorbereitung Runde 2 geliefert](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md): obligatorischer Bind-Debit, konkrete Scratchziele und exklusive Pending-RNG-Lease. [Unabhängiger Korrekturreview beauftragt](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW_TASK.md); B1/B2/B3 bleiben bis Abschluss Gates. Der historische Helper enthält abs(block>>4), entgegen dem ersten H1-Reviewtext; alte Bytes bleiben unverändert. Kontrollierte Proben sind keine whole-FEATURES-Abnahme. |
+| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Revision2](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md) ist unabhängig [CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW.md), B1/B2/B3 auf Vorbereitungsebene geschlossen. Root nimmt 16-KiB-Katalog/16-KiB-Scratch/32-KiB-neuen Peak/49.152-B-mit-altem-Katalog und 512-B-Cursor als messpflichtige Designlimits an. [GEN-06.2 Rust-Primitive](agent-tasks/GEN-06_2_CLOSED_ORE_PLACEMENT_PRIMITIVES_RUNTIME_TASK.md) wartet auf den exklusiven Worldslot und frische akzeptierte Basis. [GEN-06.3 Originalchronologie/Algorithmusvertrag](agent-tasks/GEN-06_3_ORE_ALGORITHM_ORACLE_TASK.md) wird parallel readonly vorbereitet. H1-Reviewbeschreibung korrigiert; H2-Regioncap und whole-FEATURES bleiben offen. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
 
@@ -269,8 +269,12 @@ Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
 Die drei aktuellen T3-Aufträge sind GEN-05.11 Rust-Runtime,
-GEN-06.1 unabhängiger Review Runde 2 und der unabhängige Runtime-Review
-der fertigen Storagekorrektur DUR-03.3b.
+GEN-06.3 readonly Originalchronologie-/Algorithmusvorbereitung und der unabhängige
+Runtime-Review der fertigen Storagekorrektur DUR-03.3b. GEN-06.1 Review Runde 2
+ist fertig; Root hat alle 494 Dateien/307.996.259 Bytes erneut geprüft und nimmt
+nur die kontrollierte Vorbereitung an. Im Review erkannte shared-Worldänderungen
+gehören dem aktiven Carverwriter und sind keine akzeptierte Basis. GEN-06.3 nutzt
+ein frisches readonly `18d510e1`-Archiv mit denselben 324 akzeptierten Worlddateien.
 Der eingefrorene Storage-Kandidat Runde 6 zählt Block-Entities mit ihrer
 tatsächlichen Kodierlänge; Autorenchecks Debug/Release jeweils 354 grün.
 Root prüfte alle 91 Quelldateien bytegleich und stellte ein readonly Archiv
