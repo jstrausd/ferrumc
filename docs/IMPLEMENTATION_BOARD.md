@@ -253,15 +253,16 @@ Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 Der Betreiber hat die Weltgenerierung als nächsten Schwerpunkt festgelegt.
 GEN-05.11 hat den exklusiven World-Runtimeauftrag abgeschlossen und den
 vollständigen Kandidaten eingefroren. Der Runtime-Review ist FINDINGS wegen
-RR11-M1; der neue [Korrekturauftrag](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_TASK.md)
-hat jetzt den exklusiven Worldwriter. GEN-06.2 wartet weiter auf Abnahme und
-Integration. Der unabhängige Korrekturreview
+RR11-M1; die [Korrekturlieferung09](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_DELIVERY.md)
+ist vollständig eingefroren. Der neue [unabhängige Runtimereview Runde2](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_REVIEW_TASK.md)
+prüft jetzt die tatsächliche Refusal-Reihenfolge auf einer isolierten aktuellen
+main-Basis. GEN-06.2 wartet weiter auf Abnahme und Integration. Der unabhängige Vertragskorrekturreview
 ist CLEAN_CONTRACT/CLEAN_ORACLE. Root nimmt den privaten unsigned192-Meter-
 und exakten Fehlerpfadentwurf an; die Umsetzung und Runtimeabnahme folgen getrennt.
 
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
-| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. [Rust-Kandidat044 eingefroren](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_DELIVERY.md): Autorenchecks World Debug/Release jeweils415 bestanden,1550 Consumerprüfungen und strikte Checks grün. [Runtime-Review FINDINGS](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_REVIEW.md): eine Klima-f64→f32-Umwandlung läuft vor ihrer Budgetreservierung. [RR11-M1-Korrektur](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_TASK.md) mit tatsächlichem Refusal-Regressionstest läuft. Integration und Appaktivierung bleiben offen. |
+| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. [Runtime-Review044 FINDINGS](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_REVIEW.md): Klima-f64→f32 läuft vor ihrer Budgetreservierung. [Korrekturkandidat09 eingefroren](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_DELIVERY.md), World Debug/Release jeweils418 bestanden/7ignored; betroffene Kaltstartproben separat bestanden, alte Reihenfolge in beiden Profilen assertion-killed. Root hat945 Paket-/7Seal-/364Source-/577Evidence-Mitglieder und tatsächliche Nachweise geprüft. Neuer [unabhängiger Runtimereview Runde2](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_REVIEW_TASK.md) vor Abnahme erforderlich. Integration und Appaktivierung bleiben offen. |
 | 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Revision2](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md) ist unabhängig [CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW.md), B1/B2/B3 auf Vorbereitungsebene geschlossen. Root nimmt 16-KiB-Katalog/16-KiB-Scratch/32-KiB-neuen Peak/49.152-B-mit-altem-Katalog und 512-B-Cursor als messpflichtige Designlimits an. [GEN-06.2 Rust-Primitive](agent-tasks/GEN-06_2_CLOSED_ORE_PLACEMENT_PRIMITIVES_RUNTIME_TASK.md) wartet auf den exklusiven Worldslot und frische akzeptierte Basis. [GEN-06.3 Review Revision2](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION2_REVIEW.md) ist FINDINGS: Query53-Abgleich, typisierte Bootstrapkonstanten und ganze Trace-Membership wurden in der [Autorenantwort Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3.md) korrigiert; der neue [unabhängige Prüfauftrag](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3_REVIEW_TASK.md) bleibt vor Annahme erforderlich. Neue Regionschnittstellen/-limits bleiben unangenommen; H2 und whole-FEATURES offen. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
@@ -271,7 +272,7 @@ Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
 Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
-Die laufenden World-Aufträge sind GEN-05.11 RR11-M1-Runtimekorrektur und
+Die laufenden World-Aufträge sind GEN-05.11 unabhängiger RR11-M1-Runtimekorrekturreview und
 GEN-06.3 writerfreier unabhängiger Review der gelieferten Revision3 der Query-/Oraclewerkzeuge. Der unabhängige
 Storage-Review DUR-03.3b ist CLEAN_RUNTIME_REVIEW abgeschlossen. GEN-06.1 Review Runde 2
 ist fertig; Root hat alle 494 Dateien/307.996.259 Bytes erneut geprüft und nimmt
@@ -436,8 +437,15 @@ Allowance39/59 beobachtet. Die erfolgreiche71-Gruppen-Paperreplay-/Nativeprüfun
 ist davon getrennt; keine erfolgreiche numerische Drift wurde gefunden.
 Die Korrekturbasis ist ein echtes mainb1798614-Archiv1509 Dateien plus ganzer
 frozen044 World/Delivery als explizit unangenommener1547-Dateien-Korrekturstand.
-Neue ganze Worldquelle und tatsächlicher Refusal-Regressions-/Mutationstest
-folgen vor einer neuen unabhängigen Deltaabnahme. Alte044-Nachweise bleiben erhalten.
+Neue ganze Worldquelle09 mit364 Dateien und tatsächlicher Refusal-Regressions-/
+Mutationstest sind jetzt eingefroren. Root hat das vollständige neue945-Paket,
+den7-member Seal, alle577 Evidenzdateien, den exakten5-Dateien-Delta und
+Autorenlogs/Binäridentitäten geprüft. Debug/Release jeweils418/0failed/7ignored;
+betroffene kalte Carver-/Native-/71-Gruppen-Proben erfolgreich; alte Reihenfolge
+kompiliert und scheitert in beiden Profilen an der tatsächlichen Cast-Assertion.
+Der neue unabhängige Runde2-Review nutzt ein echtes main5602-Archiv1515 plus
+ganze World09/Delivery als explizit unangenommenen1556-Dateien-Reviewstand.
+Autorenbasisb179 und alte044-/Review-/f305-Nachweise bleiben getrennt erhalten.
 
 GEN-03.1a Round1 lieferte [G31A-CLOSE-1](agent-tasks/GEN-03_1a_REGISTRY_STATE_FACTS_RUNTIME_DELIVERY.md)
 vor Implementierung: safe std Fileclose meldet keinen Fehler. Root prüfte1552
