@@ -369,15 +369,30 @@ sechs FIFOs. Root hat Bytes, vollständige Membership, lstat-Typen/-Modi und
 Linktargets geprüft; FIFOs wurden nicht geöffnet. Alle4438 Originalpins,
 175 Referenzpins,1490 Archivdateien und202/741/366/494 historische Freeze-Dateien
 stimmen weiterhin. Der
-[neue unabhängige Korrekturreview](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_REVISION2_REVIEW_TASK.md)
-prüft G31-R1-B1/B2/M1 mit vollständigem Originalbrief und Antwortmatrix.
+[abgeschlossene unabhängige Korrekturreview](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_REVISION2_REVIEW.md)
+schließt G31-R1-B1/B2 auf Designniveau und M1 im tatsächlichen Validator.
+Root hat alle1404 regulären Reviewdateien/1.116.541.431 Bytes und1817 Entries
+einschließlich Typen/Modi/Linktargets sowie sämtliche Eingangsauthorities geprüft.
+Das Gesamturteil bleibt FINDINGS wegen G31-R2-B1: Query53 widerspricht Ore Query8.
+Die unabhängig gezählten1812 Queries im Full30-Seed0-Plan erhöhen den
+Modelltotal auf3.848.413; Margin345.891 zu weiterhin pending2^22. Bounded
+Chunkselection und ein gemeinsam geprüfter Kernel-/Parentmeteradapter bleiben offen.
 Neue Reservationsmodelle36/491559/14163/4259119/14419/Query53 und eigene
 Preparation-Allowance2^23 bleiben unangenommen. Der pending Erz-Entwurf rechnet
 noch Query8; Root gab die konkrete Schnittstellen-/Budgetabweichung an beide
 Reviewer weiter. Keine stille Änderung eines Freeze oder zweiten Ore-Meters.
+Root nimmt separat nur den Registryentwurf mit Static65536/Build131072,
+Domain26 und bounded u64-Buildwork7391501569 als messpflichtige Limits an.
+Der [Registry-only Runtimeauftrag](agent-tasks/GEN-03_1a_REGISTRY_STATE_FACTS_RUNTIME_TASK.md)
+implementiert vollständigen Property-/Radixjoin, original gepinnte Prädikate,
+statische Facts und CheckedStateId ohne World-/Flatänderung. Die private
+Prüfbasis ist ein echtes main65c7f682-Archiv mit1505 Dateien; Shared Carver-WIP
+gehört nicht dazu. Registry-Runtimeabnahme und sämtliche Worldlimits bleiben offen.
 Die drei aktiven Children sind
-Carver-Runtime-Review, Ore-Korrekturreview und Blockstate-/Heightmap-Korrekturreview; alle
-arbeiten ohne Änderungen an produktiven Worldquellen. Naturwelt-/Licht-/Appaktivierung
+Carver-Runtime-Review, Ore-Korrekturreview und
+[GEN-03.1a Registry-Implementierung](agent-tasks/GEN-03_1a_REGISTRY_STATE_FACTS_RUNTIME_TASK.md).
+Der Heightmap-Korrekturreview ist abgeschlossen. Alle drei Aufgaben lassen
+produktive Worldquellen unverändert. Naturwelt-/Licht-/Appaktivierung
 bleibt offen. Root stellte für den Carverreview ein echtes readonly `356670f7`-
 Archiv bereit:1499 Dateien, alle Runtime-/Dependencybytes gleich der finalen
 Autorenbasis `47eadc4c`. Die vollständige erwartete Kombination enthält1538
