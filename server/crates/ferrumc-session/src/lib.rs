@@ -72,13 +72,21 @@ pub use directory::{
 pub use error::SessionError;
 pub use event::NetEvent;
 pub use native::{
-    CollectorSessionError, CollectorSessionLimits, NativeDisconnect, NativeEndpointState,
-    NativeInputClass, NativeJoinReservation, NativeLaneRecv, NativeRevalidation,
-    NativeRevalidationProbe, NativeRevalidationVerdict, NativeRouted, NativeSessionPhase,
-    NativeSessionStatus, NativeShardInput, NativeShardReceiver, NativeShardRegistration,
-    NativeSpawnProjection, NativeUnregisterError, PlayerSessionKey, MAX_BASELINES_PER_VIEWER,
-    MAX_COLLECTOR_AUDIENCE, MAX_COLLECTOR_SCRATCH, MAX_COLLECTOR_SESSIONS, MAX_COLLECTOR_WORK,
-    MAX_NATIVE_LANE_CAPACITY, MAX_SIMULATION_DISTANCE, MAX_TOTAL_BASELINES,
+    AdoptionInvariant, AdoptionInvariantKind, CollectorAudience, CollectorDeliveryDisposition,
+    CollectorRetirementProof, CollectorSessionError, CollectorSessionLimits,
+    CollectorViewerBinding, LeaveSaveQuarantine, LeaveSaveQuarantineReason,
+    NativeAcknowledgeReport, NativeDetachOutcome, NativeDisconnect, NativeEndpointState,
+    NativeInputClass, NativeJoinReservation, NativeLaneRecv, NativeLeaveSaveState,
+    NativeLifecycleProbe, NativeLifecycleVerdict, NativePoseOutcome, NativeRetentionPhase,
+    NativeRetentionStatus, NativeRetentionStep, NativeRetentionToken, NativeRetirementReport,
+    NativeRevalidation, NativeRevalidationProbe, NativeRevalidationVerdict, NativeRouted,
+    NativeSessionPhase, NativeSessionStatus, NativeShardInput, NativeShardReceiver,
+    NativeShardRegistration, NativeSpawnProjection, NativeUnregisterError, PlayerSessionKey,
+    LEAVE_SAVE_BLOCKING_GRACE, LEAVE_SAVE_COUNT_INTERVAL, LEAVE_SAVE_RESUBMIT_DELAY,
+    MAX_BASELINES_PER_VIEWER, MAX_COLLECTOR_AUDIENCE, MAX_COLLECTOR_SCRATCH,
+    MAX_COLLECTOR_SESSIONS, MAX_COLLECTOR_WORK, MAX_DISCONNECT_RESENDS, MAX_LEAVE_SAVE_ATTEMPTS,
+    MAX_NATIVE_EQUIPMENT_BYTES, MAX_NATIVE_LANE_CAPACITY, MAX_SIMULATION_DISTANCE,
+    MAX_TOTAL_BASELINES,
 };
 pub use outbound::OutboundMessage;
 pub use presentation::{

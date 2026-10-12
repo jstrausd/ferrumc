@@ -24,7 +24,18 @@
 //! work without allocation, never across `.await`, and never together with
 //! another lock. Router and receiver live in the same driver task, so the lock
 //! is uncontended in production; it exists because the queued entry is shared.
+//!
+//! # Take sequence (§7.3 amendment V1, Root)
+//!
+//! Every lane generation counts the items the router put into it and the items
+//! the receiver took out of it. The channel is FIFO and the router is its only
+//! sender, so the `n`-th sent item has left the lane exactly when the take
+//! count reaches `n`. A disconnect remembers its position as a [`LaneMark`];
+//! the leave-save state machine counts a disconnect resend only after the
+//! previous disconnect was taken (handed to the simulation, §6.2), never while
+//! a backlog of other sessions' items still holds it in the lane.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::{self, error::TryRecvError};
@@ -36,9 +47,56 @@ use super::PlayerSessionKey;
 use crate::directory::{ShardCoverage, ShardLease};
 
 /// Identity of one native lane generation; compared by `Arc::ptr_eq`.
+///
+/// It also carries the lane's send and take sequence (§7.3 amendment V1).
+/// Both counters only grow; a `u64` cannot wrap at any real item rate.
 #[derive(Debug)]
 pub(crate) struct NativeLaneIdentity {
     pub(crate) coverage: ShardCoverage,
+    /// Items the router (the only sender) put into this lane.
+    sent: AtomicU64,
+    /// Items the receiver took out of this lane.
+    taken: AtomicU64,
+}
+
+impl NativeLaneIdentity {
+    pub(crate) const fn new(coverage: ShardCoverage) -> Self {
+        Self {
+            coverage,
+            sent: AtomicU64::new(0),
+            taken: AtomicU64::new(0),
+        }
+    }
+
+    /// Records one successful send and returns the item's lane position.
+    pub(crate) fn record_send(&self) -> u64 {
+        self.sent.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+    }
+
+    fn record_take(&self) {
+        self.taken.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Lane position of one sent disconnect (§7.3 amendment V1, Root).
+#[derive(Debug, Clone)]
+pub(crate) struct LaneMark {
+    lane: Arc<NativeLaneIdentity>,
+    position: u64,
+}
+
+impl LaneMark {
+    pub(crate) fn new(lane: &Arc<NativeLaneIdentity>, position: u64) -> Self {
+        Self {
+            lane: Arc::clone(lane),
+            position,
+        }
+    }
+
+    /// Whether the receiver took the marked item out of its lane.
+    pub(crate) fn taken(&self) -> bool {
+        self.lane.taken.load(Ordering::Relaxed) >= self.position
+    }
 }
 
 /// The lane class of a native input.
@@ -134,7 +192,12 @@ impl NativeShardReceiver {
     /// bounded channel; [`NativeLaneRecv::MovementCellPoisoned`] reports a
     /// discarded movement whose cell lock was poisoned.
     pub fn try_recv(&mut self) -> Result<NativeShardInput, NativeLaneRecv> {
-        match self.receiver.try_recv() {
+        let item = self.receiver.try_recv();
+        if item.is_ok() {
+            // Every entry that leaves the lane counts, a poisoned movement too.
+            self.identity.record_take();
+        }
+        match item {
             Ok(LaneItem::Input(input)) => Ok(input),
             Ok(LaneItem::Movement { key, cell }) => match cell.take() {
                 Ok(input) => Ok(NativeShardInput {

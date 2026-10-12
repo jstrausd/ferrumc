@@ -47,6 +47,10 @@ async fn replacement_suspends_and_closure_revalidation_rebinds_active_and_leavin
             let _join_game = admitted.session.try_recv().unwrap();
             sessions.push(admitted);
         }
+        // NET-04.2e2: native sessions see each other; every pair is in view.
+        for admitted in &mut sessions {
+            assert_eq!(drain_peer_burst(&mut admitted.session), 4 * 2);
+        }
         let key = |i: usize| sessions[i].session.session_key().unwrap();
         let (a, b, c, d, e) = (key(0), key(1), key(2), key(3), key(4));
 
@@ -55,7 +59,7 @@ async fn replacement_suspends_and_closure_revalidation_rebinds_active_and_leavin
             router.route_native_play(&a, &at(9.5, 9.5)),
             Ok(NativeRouted::Queued)
         );
-        assert_eq!(router.disconnect_native(&b), Ok(NativeDisconnect::Sent));
+        assert_eq!(disconnect(&mut router, &b).1, Some(NativeDisconnect::Sent));
 
         // Refused replacements leave the endpoint unchanged.
         let mut foreign = native_support::router(64, 16, 8);
@@ -119,7 +123,10 @@ async fn replacement_suspends_and_closure_revalidation_rebinds_active_and_leavin
             ),
             Err(CollectorSessionError::EndpointSuspended)
         );
-        assert_eq!(router.disconnect_native(&c), Ok(NativeDisconnect::Retained));
+        assert_eq!(
+            disconnect(&mut router, &c).1,
+            Some(NativeDisconnect::Retained)
+        );
         assert_eq!(
             router.retry_native_disconnects(),
             1,
@@ -183,7 +190,10 @@ async fn replacement_suspends_and_closure_revalidation_rebinds_active_and_leavin
             NativeEndpointState::RevalidationRefused
         );
         assert_eq!(status(&e).phase(), NativeSessionPhase::Leaving);
-        assert_eq!(status(&e).disconnect(), Some(NativeDisconnect::Retained));
+        // A2 / Root 2(d): the refused session's disconnect from its stored
+        // handle went to the current lane (e1: retained forever).
+        assert_eq!(status(&e).disconnect(), Some(NativeDisconnect::Sent));
+        assert_eq!(router.retry_native_disconnects(), 0);
 
         // A gets a mandatory sync to its genuine pose for the refused selection.
         let sync = sessions[0]
@@ -202,7 +212,8 @@ async fn replacement_suspends_and_closure_revalidation_rebinds_active_and_leavin
         // E's own outbound lane is closed by the controlled leave.
         assert!(sessions[4].session.try_recv().is_none());
 
-        // C's retained disconnect is the first item on the new lane, then new A input.
+        // C's retained disconnect is the first item on the new lane, then E's
+        // disconnect from its stored handle (A2), then new A input.
         assert_eq!(
             router.route_native_play(&a, &at(11.5, 11.5)),
             Ok(NativeRouted::Queued)
@@ -210,21 +221,30 @@ async fn replacement_suspends_and_closure_revalidation_rebinds_active_and_leavin
         let first = lane.try_recv().unwrap();
         assert_eq!(first.session(), &c);
         assert_eq!(first.class(), NativeInputClass::Control);
+        let refused = lane.try_recv().unwrap();
+        assert_eq!(refused.session(), &e);
+        assert_eq!(refused.class(), NativeInputClass::Control);
         let second = lane.try_recv().unwrap();
         assert_eq!(second.session(), &a);
-        env.shard
-            .enqueue_owned_player_input(first.into_parts().2)
-            .unwrap();
-        env.shard
-            .enqueue_owned_player_input(second.into_parts().2)
-            .unwrap();
+        for item in [first, refused, second] {
+            env.shard
+                .enqueue_owned_player_input(item.into_parts().2)
+                .unwrap();
+        }
         let mut out = env.boundary();
         assert!(out.take_refusals().is_empty());
         assert_eq!(
             env.position(&sessions[0].handle),
             Vec3::new(11.5, 64.0, 11.5)
         );
-        for detached in [1, 2, 3] {
+        // The genuine owner applied E's disconnect: the normal detach path.
+        assert_eq!(
+            router.native_detached(e_player, &mut |handle, probe| {
+                probe.submit(env.shard.collector_lifecycle_view(handle).ok())
+            }),
+            Ok(ferrumc_session::NativeDetachOutcome::Confirmed)
+        );
+        for detached in [1, 2, 3, 4] {
             assert!(matches!(
                 env.shard
                     .connected_owned_player_view(&sessions[detached].handle),

@@ -526,8 +526,8 @@ async fn foreign_stale_and_leaving_keys_never_address_a_session() {
         .native_lane_input_live(&foreign_key, NativeInputClass::Control));
     // Leaving sessions accept no gameplay.
     assert_eq!(
-        f.router.disconnect_native(&f.key),
-        Ok(NativeDisconnect::Sent)
+        disconnect(&mut f.router, &f.key).1,
+        Some(NativeDisconnect::Sent)
     );
     assert_eq!(
         f.router.route_native_play(&f.key, &at(9.0, 9.0)),
@@ -547,13 +547,12 @@ async fn disconnect_native_is_idempotent_and_detaches_the_genuine_admission() {
     for store in STORES {
         let mut f = fixture(store, 64, 16, 32).await;
         f.router.route_native_play(&f.key, &at(9.0, 9.0)).unwrap();
+        let (token, first) = disconnect(&mut f.router, &f.key);
+        assert_eq!(first, Some(NativeDisconnect::Sent));
         assert_eq!(
-            f.router.disconnect_native(&f.key),
-            Ok(NativeDisconnect::Sent)
-        );
-        assert_eq!(
-            f.router.disconnect_native(&f.key),
-            Ok(NativeDisconnect::Sent)
+            disconnect(&mut f.router, &f.key),
+            (token, Some(NativeDisconnect::Sent)),
+            "idempotent: same token, still one disconnect"
         );
         let status = f.router.native_session_status(&f.key).unwrap();
         assert_eq!(status.phase(), NativeSessionPhase::Leaving);
@@ -627,16 +626,14 @@ async fn full_lane_turns_data_into_a_controlled_leave_and_retains_the_disconnect
             g.router.route_native_play(&g.key, &held(slot)).unwrap();
         }
         assert_eq!(
-            g.router.disconnect_native(&g.key),
-            Ok(NativeDisconnect::Sent)
+            disconnect(&mut g.router, &g.key).1,
+            Some(NativeDisconnect::Sent)
         );
+        let (second_token, retained) = disconnect(&mut g.router, &second_key);
+        assert_eq!(retained, Some(NativeDisconnect::Retained));
         assert_eq!(
-            g.router.disconnect_native(&second_key),
-            Ok(NativeDisconnect::Retained)
-        );
-        assert_eq!(
-            g.router.disconnect_native(&second_key),
-            Ok(NativeDisconnect::Retained)
+            disconnect(&mut g.router, &second_key),
+            (second_token, Some(NativeDisconnect::Retained))
         );
         assert_eq!(g.router.retry_native_disconnects(), 1);
         let mut controls = 0;

@@ -72,7 +72,8 @@ pub enum CollectorSessionError {
     NativeEndpointInUse {
         /// The registration lineage that is still referenced.
         registration_id: ShardRegistrationId,
-        /// Native sessions (active or leaving) referencing it.
+        /// Native sessions (active or leaving), retention records, adopted
+        /// admissions and poisoned entries referencing it.
         sessions: usize,
         /// Provisional join reservations referencing it.
         reservations: usize,
@@ -158,6 +159,76 @@ pub enum CollectorSessionError {
     /// A bounded worklist could not be allocated.
     #[error("bounded native session allocation failed")]
     AllocationFailed,
+    /// The router-local lifecycle probe sequence is exhausted; nothing changed.
+    #[error("native lifecycle probe sequence exhausted")]
+    ProbesExhausted,
+    /// The router-local retention lineage counter is exhausted; nothing changed.
+    #[error("native retention lineages exhausted")]
+    LineageExhausted,
+    /// The retention token names no current record of this router.
+    #[error("stale or foreign native retention token")]
+    StaleRetention,
+    /// `native_retention_unsent` without a submit of the last service step.
+    #[error("no native retention submit to roll back")]
+    NoRetentionSubmit,
+    /// The status closure reported a wiring break (snapshot, uninitialized,
+    /// scope, or any non-retention refusal); the driver fail-stops.
+    #[error("native detached status invariant broken")]
+    NativeStatusInvariant,
+    /// The record is not releasable yet (retirement, acknowledgement or
+    /// confirmed leave-save missing).
+    #[error("native retention record is not releasable: {0}")]
+    RetentionNotReleasable(&'static str),
+    /// The record was superseded by a genuine rejoin; no leave-save or release.
+    #[error("native retention record was superseded by a rejoin")]
+    RetentionSuperseded,
+    /// The simulation release refused the original handle as stale or foreign.
+    #[error("native release refused: stale or foreign handle")]
+    NativeReleaseStale,
+    /// The simulation release gate refused before any mutation.
+    #[error("native release refused: {0}")]
+    NativeReleaseRefused(ferrumc_sim::DetachedReleaseRefusal),
+    /// The simulation release failed for another reason, or its receipt named
+    /// another player; the record is unchanged.
+    #[error("native release failed")]
+    NativeReleaseFailed,
+    /// D8: the lifecycle acknowledgement failed; an invariant break, the driver
+    /// fail-stops.
+    #[error("native lifecycle acknowledgement failed")]
+    NativeLifecycleAckFailed,
+    /// The unbound retirement preconditions are not met yet.
+    #[error("native unbound retirement refused: {0}")]
+    RetirementRefused(&'static str),
+    /// Name or equipment of a native join exceed their bounds.
+    #[error("invalid native join metadata: {0}")]
+    InvalidJoinMetadata(&'static str),
+    /// The joiner's outbound cannot hold `JoinGame` plus its mandatory peer burst.
+    #[error("native peer burst exceeds the outbound capacity")]
+    PeerBurstCapacity,
+    /// A per-viewer or total player-baseline limit would be exceeded.
+    #[error("native player baseline capacity exceeded")]
+    BaselineCapacity,
+    /// The admitted readonly work of a scan or reconcile would be exceeded.
+    #[error("native collector work capacity exceeded")]
+    WorkCapacity,
+    /// The checked scratch charge of a plan would be exceeded.
+    #[error("native collector scratch capacity exceeded")]
+    ScratchCapacity,
+    /// The collector audience would exceed its limit.
+    #[error("native collector audience capacity exceeded")]
+    AudienceCapacity,
+    /// The collector has no native session binding (legacy, never bound, unknown).
+    #[error("collector binding unavailable")]
+    CollectorBindingUnavailable,
+    /// The collector names another owner, admission or generation than the session.
+    #[error("collector admission mismatch")]
+    CollectorAdmissionMismatch,
+    /// The collector session is leaving, suspended, closed or not live.
+    #[error("collector session is not current")]
+    CollectorNotCurrent,
+    /// The collector's tracking has an unfinished reconcile.
+    #[error("collector tracking is not current")]
+    TrackingNotCurrent,
 }
 
 impl From<CollectorSessionError> for ServerError {
@@ -167,10 +238,18 @@ impl From<CollectorSessionError> for ServerError {
             | CollectorSessionError::SessionIdsExhausted
             | CollectorSessionError::EntityIdsExhausted
             | CollectorSessionError::NativeLaneFull { .. }
-            | CollectorSessionError::AllocationFailed => {
+            | CollectorSessionError::AllocationFailed
+            | CollectorSessionError::LineageExhausted
+            | CollectorSessionError::PeerBurstCapacity
+            | CollectorSessionError::BaselineCapacity
+            | CollectorSessionError::WorkCapacity
+            | CollectorSessionError::ScratchCapacity
+            | CollectorSessionError::AudienceCapacity => {
                 ServerError::capacity(format!("native session: {error}"))
             }
-            CollectorSessionError::UnknownShard { .. } | CollectorSessionError::StaleSession => {
+            CollectorSessionError::UnknownShard { .. }
+            | CollectorSessionError::StaleSession
+            | CollectorSessionError::StaleRetention => {
                 ServerError::not_found(format!("native session: {error}"))
             }
             _ => ServerError::invalid_state(format!("native session: {error}")),

@@ -3,6 +3,8 @@
 //! validated registry layout, and a driver-like lane pump. No fake facts.
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
+pub mod e2;
+
 use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,8 +16,8 @@ use ferrumc_math::{ChunkPos, ShardPos, Vec3};
 use ferrumc_proto::generated::configuration::{KnownPack, RegistryData, RegistryEntry};
 use ferrumc_proto::generated::play::{JoinGame, SpawnInfo};
 use ferrumc_session::{
-    CollectorSessionLimits, NativeJoinReservation, NativeShardReceiver, PlayerSessionHandle,
-    SessionRouter,
+    CollectorSessionLimits, NativeDisconnect, NativeJoinReservation, NativeRetentionToken,
+    NativeShardReceiver, PlayerSessionHandle, PlayerSessionKey, SessionRouter,
 };
 use ferrumc_sim::{
     ChunkTicket, CollectorLifecycleLimits, GenerationBinding, ItemPublicationLimits,
@@ -69,11 +71,11 @@ pub fn player(name: &str) -> PlayerId {
 pub fn spawn() -> Vec3 {
     Vec3::new(8.5, 64.0, 8.5)
 }
-fn config() -> OwnershipConfig {
+fn config(receipts: u64) -> OwnershipConfig {
     OwnershipConfig::new(
         OwnershipCapacity::new(
             nz(MAX_OWNERSHIP_REQUEST_BYTES),
-            NonZeroU64::new(10_000).unwrap(),
+            NonZeroU64::new(receipts).unwrap(),
             NonZeroU64::new(10_000).unwrap(),
         )
         .unwrap(),
@@ -96,6 +98,32 @@ pub enum Store {
 
 pub const STORES: [Store; 2] = [Store::Memory, Store::Redb];
 
+/// Owner and store bounds of one test environment (genuine limits, no fakes).
+#[derive(Debug, Clone, Copy)]
+pub struct EnvLimits {
+    /// Simulation input queue count (`MAX_PLAYER_OWNERSHIP_INPUTS` in the contract).
+    pub inputs: usize,
+    /// Simulation pending limit.
+    pub pending: usize,
+    /// Persisted receipt history of the store; exhaustion is a genuine
+    /// `HistoryCapacity` refusal (status `Prepared`).
+    pub receipts: u64,
+    /// Counter defer allowance: normal boundaries an unresolved entity pending
+    /// may defer before `CounterRecoveryRequired`.
+    pub defer: usize,
+}
+
+impl Default for EnvLimits {
+    fn default() -> Self {
+        Self {
+            inputs: 32,
+            pending: 32,
+            receipts: 10_000,
+            defer: 64,
+        }
+    }
+}
+
 /// One native shard initialized in the contract's order (§10.2): ownership,
 /// publications, lifecycle, counter mode at `Tick::ZERO`, initial refill.
 pub struct SimEnv {
@@ -106,7 +134,7 @@ pub struct SimEnv {
     pub tick: Tick,
     backend: Arc<dyn Backend>,
     path: Option<PathBuf>,
-    next_id: u8,
+    next_id: u128,
 }
 
 impl Drop for SimEnv {
@@ -122,14 +150,27 @@ impl SimEnv {
         Self::with_inputs(store, 32).await
     }
 
+    pub async fn with_inputs(store: Store, inputs: usize) -> Self {
+        Self::configured(
+            store,
+            EnvLimits {
+                inputs,
+                ..EnvLimits::default()
+            },
+        )
+        .await
+    }
+
     #[allow(
         clippy::too_many_lines,
         reason = "the contract's ordered native initialization"
     )]
-    pub async fn with_inputs(store: Store, inputs: usize) -> Self {
+    pub async fn configured(store: Store, env: EnvLimits) -> Self {
         let (backend, path): (Arc<dyn Backend>, Option<PathBuf>) = match store {
             Store::Memory => (
-                Arc::new(InMemoryStore::with_player_entity_ownership(config()).unwrap()),
+                Arc::new(
+                    InMemoryStore::with_player_entity_ownership(config(env.receipts)).unwrap(),
+                ),
                 None,
             ),
             Store::Redb => {
@@ -140,7 +181,8 @@ impl SimEnv {
                 ));
                 (
                     Arc::new(
-                        RedbStore::open_with_player_entity_ownership(&path, config()).unwrap(),
+                        RedbStore::open_with_player_entity_ownership(&path, config(env.receipts))
+                            .unwrap(),
                     ),
                     Some(path),
                 )
@@ -172,9 +214,9 @@ impl SimEnv {
                 PlayerOwnershipLimits::new(
                     nz(16),
                     nz(MAX_OWNED_PLAYER_BYTES),
-                    nz(32),
+                    nz(env.pending),
                     nz(MAX_PLAYER_OWNERSHIP_PENDING_BYTES),
-                    nz(inputs),
+                    nz(env.inputs),
                     nz(MAX_PLAYER_OWNERSHIP_INPUT_BYTES),
                 )
                 .unwrap(),
@@ -199,7 +241,7 @@ impl SimEnv {
             .initialize_owned_item_counters(
                 OwnedItemCounterLimits::new(
                     nz(MAX_CONFIRMED_ITEM_BYTES),
-                    nz(64),
+                    nz(env.defer),
                     nz(64),
                     nz(MAX_OWNED_COUNTER_PLAN_ENTRIES),
                     nz(MAX_OWNED_COUNTER_PLAN_BYTES),
@@ -212,7 +254,7 @@ impl SimEnv {
                 Tick::ZERO,
             )
             .unwrap();
-        let mut env = Self {
+        let mut sim = Self {
             shard,
             store,
             binding,
@@ -222,21 +264,22 @@ impl SimEnv {
             path,
             next_id: 100,
         };
-        let ids = (0..4).map(|_| env.fresh_id()).collect();
-        env.shard
+        let ids = (0..4).map(|_| sim.fresh_id()).collect();
+        sim.shard
             .enqueue_owned_player_input(OwnedPlayerInput::refill_item_save_ids(
-                env.counter.clone(),
+                sim.counter.clone(),
                 ids,
             ))
             .unwrap();
-        let mut out = env.boundary();
+        let mut out = sim.boundary();
         assert!(out.take_refusals().is_empty(), "initial refill applied");
-        env
+        sim
     }
 
+    /// A fresh driver operation id (distinct from the fixed `id(n)` values).
     pub fn fresh_id(&mut self) -> OwnershipTransferId {
         self.next_id = self.next_id.checked_add(1).unwrap();
-        id(self.next_id)
+        OwnershipTransferId::from_bytes((self.next_id | (1_u128 << 120)).to_be_bytes())
     }
 
     /// One checked normal boundary at exactly the next logical tick.
@@ -503,6 +546,38 @@ pub fn admit(
     let view = env.shard.connected_owned_player_view(handle).unwrap();
     let join = JoinFields::valid(view.game_mode()).build();
     router.admit_native_join(reservation, lane, handle, &view, join, "native", Vec::new())
+}
+
+/// D2 (A5): `disconnect_native` returns the retention token; the lane
+/// disposition of the disconnect is read from the session status.
+pub fn disconnect(
+    router: &mut SessionRouter,
+    key: &PlayerSessionKey,
+) -> (NativeRetentionToken, Option<NativeDisconnect>) {
+    let token = router.disconnect_native(key).unwrap();
+    assert_eq!(token.player(), key.player());
+    let status = router.native_session_status(key).unwrap();
+    (token, status.disconnect())
+}
+
+/// Drains a session's queued NET-04.2e2 peer burst and returns its length;
+/// every packet must be a mandatory tab-list add or player spawn.
+pub fn drain_peer_burst(session: &mut PlayerSessionHandle) -> usize {
+    let mut count = 0;
+    while let Some(message) = session.try_recv() {
+        assert_eq!(message.criticality(), ferrumc_net::Criticality::Mandatory);
+        assert!(
+            matches!(
+                message.packet(),
+                ferrumc_proto::generated::play::ClientboundPlayPacket::PlayerInfoUpdate(_)
+                    | ferrumc_proto::generated::play::ClientboundPlayPacket::SpawnEntity(_)
+            ),
+            "peer burst only: {:?}",
+            message.packet()
+        );
+        count += 1;
+    }
+    count
 }
 
 /// Driver-like pump: drains the lane into the real simulation queue and runs

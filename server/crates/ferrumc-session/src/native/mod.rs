@@ -1,14 +1,20 @@
-//! Native collector-session types (NET-04.2e1): sealed session keys, positive
-//! limits, the native endpoint lane, join reservations and closure-scoped
-//! endpoint revalidation.
+//! Native collector-session types: sealed session keys, positive limits, the
+//! native endpoint lane, join reservations and closure-scoped endpoint
+//! revalidation (NET-04.2e1); retention tokens, the leave-save state machine,
+//! lifecycle probes, collector delivery dispositions and adoption invariants
+//! (NET-04.2e2).
 //!
 //! The router never holds a `SimShard`. It stores the genuine admission handle
 //! the driver passed to [`admit_native_join`](crate::SessionRouter::admit_native_join)
-//! and builds every native gameplay input from it.
+//! or [`adopt_unbound_native_admission`](crate::SessionRouter::adopt_unbound_native_admission)
+//! and builds every native input from it.
 
+mod audience;
 mod config;
 mod error;
 mod lane;
+mod lifecycle;
+mod retention;
 mod revalidation;
 
 use std::sync::Weak;
@@ -17,6 +23,11 @@ use ferrumc_core::{GameMode, PlayerId};
 use ferrumc_math::Vec3;
 use ferrumc_sim::ShardId;
 
+pub use audience::{
+    AdoptionInvariant, AdoptionInvariantKind, CollectorAudience, CollectorDeliveryDisposition,
+    CollectorRetirementProof, CollectorViewerBinding, NativeAcknowledgeReport, NativeDetachOutcome,
+    NativePoseOutcome, NativeRetirementReport,
+};
 pub use config::{
     CollectorSessionLimits, PlayerSessionKey, MAX_BASELINES_PER_VIEWER, MAX_COLLECTOR_AUDIENCE,
     MAX_COLLECTOR_SCRATCH, MAX_COLLECTOR_SESSIONS, MAX_COLLECTOR_WORK, MAX_NATIVE_LANE_CAPACITY,
@@ -26,13 +37,29 @@ pub(crate) use config::{
     NativeRegistryLayout, RouterIdentity, OVERWORLD, OVERWORLD_DIMENSION_TYPE,
 };
 pub use error::CollectorSessionError;
-pub(crate) use lane::{lane_channel, LaneItem, MergeOutcome, MovementCell, NativeLaneIdentity};
+pub(crate) use lane::{
+    lane_channel, LaneItem, LaneMark, MergeOutcome, MovementCell, NativeLaneIdentity,
+};
 pub use lane::{
     NativeInputClass, NativeLaneRecv, NativeShardInput, NativeShardReceiver,
     NativeShardRegistration,
 };
+#[cfg(test)]
+pub(crate) use lifecycle::LifecycleFacts;
+pub use lifecycle::{NativeLifecycleProbe, NativeLifecycleVerdict};
+pub(crate) use retention::{Decision, DisconnectPath, LaneDisconnect, Retention};
+pub use retention::{
+    LeaveSaveQuarantine, LeaveSaveQuarantineReason, NativeLeaveSaveState, NativeRetentionPhase,
+    NativeRetentionStatus, NativeRetentionStep, NativeRetentionToken, LEAVE_SAVE_BLOCKING_GRACE,
+    LEAVE_SAVE_COUNT_INTERVAL, LEAVE_SAVE_RESUBMIT_DELAY, MAX_DISCONNECT_RESENDS,
+    MAX_LEAVE_SAVE_ATTEMPTS,
+};
 pub(crate) use revalidation::{LivePose, VerdictOutcome};
 pub use revalidation::{NativeRevalidation, NativeRevalidationProbe, NativeRevalidationVerdict};
+
+/// Largest admitted pre-encoded equipment body of a native join (six slots;
+/// chosen bound, not measured, H7). It is cloned only into bounded viewer sends.
+pub const MAX_NATIVE_EQUIPMENT_BYTES: usize = 64 * 1024;
 
 /// Read-only spawn pose minted from the genuine live view at admission.
 ///
@@ -63,7 +90,9 @@ impl NativeSpawnProjection {
 }
 
 /// A provisional native join slot: a session incarnation, a burned wire id and
-/// one counted session-table entry. It is not a simulation admission.
+/// one allocated, counted session-table entry that the active session or the
+/// adopted record later takes over in place (R3-3). It is not a simulation
+/// admission.
 ///
 /// Sealed and not `Clone`:
 ///
@@ -98,7 +127,8 @@ pub enum NativeRouted {
     Ignored,
 }
 
-/// Disposition of [`disconnect_native`](crate::SessionRouter::disconnect_native).
+/// Lane disposition of a native session's disconnect, as reported by
+/// [`NativeSessionStatus::disconnect`] after [`disconnect_native`](crate::SessionRouter::disconnect_native).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeDisconnect {
     /// The disconnect entered the native lane.
@@ -107,6 +137,9 @@ pub enum NativeDisconnect {
     /// retried by [`retry_native_disconnects`](crate::SessionRouter::retry_native_disconnects)
     /// or sent first after revalidation.
     Retained,
+    /// Revalidation reported the simulation player detached: no lane
+    /// disconnect is needed and none is retained (A2).
+    NotNeeded,
 }
 
 /// Lifecycle phase of a native session.
@@ -174,8 +207,9 @@ impl NativeSessionStatus {
         self.self_wire_id
     }
 
-    /// The last genuine native mode the session observed (admission or
-    /// revalidation view); not a replacement for the simulation's state.
+    /// The last genuine native mode the session observed (admission,
+    /// revalidation or pose-producer view); not a replacement for the
+    /// simulation's state.
     pub const fn game_mode(self) -> GameMode {
         self.game_mode
     }

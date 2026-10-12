@@ -28,7 +28,7 @@ use ferrumc_storage::{
 use ferrumc_world::{FlatWorldGenerator, GenerationIdentity, WorldSeed};
 
 use super::*;
-use crate::native::NativeLaneRecv;
+use crate::native::{NativeLaneRecv, NativeLifecycleVerdict};
 use crate::router::DEFAULT_VIEW_DISTANCE;
 use crate::{SessionError, ShardLease};
 use ferrumc_sim::ShardId;
@@ -313,7 +313,11 @@ fn native_reservation_burns_max_once_and_refuses_exhausted_counters_without_side
     let last = router
         .reserve_native_join(PlayerId::offline("Last"), generation(), spawn())
         .unwrap();
-    assert_eq!(router.native_reservations[&last.player()].wire_id, i32::MAX);
+    let wire = match &router.native.entry(last.key.slot).unwrap().state {
+        EntryState::Reserved(record) => record.wire_id,
+        other => panic!("reservation entry expected: {other:?}"),
+    };
+    assert_eq!(wire, i32::MAX);
     assert_eq!(router.next_entity_id, None);
     assert_eq!(router.next_session, None);
     assert_eq!(
@@ -329,7 +333,7 @@ fn native_reservation_burns_max_once_and_refuses_exhausted_counters_without_side
             .err(),
         Some(CollectorSessionError::EntityIdsExhausted)
     );
-    assert_eq!(router.native_reservations.len(), 1);
+    assert_eq!(router.native_reservation_count(), 1);
     assert_eq!(router.next_session, Some(NonZeroU64::MIN));
     router.cancel_native_join(last).unwrap();
     assert_eq!(router.next_entity_id, None, "a cancel never reissues");
@@ -366,7 +370,10 @@ async fn poisoned_movement_cell_is_reported_typed_and_never_merged_again() {
         Ok(NativeRouted::Queued)
     );
     let cell = Arc::clone(
-        router.native_sessions[&key.player]
+        router
+            .native
+            .session(key.slot)
+            .unwrap()
             .movement
             .as_ref()
             .unwrap(),
@@ -455,9 +462,7 @@ async fn each_take_and_replace_branch_of_a_movement_cell_is_decided_deterministi
         })
         .unwrap();
     let mut detached = NativeShardReceiver {
-        identity: Arc::new(NativeLaneIdentity {
-            coverage: lease.coverage(),
-        }),
+        identity: Arc::new(NativeLaneIdentity::new(lease.coverage())),
         receiver,
     };
     let taken = detached.try_recv().unwrap();
@@ -529,4 +534,134 @@ fn a_legacy_input_resolved_to_a_native_endpoint_is_returned_intact() {
     assert!(router
         .route_game_input_owned(PlayerId::offline("Legacy"), input)
         .is_err());
+}
+
+// ---------------------------------------------------------------- NET-04.2e2
+
+/// A1 / R3-3: the reservation allocates the one table entry; admission,
+/// disconnect and adoption take it over in place, and a freed entry is reused
+/// before the table grows.
+#[tokio::test]
+async fn table_entries_are_taken_over_in_place_without_growth() {
+    let (env, mut router, _lease, _lane, key) = native_session().await;
+    let slots = router.native.slots.len();
+    let capacity = router.native.slots.capacity();
+    assert_eq!(slots, 1);
+    assert!(matches!(
+        router.native.entry(key.slot).unwrap().state,
+        EntryState::Session(_)
+    ));
+    let token = router.disconnect_native(&key).unwrap();
+    assert_eq!(router.native.slots.len(), slots);
+    assert_eq!(router.native.slots.capacity(), capacity);
+    assert!(router
+        .native
+        .session(key.slot)
+        .unwrap()
+        .retention
+        .as_ref()
+        .is_some_and(|r| r.lineage.get() == token.lineage()));
+    // A second reservation grows the table by exactly one entry, fallibly.
+    let second = router
+        .reserve_native_join(PlayerId::offline("Second"), generation(), spawn())
+        .unwrap();
+    assert_eq!(second.key.slot, 1);
+    let grown = router.native.slots.capacity();
+    // Cancel frees it; the next reservation reuses the same slot index.
+    router.cancel_native_join(second).unwrap();
+    let third = router
+        .reserve_native_join(PlayerId::offline("Third"), generation(), spawn())
+        .unwrap();
+    assert_eq!(third.key.slot, 1);
+    assert_eq!(router.native.slots.len(), 2);
+    assert_eq!(router.native.slots.capacity(), grown);
+    // Adoption replaces the reserved state in the same slot.
+    let (third_env, handle) = admitted(PlayerId::offline("Third")).await;
+    let view = third_env
+        .shard
+        .connected_owned_player_view(&handle)
+        .unwrap();
+    let adopted = router
+        .adopt_unbound_native_admission(third, &handle, &view)
+        .unwrap();
+    assert!(matches!(
+        router.native.entry(1).unwrap().state,
+        EntryState::Record(_)
+    ));
+    assert_eq!(router.native.slots.len(), 2);
+    assert_eq!(router.native.slots.capacity(), grown);
+    assert_ne!(adopted.lineage(), token.lineage());
+    drop(env);
+}
+
+#[tokio::test]
+async fn exhausted_lineage_refuses_before_any_effect_and_poisons_an_adoption() {
+    let (_env, mut router, _lease, mut lane, key) = native_session().await;
+    router.native.next_lineage = None;
+    assert_eq!(
+        router.disconnect_native(&key),
+        Err(CollectorSessionError::LineageExhausted)
+    );
+    let status = router.native_session_status(&key).unwrap();
+    assert_eq!(status.phase(), crate::NativeSessionPhase::Active);
+    assert_eq!(status.disconnect(), None);
+    assert!(matches!(lane.try_recv(), Err(NativeLaneRecv::Empty)));
+    // The last lineage is issued exactly once.
+    router.native.next_lineage = Some(NonZeroU64::MAX);
+    let token = router.disconnect_native(&key).unwrap();
+    assert_eq!(token.lineage(), u64::MAX);
+    assert_eq!(router.native.next_lineage, None);
+    let reservation = router
+        .reserve_native_join(PlayerId::offline("Late"), generation(), spawn())
+        .unwrap();
+    let (env, handle) = admitted(PlayerId::offline("Late")).await;
+    let view = env.shard.connected_owned_player_view(&handle).unwrap();
+    let broken = router
+        .adopt_unbound_native_admission(reservation, &handle, &view)
+        .unwrap_err();
+    assert_eq!(
+        broken.kind(),
+        crate::AdoptionInvariantKind::LineageExhausted
+    );
+    assert_eq!(
+        router.native_poisoned(PlayerId::offline("Late")),
+        Some(crate::AdoptionInvariantKind::LineageExhausted)
+    );
+}
+
+#[tokio::test]
+async fn lifecycle_verdicts_of_another_probe_or_an_exhausted_sequence_prove_nothing() {
+    let (_env, mut router, _lease, _lane, key) = native_session().await;
+    let token = router.disconnect_native(&key).unwrap();
+    let forged_facts = crate::native::LifecycleFacts {
+        matches: true,
+        detached: true,
+        live: false,
+        reserved_pins: 0,
+        retained_pins: 0,
+    };
+    // A detached fact under a sequence no probe of this call carries.
+    let outcome = router
+        .native_detached(key.player, &mut |_, probe| NativeLifecycleVerdict {
+            seq: probe.seq.wrapping_add(1),
+            facts: Some(forged_facts),
+            ticket: None,
+            acknowledged: None,
+        })
+        .unwrap();
+    assert_eq!(outcome, crate::NativeDetachOutcome::NotDetached);
+    assert_eq!(
+        router.native_retention_status(token).unwrap().phase(),
+        crate::NativeRetentionPhase::Leaving
+    );
+    // An exhausted probe sequence refuses before the closure runs.
+    router.probe_seq = u64::MAX;
+    assert_eq!(
+        router.native_detached(key.player, &mut |_, _| unreachable!()),
+        Err(CollectorSessionError::ProbesExhausted)
+    );
+    assert_eq!(
+        router.retire_detached_native_sessions(&mut |_, _| unreachable!()),
+        Ok(crate::NativeRetirementReport::default())
+    );
 }

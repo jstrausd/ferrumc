@@ -81,3 +81,34 @@ review.
 NET-04.2e1 (`ferrumc-session` only) is authorized now; its only prerequisite is
 the accepted NET-04.2c contract. SIM-03.4b, NET-04.2e2, DUR-05a, NET-04.2f and
 DUR-05b follow the contract's ticket order and are authorized separately.
+
+## Amendment V1 to §7.3 — disconnect retry counting (12.10.2026)
+
+Found by the independent NET-04.2e2 runtime review
+([round 1](NET-04_2e2_NATIVE_SESSION_LIFECYCLE_REVIEW.md), V1): counting
+disconnect retries per applied normal boundary (`applied > sent_at`) lets a lane
+backlog caused by other players quarantine an uninvolved player as
+`DisconnectNotApplied`. From now on a retry counts only after the previously
+sent disconnect input was actually taken out of the lane and a normal boundary
+was applied afterwards while the player stays connected; a backlog never counts.
+"Taken out" is measured at the lane receiver: a disconnect that the driver then
+holds because the simulation enqueue refused it may count at most one retry
+early ([round 2](NET-04_2e2_NATIVE_SESSION_LIFECYCLE_REVIEW_ROUND2.md), R2-H1).
+The limit stays one send plus eight retries before
+`Quarantined{DisconnectNotApplied}`. Implemented in NET-04.2e2 and marked there
+as "§7.3-Nachtrag V1 (Root)".
+
+## Conditions carried to NET-04.2f (12.10.2026)
+
+- Receiver replacement follows §4.3 exactly: replace first, then drain the old
+  receiver completely before the new one, proven by a test. A driver that drops
+  an undrained old receiver leaves the record in `AwaitDetach`, skips its final
+  save, keeps the simulation player connected and makes stop phase A end
+  `Unresolved` (NET-04.2e2 review round 2, R2-H2 and the f condition).
+- The native path must not route game-mode events through
+  `mirror_game_mode_change` (the connection inventory authority) while keeping
+  the teleport stamping of `mirror_outbound`.
+- Chunk tickets the driver acquires for a player are released by the driver
+  (SIM-03.4b review, H3).
+- The held-slot resync needs a simulation producer for the selected slot first
+  (planned simulation ticket; NET-04.2e2 delivery, A3 partially met).

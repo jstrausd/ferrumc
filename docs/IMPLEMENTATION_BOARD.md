@@ -283,9 +283,17 @@ nativer Spielerzustände nur nach bestätigtem Save, rein lesender Status,
 Storage-Re-Export für die Session. Sim Debug/Release je394 und Session206 gegen
 das neue Sim grün; fünf eigene Reviewerprobes auf Memory und redb. Ein fremder
 Owner meldet weiter `StaleHandle` (offengelegt; e2 behandelt beides als
-Quarantäne). [NET-04.2e2](agent-tasks/NET-04_2e2_NATIVE_SESSION_LIFECYCLE_TASK.md) (nur
-`ferrumc-session`) ist freigegeben; DUR-05a, NET-04.2f und DUR-05b folgen der
-Ticketfolge.
+Quarantäne). [NET-04.2e2](agent-tasks/NET-04_2e2_NATIVE_SESSION_LIFECYCLE_REVIEW_ROUND2.md)
+(nur `ferrumc-session`) ist nach zwei Reviewrunden CLEAN_RUNTIME integriert:
+Join mit übernehmbarem Tabelleneintrag, Retention-Record mit Original-Handle bis
+zum Release, Leave-Save-Zustandsmaschine mit typisierter Quarantäne, Release nur
+über die SIM-03.4b-APIs, G3-Adoption, Audience/Reconcile und Pose-/Mode-Resync.
+Runde 1 fand einen Driverabbruch beim Stop-Final-Save, einen nie endenden
+zurückgehaltenen Disconnect und einen Vertragsfehler in der Wiederholungszählung;
+der Root hat §7.3 dazu um den Nachtrag V1 ergänzt. Session Debug/Release je244,
+App375 und Testkit100 grün. Der Held-Slot-Resync wartet auf einen Sim-Producer.
+DUR-05a, NET-04.2f und DUR-05b folgen der Ticketfolge; die f-Auflagen stehen in
+den [Rootentscheidungen](agent-tasks/NET-04_2d_NATIVE_DRIVER_ENDPOINT_ROOT_DECISIONS.md).
 
 Der veröffentlichte Ausgangsstand `d3fca66c` mit DUR-03.2 und SIM-03.4 hat
 vollständig erfolgreiche CI:

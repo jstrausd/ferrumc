@@ -238,6 +238,9 @@ pub struct PlayerSessionKey {
     pub(crate) router: Weak<RouterIdentity>,
     pub(crate) player: PlayerId,
     pub(crate) incarnation: NonZeroU64,
+    /// Index of the session-table entry the reservation allocated; a routing
+    /// hint only, every lookup re-checks the full key.
+    pub(crate) slot: usize,
 }
 
 impl PlayerSessionKey {

@@ -402,7 +402,10 @@ async fn restore_and_bootstrap_admissions_queue_join_game_first_on_both_backends
                 None,
             )
             .expect("the queued JoinGame forms a valid decoder frame");
-            assert!(admitted.try_recv().is_none(), "no peer burst in e1");
+            // NET-04.2e2: after JoinGame exactly the other session's mandatory
+            // tab-list add and spawn (e1 had no peer burst), nothing else.
+            assert_eq!(drain_peer_burst(admitted), 2);
+            assert!(admitted.try_recv().is_none());
         }
 
         // The projection carries the live view's exact bits, unnormalized.

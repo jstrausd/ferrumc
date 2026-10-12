@@ -372,8 +372,8 @@ pub struct SessionRouter {
     /// Router-local revalidation probe sequence (checked, never reused).
     probe_seq: u64,
     collector: Option<native::CollectorConfig>,
-    native_sessions: BTreeMap<PlayerId, native::NativeSession>,
-    native_reservations: BTreeMap<PlayerId, native::NativeReservationRecord>,
+    /// The unified native session table (NET-04.2e2, A1).
+    native: native::NativeTable,
 }
 
 impl SessionRouter {
@@ -425,8 +425,7 @@ impl SessionRouter {
             next_session: Some(NonZeroU64::MIN),
             probe_seq: 0,
             collector: None,
-            native_sessions: BTreeMap::new(),
-            native_reservations: BTreeMap::new(),
+            native: native::NativeTable::new(),
         }
     }
 
