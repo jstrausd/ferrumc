@@ -262,7 +262,7 @@ und exakten Fehlerpfadentwurf an; die Umsetzung und Runtimeabnahme folgen getren
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
 | 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. [Rust-Kandidat044 eingefroren](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_DELIVERY.md): Autorenchecks World Debug/Release jeweils415 bestanden,1550 Consumerprüfungen und strikte Checks grün. [Runtime-Review FINDINGS](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_REVIEW.md): eine Klima-f64→f32-Umwandlung läuft vor ihrer Budgetreservierung. [RR11-M1-Korrektur](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_TASK.md) mit tatsächlichem Refusal-Regressionstest läuft. Integration und Appaktivierung bleiben offen. |
-| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Revision2](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md) ist unabhängig [CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW.md), B1/B2/B3 auf Vorbereitungsebene geschlossen. Root nimmt 16-KiB-Katalog/16-KiB-Scratch/32-KiB-neuen Peak/49.152-B-mit-altem-Katalog und 512-B-Cursor als messpflichtige Designlimits an. [GEN-06.2 Rust-Primitive](agent-tasks/GEN-06_2_CLOSED_ORE_PLACEMENT_PRIMITIVES_RUNTIME_TASK.md) wartet auf den exklusiven Worldslot und frische akzeptierte Basis. [GEN-06.3 Review Revision2](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION2_REVIEW.md) ist FINDINGS: Query53-Abgleich, typisierte Bootstrapkonstanten und ganze Trace-Membership benötigen [Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3_TASK.md). Neue Regionschnittstellen/-limits bleiben unangenommen; H2 und whole-FEATURES offen. |
+| 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Revision2](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md) ist unabhängig [CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW.md), B1/B2/B3 auf Vorbereitungsebene geschlossen. Root nimmt 16-KiB-Katalog/16-KiB-Scratch/32-KiB-neuen Peak/49.152-B-mit-altem-Katalog und 512-B-Cursor als messpflichtige Designlimits an. [GEN-06.2 Rust-Primitive](agent-tasks/GEN-06_2_CLOSED_ORE_PLACEMENT_PRIMITIVES_RUNTIME_TASK.md) wartet auf den exklusiven Worldslot und frische akzeptierte Basis. [GEN-06.3 Review Revision2](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION2_REVIEW.md) ist FINDINGS: Query53-Abgleich, typisierte Bootstrapkonstanten und ganze Trace-Membership wurden in der [Autorenantwort Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3.md) korrigiert; der neue [unabhängige Prüfauftrag](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3_REVIEW_TASK.md) bleibt vor Annahme erforderlich. Neue Regionschnittstellen/-limits bleiben unangenommen; H2 und whole-FEATURES offen. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
 
@@ -272,7 +272,7 @@ Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
 Die laufenden World-Aufträge sind GEN-05.11 RR11-M1-Runtimekorrektur und
-GEN-06.3 writerfreie Korrektur Revision3 der Query-/Oraclewerkzeuge. Der unabhängige
+GEN-06.3 writerfreier unabhängiger Review der gelieferten Revision3 der Query-/Oraclewerkzeuge. Der unabhängige
 Storage-Review DUR-03.3b ist CLEAN_RUNTIME_REVIEW abgeschlossen. GEN-06.1 Review Runde 2
 ist fertig; Root hat alle 494 Dateien/307.996.259 Bytes erneut geprüft und nimmt
 nur die kontrollierte Vorbereitung an. Im Review erkannte shared-Worldänderungen
@@ -356,6 +356,15 @@ erhalten; maßgeblich ist der vollständige enclosing Freeze e97293eb.
 Root verlangt [gezielte Korrektur Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3_TASK.md):
 typisierte executable Konstanten, genaue rekursive Payloadmembership und
 konsistenter Query-/Adapter-/Debitentwurf. Keine historische Freezeänderung.
+Die vollständige [Antwort Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3.md)
+ist geliefert: Query53 plus explizite Selection32 am selben Parent, Modellmaximum
+3.904.585/Margin289.719 zu weiterhin pending2^22, typisierte Konstanten und
+vollständige membergebundene Payloadprüfung. Der Autorenfreeze umfasst68900
+Dateien/31.815.362.417 Bytes; mathematische Modelle und echte JVMkontrollen
+bleiben getrennt von fehlenden Rustproducern. Der neue
+[unabhängige Reviewauftrag](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3_REVIEW_TASK.md)
+prüft die gesamte ursprüngliche Pflicht-/Befund-/Antwortkette. Kein CLEAN- oder
+Runtimeurteil folgt aus dieser Lieferung.
 GEN-06.2s Single-key1Mi bleibt unverändert.
 Alle neuen Region-/Kapazitäts-/Interfacevorschläge bleiben bis zu Review und
 Rootentscheidung unangenommen.
@@ -393,9 +402,9 @@ Die unabhängig gezählten1812 Queries im Full30-Seed0-Plan erhöhen den
 Modelltotal auf3.848.413; Margin345.891 zu weiterhin pending2^22. Bounded
 Chunkselection und ein gemeinsam geprüfter Kernel-/Parentmeteradapter bleiben offen.
 Neue Reservationsmodelle36/491559/14163/4259119/14419/Query53 und eigene
-Preparation-Allowance2^23 bleiben unangenommen. Der pending Erz-Entwurf rechnet
-noch Query8; Root gab die konkrete Schnittstellen-/Budgetabweichung an beide
-Reviewer weiter. Keine stille Änderung eines Freeze oder zweiten Ore-Meters.
+Preparation-Allowance2^23 bleiben unangenommen. Der historische Erz-Entwurf Revision2 rechnete
+Query8; die neue Revision3 schlägt53+32 und eine atomare85-Reservation am
+aktiven Parent vor. Der neue Review muss diese konkrete Verbindung prüfen. Keine stille Änderung eines Freeze oder zweiten Ore-Meters.
 Root nimmt separat nur den Registryentwurf mit Static65536/Build131072,
 Domain26 und bounded u64-Buildwork7391501569 als messpflichtige Limits an.
 Der [Registry-only Runtimeauftrag](agent-tasks/GEN-03_1a_REGISTRY_STATE_FACTS_RUNTIME_TASK.md)
@@ -404,7 +413,7 @@ statische Facts und CheckedStateId ohne World-/Flatänderung. Die private
 Prüfbasis ist ein echtes main65c7f682-Archiv mit1505 Dateien; Shared Carver-WIP
 gehört nicht dazu. Registry-Runtimeabnahme und sämtliche Worldlimits bleiben offen.
 Die drei aktiven Children sind
-Carver-Runtimekorrektur, Ore-Korrektur Revision3 und
+Carver-Runtimekorrektur, unabhängiger Ore-Review Revision3 und
 [GEN-03.1a Registry-Round2](agent-tasks/GEN-03_1a_REGISTRY_CHECKED_CLOSE_RESUME_TASK.md).
 Der Heightmap-Korrekturreview ist abgeschlossen. Die Carverkorrektur hat den
 exklusiven Worldwriter; die anderen beiden Aufgaben lassen Worldquellen
