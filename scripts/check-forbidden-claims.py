@@ -1150,6 +1150,22 @@ def neutral_plugin_read_maps(text: str, match: re.Match[str]) -> bool:
     )
 
 
+def neutral_runtime_test_archive(text: str, match: re.Match[str]) -> bool:
+    """Recognize the review's test-build archive, without exempting plugin claims."""
+    return (
+        match.group().casefold() == "isolated"
+        and re.search(
+            r"(?:^|[.!?]\s+)Wirkliche "
+            r"Rustkernel-/Allocation-/Stack-/Lifecycle-/Integrationtests "
+            r"müssen im später freigegebenen $",
+            text[: match.start()],
+        )
+        is not None
+        and re.match(r" archive/Overlay erfolgen\.(?:\s|$)", text[match.end() :])
+        is not None
+    )
+
+
 def scan(blocks: list[Block]) -> list[Finding]:
     findings: list[Finding] = []
     seen: set[tuple[str, str, int, str]] = set()
@@ -1182,7 +1198,9 @@ def scan(blocks: list[Block]) -> list[Finding]:
         plain = render_public_text(block.text)
         if block.plugin_context:
             for match in PLUGIN_TERM.finditer(plain):
-                if neutral_plugin_read_maps(plain, match):
+                if neutral_plugin_read_maps(plain, match) or neutral_runtime_test_archive(
+                    plain, match
+                ):
                     continue
                 term_pattern = re.compile(rf"\b{re.escape(match.group())}\b", re.I)
                 add(
@@ -2201,6 +2219,39 @@ def self_test(repo_root: Path) -> None:
                     {
                         "docs/runtime.md": (
                             "# Runtime\n\nFerrumC loads plugins.\n\nIt is isolated.\n"
+                        )
+                    },
+                    "plugin-context-term",
+                ),
+                (
+                    "review-test-build-archive",
+                    {
+                        "docs/review.md": (
+                            "Wirkliche Rustkernel-/Allocation-/Stack-/Lifecycle-/"
+                            "Integrationtests müssen im später freigegebenen isolated "
+                            "archive/Overlay erfolgen. Kein Pluginurteil.\n"
+                        )
+                    },
+                    None,
+                ),
+                (
+                    "review-archive-separate-plugin-claim",
+                    {
+                        "docs/review.md": (
+                            "Wirkliche Rustkernel-/Allocation-/Stack-/Lifecycle-/"
+                            "Integrationtests müssen im später freigegebenen isolated "
+                            "archive/Overlay erfolgen. Plugins are isolated.\n"
+                        )
+                    },
+                    "plugin-context-term",
+                ),
+                (
+                    "review-plugin-execution-isolation",
+                    {
+                        "docs/review.md": (
+                            "Wirkliche Rustkernel-/Allocation-/Stack-/Lifecycle-/"
+                            "Integrationtests müssen im später freigegebenen isolated "
+                            "plugin runtime erfolgen.\n"
                         )
                     },
                     "plugin-context-term",
