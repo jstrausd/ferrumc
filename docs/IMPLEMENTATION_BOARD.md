@@ -318,11 +318,19 @@ prüft Instrumentierung, Schreib-/RNG-/Sectionreihenfolge und den vorgeschlagene
 1-Mi-Arbeitsbudgets nach mindestens 914.945 Einheiten für Kopie und Validation.
 Noch keine Kernel-Runtimefreigabe oder Whole-FEATURES-Abnahme.
 
-[GEN-03.1](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_ORACLE_TASK.md) bereitet
-parallel echte Originalprädikate aller Blockzustände und Höhenkartentypen vor.
-Der spätere statische Registryproducer und Worldconsumer werden getrennt
-beauftragt. Die drei aktiven Children sind Carver-Runtime, Ore-Review und
-Blockstate-/Heightmap-Vorbereitung; nur Carver schreibt produktive Worldquellen.
+[GEN-03.1](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_ORACLE.md) hat die
+writerfreie Originalvorbereitung geliefert: je Original 27.946 States,
+1.105 Blöcke, sechs Heightmap-Prädikate sowie 836 Tracezeilen aus zehn echten
+kontrollierten EMPTY-ProtoChunks. Der vollständige Identitätsjoin meldet keine
+FerrumC-/Vanilla-/Paper-Abweichungen. Root prüfte alle 202 eingefrorenen
+Dateien/36.215.670 Bytes ohne Abweichung. Der
+[unabhängige Review](agent-tasks/GEN-03_1_BLOCKSTATE_HEIGHTMAP_ORACLE_REVIEW_TASK.md)
+prüft Originalmethoden, vollständige IDs/Properties, Packing/Sentinels,
+Lifecyclegrenzen und neue Kapazitäts-/Workvorschläge. Diese Grenzen sind noch
+nicht angenommen. Statischer Registryproducer und Worldconsumer folgen als
+getrennte Runtimeaufträge nach Review. Die drei aktiven Children sind
+Carver-Runtime, Ore-Review und Blockstate-/Heightmap-Review; nur Carver schreibt
+produktive Worldquellen. Naturwelt-/Licht-/Appaktivierung bleibt offen.
 
 `feature_catalog` hat NBT-WRITE-01 und NET-04.2a unabhängig CLEAN geliefert;
 Root integrierte sie als `579bed62` und `67a9aa94`. SIM-03.4 ist nach unabhängigem Rootreview und frischem Kombinationsarchiv mit
