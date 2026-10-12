@@ -193,6 +193,11 @@ pub struct SeededSurfaceColumns {
 }
 
 impl SeededSurfaceColumns {
+    pub(crate) fn carver_states(&self) -> impl Iterator<Item = BlockStateId> + '_ {
+        self.alphabet.entries[..self.alphabet.len]
+            .iter()
+            .map(|entry| BlockStateId::new(entry.state))
+    }
     /// Binds the column driver to the seed and settings of `rules`.
     ///
     /// Order: the allowance domain is checked by the budget type; then the

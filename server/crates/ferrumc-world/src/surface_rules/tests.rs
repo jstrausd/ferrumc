@@ -708,7 +708,7 @@ pub(super) fn trace(
         }
         _ => "-".to_owned(),
     };
-    let secondary = match after.secondary {
+    let secondary = match after.secondary.get() {
         Some(value) if before.is_none_or(|b| b.secondary.is_none()) => double_text(value),
         _ => "-".to_owned(),
     };

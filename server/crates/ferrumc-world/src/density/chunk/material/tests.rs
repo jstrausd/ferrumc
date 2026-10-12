@@ -138,7 +138,7 @@ fn material_output_lifecycle_and_reset() {
         out.should_schedule_fluid_update(BlockPos::new(16, 0, 0)),
         None
     );
-    assert!(s.state.lifecycle == Lifecycle::Complete);
+    assert_eq!(s.state.lifecycle, Lifecycle::Complete);
     let used = s.work_used();
     assert!(s.sample_chunk_densities().is_err());
     assert!(s.sample_chunk_materials().is_err());
@@ -310,8 +310,8 @@ fn full_material_exact_budget_poison_and_atomic_reset() {
             NoiseChunkWorkBudget::new((n - 1).try_into().unwrap()).unwrap(),
         )
         .unwrap();
-    exhausted(&short.sample_chunk_materials().unwrap_err(), n - 1);
-    assert!(short.state.lifecycle == Lifecycle::Poisoned);
+    exhausted(&short.sample_chunk_materials().unwrap_err().into(), n - 1);
+    assert_eq!(short.state.lifecycle, Lifecycle::Poisoned);
     let before = (
         short.work_used(),
         short.surface.len,
@@ -320,15 +320,16 @@ fn full_material_exact_budget_poison_and_atomic_reset() {
         short.state.driver_phase,
     );
     assert!(short.reset(NoiseChunkWorkBudget::new(1).unwrap()).is_err());
-    assert!(short.state.lifecycle == Lifecycle::Poisoned);
-    assert!(
+    assert_eq!(short.state.lifecycle, Lifecycle::Poisoned);
+    assert_eq!(
         (
             short.work_used(),
             short.surface.len,
             short.state.scalar_counter,
             short.state.array_counter,
             short.state.driver_phase
-        ) == before
+        ),
+        before
     );
     assert!(short.sample_chunk_materials().is_err());
     assert!(short.sample_chunk_densities().is_err());
@@ -366,8 +367,8 @@ fn material_preparation_exact_budget_failure_poison_and_output_limits() {
             NoiseChunkWorkBudget::new((n - 1).try_into().unwrap()).unwrap(),
         )
         .unwrap();
-    exhausted(&short.sample_chunk_materials().unwrap_err(), n - 1);
-    assert!(short.state.lifecycle == Lifecycle::Poisoned);
+    exhausted(&short.sample_chunk_materials().unwrap_err().into(), n - 1);
+    assert_eq!(short.state.lifecycle, Lifecycle::Poisoned);
     assert!(!short.state.interpolating);
     assert_eq!(short.state.scalar_counter, 0);
     for (kind, size, maximum) in [
@@ -488,7 +489,7 @@ fn malformed_settings_poison_before_driver_and_reset_restores_fresh_run() {
             field: "default_fluid"
         }
     ));
-    assert!(s.state.lifecycle == Lifecycle::Poisoned);
+    assert_eq!(s.state.lifecycle, Lifecycle::Poisoned);
     assert!(!s.state.interpolating);
     assert_eq!(s.state.scalar_counter, 0);
     std::sync::Arc::get_mut(&mut s.data)
@@ -496,7 +497,7 @@ fn malformed_settings_poison_before_driver_and_reset_restores_fresh_run() {
         .metadata
         .default_fluid = original;
     s.reset(budget()).unwrap();
-    assert!(s.state.lifecycle == Lifecycle::Fresh);
+    assert_eq!(s.state.lifecycle, Lifecycle::Fresh);
     assert!(s.sample_chunk_materials().is_ok());
 }
 

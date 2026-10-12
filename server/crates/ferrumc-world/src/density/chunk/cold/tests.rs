@@ -217,5 +217,62 @@ fn large_admitted_geometry_refuses_scratch_before_allocating_pool() {
         .fresh_paper_noise_chunk(ChunkPos::ORIGIN, budget())
         .err()
         .unwrap();
-    is_limit(&error, NoiseChunkLimit::ScratchBytes);
+    is_limit(&error.into(), NoiseChunkLimit::ScratchBytes);
+}
+
+#[test]
+fn carver_exact_faults_cross_cold_keys_and_spline_construction() {
+    use crate::sample_work::{CarverCumulativeMeter, ChargeFault, Unsigned192};
+    let r = router("minecraft:overworld", 0);
+    let nodes = vec![constant(&r.data, 1.0)];
+    let mut spline_node = nodes[0].clone();
+    spline_node.kind = BoundKind::Original(NodeKind::SplineConstant(1.0));
+    let spline_nodes = [spline_node];
+    let mut public_work = SampleWork::new(budget().units() as usize);
+    let plan = spline::plan(&spline_nodes, 0, &mut public_work).unwrap();
+    for limbs in [[u64::MAX, 0, 0], [u64::MAX, u64::MAX, 0], [u64::MAX; 3]] {
+        let wide = || {
+            let n = Unsigned192::from_limbs(limbs);
+            let mut meter = CarverCumulativeMeter::new(n);
+            meter.test_position(n, n, 0);
+            SampleWork::with_carver_meter(meter)
+        };
+        let verify = |error| {
+            assert!(
+                matches!(error, crate::density::chunk::NoiseChunkCoreError::Work(ChargeFault::Carver { limit, used }) if limit == limbs && used == limbs)
+            );
+        };
+        let mut keys = Keys::new().unwrap();
+        verify(
+            keys.identity(Identity::FreshNoise, &mut wide())
+                .unwrap_err(),
+        );
+        verify(keys.intern(vec![1, 2], None, &mut wide()).unwrap_err());
+        verify(spline::plan(&spline_nodes, 0, &mut wide()).err().unwrap());
+        verify(spline::build(&spline_nodes, 0, &plan, &mut wide()).unwrap_err());
+        verify(
+            spline::bounds(
+                bind::pair(0.0, 1.0),
+                &[crate::density::graph::Point {
+                    location: 0.0,
+                    value: 0,
+                    derivative: 0.0,
+                }],
+                &nodes,
+                &mut wide(),
+            )
+            .unwrap_err(),
+        );
+        let state = ChunkState::new(
+            &r.data,
+            ChunkPos::ORIGIN,
+            r.data.metadata.geometry,
+            &mut public_work,
+        )
+        .unwrap();
+        let mut work = wide();
+        let mut cold = Cold::new(&r.data, state, &mut work).unwrap();
+        verify(cold.roots().unwrap_err());
+        assert_eq!(cold.visits, 0);
+    }
 }

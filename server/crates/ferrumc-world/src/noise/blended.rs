@@ -1,6 +1,6 @@
 use ferrumc_math::{BlockPos, Vec3};
 
-use super::ConsumerNoiseError;
+use super::ConsumerNoiseCoreError;
 use super::{finite, lerp, wrap_unchecked, NoiseError, PerlinNoise};
 use crate::random::WorldgenRandomSource;
 use crate::sample_work::SampleWork;
@@ -93,14 +93,22 @@ impl BlendedNoise {
             + self.main_noise.retained_bytes()
             - 3 * std::mem::size_of::<PerlinNoise>()
     }
+    #[cfg(test)]
     pub(crate) fn paper_build60_basis(
         &self,
         work: &mut SampleWork,
     ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        self.paper_build60_basis_core(work)
+            .map_err(crate::sample_work::ChargeFault::into_public)
+    }
+    pub(crate) fn paper_build60_basis_core(
+        &self,
+        work: &mut SampleWork,
+    ) -> Result<Self, crate::sample_work::ChargeFault> {
         Ok(Self {
-            min_limit_noise: self.min_limit_noise.paper_build60_basis(work)?,
-            max_limit_noise: self.max_limit_noise.paper_build60_basis(work)?,
-            main_noise: self.main_noise.paper_build60_basis(work)?,
+            min_limit_noise: self.min_limit_noise.paper_build60_basis_core(work)?,
+            max_limit_noise: self.max_limit_noise.paper_build60_basis_core(work)?,
+            main_noise: self.main_noise.paper_build60_basis_core(work)?,
             parameters: self.parameters,
             xz_multiplier: self.xz_multiplier,
             y_multiplier: self.y_multiplier,
@@ -171,12 +179,12 @@ impl BlendedNoise {
         finite(self.sample_with_blend(position).0)
     }
 
-    pub(crate) fn sample_consumer(
+    pub(crate) fn sample_consumer_core(
         &self,
         position: BlockPos,
         work: &mut SampleWork,
-    ) -> Result<f64, ConsumerNoiseError> {
-        let result = self.sample_with_blend_metered(position, &mut || work.charge())?;
+    ) -> Result<f64, ConsumerNoiseCoreError> {
+        let result = self.sample_with_blend_metered(position, &mut || work.charge_core())?;
         Ok(finite(result.0)?)
     }
 

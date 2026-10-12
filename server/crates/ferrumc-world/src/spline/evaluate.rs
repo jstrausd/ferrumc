@@ -1,7 +1,8 @@
 //! Allocation-free sampling with deterministic original callback ordering.
 
 use super::{
-    Graph, NodeKind, SplineCoordinateId, SplineNodeId, SplineSampleError, MAX_SPLINE_SAMPLE_WORK,
+    Graph, NodeKind, SplineCoordinateId, SplineCoreError, SplineNodeId, SplineSampleError,
+    MAX_SPLINE_SAMPLE_WORK,
 };
 use crate::sample_work::SampleWork;
 
@@ -16,19 +17,19 @@ pub(super) fn sample<E>(
     sample_shared(graph, &mut SampleWork::new(budget), &mut |id, _| {
         coordinate(id)
     })
+    .map_err(SplineCoreError::into_public)
 }
 
 pub(super) fn sample_shared<E>(
     graph: &Graph,
     work: &mut SampleWork,
     coordinate: &mut impl FnMut(SplineCoordinateId, &mut SampleWork) -> Result<f32, E>,
-) -> Result<f32, SplineSampleError<E>> {
+) -> Result<f32, SplineCoreError<E>> {
     visit(graph, graph.root, work, coordinate)
 }
 
-fn charge<E>(work: &mut SampleWork) -> Result<(), SplineSampleError<E>> {
-    work.charge()
-        .map_err(|error| SplineSampleError::BudgetExceeded { limit: error.limit })
+fn charge<E>(work: &mut SampleWork) -> Result<(), SplineCoreError<E>> {
+    work.charge_core().map_err(SplineCoreError::Work)
 }
 
 fn visit<E>(
@@ -36,20 +37,19 @@ fn visit<E>(
     index: usize,
     work: &mut SampleWork,
     source: &mut impl FnMut(SplineCoordinateId, &mut SampleWork) -> Result<f32, E>,
-) -> Result<f32, SplineSampleError<E>> {
+) -> Result<f32, SplineCoreError<E>> {
     charge(work)?;
     let result = match &graph.nodes[index].kind {
         NodeKind::Constant(value) => *value,
         NodeKind::Multipoint { coordinate, points } => {
             charge(work)?;
-            let x = source(*coordinate, work).map_err(|source| {
-                SplineSampleError::CoordinateSource {
+            let x =
+                source(*coordinate, work).map_err(|source| SplineCoreError::CoordinateSource {
                     coordinate: *coordinate,
                     source,
-                }
-            })?;
+                })?;
             if !x.is_finite() {
-                return Err(SplineSampleError::NonFiniteCoordinate {
+                return Err(SplineCoreError::NonFiniteCoordinate {
                     coordinate: *coordinate,
                     bits: x.to_bits(),
                 });
@@ -92,7 +92,7 @@ fn visit<E>(
     if result.is_finite() {
         Ok(result)
     } else {
-        Err(SplineSampleError::NonFiniteResult {
+        Err(SplineCoreError::NonFiniteResult {
             node: SplineNodeId::new(index as u32),
             bits: result.to_bits(),
         })

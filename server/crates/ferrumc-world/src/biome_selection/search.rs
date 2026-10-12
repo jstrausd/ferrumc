@@ -1,8 +1,9 @@
 //! Exact Java-long distances, strict ties and explicitly retained leaf history.
 
 use super::{
-    charge, fail, limit, BiomeClimateTarget, BiomeError, BiomeErrorKind, BiomeLimit,
-    BiomeSelection, BiomeTree, NodeKind, SampleWork, MAX_BIOME_TREE_DEPTH,
+    core_charge as charge, core_fail as fail, limit, BiomeClimateTarget, BiomeCoreError,
+    BiomeError, BiomeErrorKind, BiomeLimit, BiomeSelection, BiomeTree, NodeKind, SampleWork,
+    MAX_BIOME_TREE_DEPTH,
 };
 
 pub(super) fn select(
@@ -11,6 +12,15 @@ pub(super) fn select(
     prior: Option<u16>,
     work: &mut SampleWork,
 ) -> Result<(u16, BiomeSelection), BiomeError> {
+    select_core(tree, target, prior, work).map_err(crate::sample_work::CoreError::into_public)
+}
+
+pub(super) fn select_core(
+    tree: &BiomeTree,
+    target: BiomeClimateTarget,
+    prior: Option<u16>,
+    work: &mut SampleWork,
+) -> Result<(u16, BiomeSelection), BiomeCoreError> {
     let q = target.coordinates();
     let coordinates = [q[0], q[1], q[2], q[3], q[4], q[5], 0];
     charge(work)?;
@@ -27,7 +37,7 @@ fn search(
     prior: Option<u16>,
     work: &mut SampleWork,
     depth: usize,
-) -> Result<Option<u16>, BiomeError> {
+) -> Result<Option<u16>, BiomeCoreError> {
     limit(BiomeLimit::Depth, depth, MAX_BIOME_TREE_DEPTH)?;
     charge(work)?;
     let node = tree
@@ -81,7 +91,7 @@ fn distance(
     node: u16,
     coordinates: &[i64; 7],
     work: &mut SampleWork,
-) -> Result<i64, BiomeError> {
+) -> Result<i64, BiomeCoreError> {
     charge(work)?;
     let node = tree
         .nodes

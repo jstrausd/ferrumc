@@ -11,8 +11,9 @@ use super::fill::{write, Provider};
 use super::material::MaterialRun;
 use super::state::{lerp, Cache, DriverPhase, Lifecycle};
 use super::{
-    bytes, charge, fail, output_index, ChunkDensitySamples, ChunkMaterialSamples, NoiseChunkError,
-    NoiseChunkErrorKind, NoiseChunkLimit, NoiseChunkSession,
+    bytes, core_charge as charge, core_fail as fail, output_index, ChunkDensitySamples,
+    ChunkMaterialSamples, NoiseChunkCoreError as NoiseChunkError, NoiseChunkErrorKind,
+    NoiseChunkLimit, NoiseChunkSession,
 };
 
 enum OutputSink {

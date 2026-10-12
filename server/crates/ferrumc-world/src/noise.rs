@@ -6,7 +6,9 @@
 use ferrumc_math::Vec3;
 
 use crate::random::WorldgenRandomSource;
-use crate::sample_work::{SampleWork, SampleWorkExceeded};
+#[cfg(test)]
+use crate::sample_work::SampleWorkExceeded;
+use crate::sample_work::{ChargeFault, SampleWork};
 
 mod blended;
 mod normal;
@@ -52,18 +54,47 @@ pub enum NoiseError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) enum ConsumerNoiseError {
     Noise(NoiseError),
     Work(SampleWorkExceeded),
 }
+#[cfg(test)]
 impl From<NoiseError> for ConsumerNoiseError {
     fn from(error: NoiseError) -> Self {
         Self::Noise(error)
     }
 }
+#[cfg(test)]
 impl From<SampleWorkExceeded> for ConsumerNoiseError {
     fn from(error: SampleWorkExceeded) -> Self {
         Self::Work(error)
+    }
+}
+
+/// Closed shared sampling error; the public adapter never accepts a wide fault.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ConsumerNoiseCoreError {
+    Noise(NoiseError),
+    Work(ChargeFault),
+}
+impl From<NoiseError> for ConsumerNoiseCoreError {
+    fn from(error: NoiseError) -> Self {
+        Self::Noise(error)
+    }
+}
+impl From<ChargeFault> for ConsumerNoiseCoreError {
+    fn from(error: ChargeFault) -> Self {
+        Self::Work(error)
+    }
+}
+impl ConsumerNoiseCoreError {
+    #[cfg(test)]
+    pub(crate) fn into_public(self) -> ConsumerNoiseError {
+        match self {
+            Self::Noise(error) => ConsumerNoiseError::Noise(error),
+            Self::Work(fault) => ConsumerNoiseError::Work(fault.into_public()),
+        }
     }
 }
 
@@ -116,13 +147,21 @@ impl ImprovedNoise {
     // Build 60 recompiles nextDouble through f32 for both random algorithms.
     // Scaling by 256 is an exact power of two, so rounding the original offset
     // reproduces that constructor without new draws or permutation changes.
+    #[cfg(test)]
     pub(crate) fn paper_build60_basis(
         &self,
         work: &mut crate::sample_work::SampleWork,
     ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        self.paper_build60_basis_core(work)
+            .map_err(crate::sample_work::ChargeFault::into_public)
+    }
+    pub(crate) fn paper_build60_basis_core(
+        &self,
+        work: &mut crate::sample_work::SampleWork,
+    ) -> Result<Self, crate::sample_work::ChargeFault> {
         let mut permutation = [0; 256];
         for (slot, &value) in permutation.iter_mut().zip(&self.permutation) {
-            work.charge()?;
+            work.charge_core()?;
             *slot = value;
         }
         let mut offsets = [0.0; 3];
@@ -131,7 +170,7 @@ impl ImprovedNoise {
                 .iter_mut()
                 .zip([self.offsets.x, self.offsets.y, self.offsets.z])
         {
-            work.charge()?;
+            work.charge_core()?;
             *slot = f64::from(value as f32);
         }
         Ok(Self {
@@ -303,19 +342,19 @@ impl PerlinNoise {
     pub(crate) fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>() + self.octaves.len() * std::mem::size_of::<Octave>()
     }
-    pub(crate) fn paper_build60_basis(
+    pub(crate) fn paper_build60_basis_core(
         &self,
         work: &mut crate::sample_work::SampleWork,
-    ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+    ) -> Result<Self, crate::sample_work::ChargeFault> {
         let mut octaves = Vec::with_capacity(self.octaves.len());
         for octave in &self.octaves {
-            work.charge()?;
+            work.charge_core()?;
             octaves.push(Octave {
                 amplitude: octave.amplitude,
                 noise: octave
                     .noise
                     .as_ref()
-                    .map(|n| n.paper_build60_basis(work))
+                    .map(|n| n.paper_build60_basis_core(work))
                     .transpose()?,
             });
         }
@@ -487,11 +526,20 @@ impl PerlinNoise {
     // Only the checked builtin density consumer uses this path. A legitimate
     // block position can produce inputs larger than the public caller cap;
     // each original octave is wrapped before its ImprovedNoise sample.
+    #[cfg(test)]
     pub(crate) fn sample_consumer(
         &self,
         position: Vec3,
         work: &mut SampleWork,
     ) -> Result<f64, ConsumerNoiseError> {
+        self.sample_consumer_core(position, work)
+            .map_err(ConsumerNoiseCoreError::into_public)
+    }
+    pub(crate) fn sample_consumer_core(
+        &self,
+        position: Vec3,
+        work: &mut SampleWork,
+    ) -> Result<f64, ConsumerNoiseCoreError> {
         if ![position.x, position.y, position.z]
             .into_iter()
             .all(f64::is_finite)
@@ -502,7 +550,7 @@ impl PerlinNoise {
         let mut factor = self.value_factor;
         let mut value = 0.0;
         for octave in &self.octaves {
-            work.charge()?;
+            work.charge_core()?;
             if let Some(noise) = &octave.noise {
                 let sample_position = Vec3::new(
                     wrap_consumer(position.x * frequency)?,

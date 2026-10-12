@@ -2,7 +2,9 @@
 
 use ferrumc_math::{BlockPos, ChunkPos};
 
-use super::super::{bytes, charge, fail, limit, NoiseChunkErrorKind, NoiseChunkLimit};
+use super::super::{
+    bytes, core_charge as charge, core_fail as fail, limit, NoiseChunkErrorKind, NoiseChunkLimit,
+};
 use super::{
     clamped_map, finite, random_at, random_int, sample, MaterialBlocks, MaterialDomain,
     NoiseChunkError, NoiseChunkSession,
@@ -43,6 +45,7 @@ impl FluidStatus {
     }
 }
 
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Aquifer {
     pub schedule: bool,
     enabled: bool,

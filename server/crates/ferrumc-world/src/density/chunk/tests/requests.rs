@@ -96,7 +96,7 @@ pub(in crate::density::chunk) fn fill_declared(
             return Some(Err(fail(NoiseChunkErrorKind::InvalidGraph)));
         }
         if let Err(error) = write(slot, leaf.values[i % leaf.values.len()], state.start, work) {
-            return Some(Err(error));
+            return Some(Err(error.into()));
         }
     }
     Some(Ok(()))

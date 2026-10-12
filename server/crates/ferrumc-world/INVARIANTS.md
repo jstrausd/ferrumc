@@ -736,3 +736,51 @@
 - `ChunkLightData::full_bright` marks all `LIGHT_SECTION_COUNT` (26) sections in
   the sky-light and empty-block-light masks (`0x03FF_FFFF`), supplies 26 `0xFF`
   2048-byte sky arrays, and leaves block light and the other two masks empty.
+
+## Cold Carver runtime
+
+- `SeededCarvers` admits only the three accepted builtin overworld settings,
+  the original geometry, Paper zoom and explicit original multinoise source.
+  The binding census is90; geometry admission is63912717682 under the unchanged
+  public2^36 cap. Binding/run/output caps are4KiB/4KiB/448KiB.
+- A fresh Prepared run owns Noise, Aquifer and a cold selector. All289 source
+  queries execute in X-outer/Z-inner order, with consumed fix-ups interleaved.
+  There is no skipped source, Stored fallback, precomputed biome fact, foreign
+  public raw source or session reset. Temporary concrete disjoint borrows call
+  the existing lazy memo miss; temperature shares it and nonconsuming rules
+  query zero times. Only per-fix-up rule column/block state is refreshed.
+- The closed private halo derives source chunks[-1875007,1875006], quart
+  X/Z[-7500028,7500024] and fix-up quartY[-17,78], with checked i64 products
+  before narrowing. Public climate, coordinate and budget caps are unchanged.
+- One unsigned192 limit/used authority covers every constructor and nested
+  Noise/Aquifer charge; selector owns its separate authority. Refused charges
+  change no meter or RNG state. Segment refills change only bounded bookkeeping.
+  Exact private faults retain all limbs through basis/RNG/Cold/Keys/Spline,
+  density/marker/ChunkState, preliminary/climate, Aquifer and selector cores.
+  Public adapters cannot accept a private fault or expose a narrowed counter.
+- Noise admission is321566836740286847972889004023138800132439. Prepare reserves
+  117744178367 inside that total and checks actual usage before Ready. Carve
+  admits remaining321566836740286847972889004023021055954072, selector18716174375
+  and rules45120000. No whole Noise total is charged twice.
+- Only Ready may run: Ready→Running→Complete/Poisoned, without continuation.
+  Output is Empty before binding, Surface, producer, rule-context, allowance
+  and geometry-budget checks. Defensive faults poison the run and expose no
+  partial data. Input Surface remains independently Published and unchanged.
+- Original seeding, f32 operation order, immutable SIN, Cave/extra-Cave/Canyon,
+  strict child-thickness branching, mask-before-write, replaceability, barrier
+  mask/no-write, grass/mycelium fix-up and live height rescans are preserved.
+  One Aquifer starts with flag=false; cache and flag persist across every
+  source/carver boundary, including stale Lava bypass flags. Fluid flags are
+  the declared set policy, separate from original ordered duplicate evidence.
+- The independent output retains418896B and borrowed Surface406592B. Their
+  825488B sum is partial: producer, tree/Arc, binding, cache/scratch and static
+  categories are counted separately by complete native/allocator evidence.
+  Production layouts and all literal caps are verified on pinned x86-64.
+- All71 full original groups compare S1 first, then complete FINAL states,
+  digest, masks, live heights, fluid sets, starts/carves, Aquifer/flag events
+  and all355 lazy rule/query events. Two upstream-refused classes stay typed
+  Empty. Vanilla and synthetic boundary/history controls keep their labels.
+- Original Legacy geometry rejection and earlier immutable router shuffles
+  remain unmetered scoped policies. The finite wide RNG allowance gives no
+  practical all-seed execution-time, TPS, RSS or live-server promise. No warm
+  history, structures, features, lighting, persistence or activation follows.

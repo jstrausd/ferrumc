@@ -262,7 +262,7 @@ und exakten Fehlerpfadentwurf an; die Umsetzung und Runtimeabnahme folgen getren
 
 | Reihenfolge | Nächster Lieferumfang | Aktueller Stand / Freigabekriterium |
 | --- | --- | --- |
-| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. [Runtime-Review044 FINDINGS](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_REVIEW.md): Klima-f64→f32 läuft vor ihrer Budgetreservierung. [Korrekturkandidat09 eingefroren](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_DELIVERY.md), World Debug/Release jeweils418 bestanden/7ignored; betroffene Kaltstartproben separat bestanden, alte Reihenfolge in beiden Profilen assertion-killed. Root hat945 Paket-/7Seal-/364Source-/577Evidence-Mitglieder und tatsächliche Nachweise geprüft. Neuer [unabhängiger Runtimereview Runde2](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_REVIEW_TASK.md) vor Abnahme erforderlich. Integration und Appaktivierung bleiben offen. |
+| 1 | GEN-05.11: Höhlen, zusätzliche unterirdische Höhlen und Schluchten, Masken, Wasser/Lava und Oberflächenkorrektur | [Korrekturreview CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_REVISION2_REVIEW.md), CR11-B1/B2 auf Vertragsebene geschlossen. [Runtime-Review044 FINDINGS](agent-tasks/GEN-05_11_OVERWORLD_CARVERS_RUNTIME_REVIEW.md): Klima-f64→f32 läuft vor ihrer Budgetreservierung. [Korrekturkandidat09 eingefroren](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_DELIVERY.md), World Debug/Release jeweils418 bestanden/7ignored; betroffene Kaltstartproben separat bestanden, alte Reihenfolge in beiden Profilen assertion-killed. Root hat945 Paket-/7Seal-/364Source-/577Evidence-Mitglieder und tatsächliche Nachweise geprüft. [Unabhängiger Runtimereview Runde2](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_REVIEW.md) ist CLEAN_RUNTIME_REVIEW; RR11-M1 geschlossen. Root prüfte483 Reviewpaket-/4Seal-Mitglieder vollständig und nimmt den bounded kalten Producer an. Der vollständige364-Dateien-Worldstand wird integriert; frische Whole-CI folgt. Appaktivierung bleibt offen. |
 | 2 | GEN-06.1: gewöhnliche Erzfeatures und ihre Platzierung; danach Vegetation und weitere Features | [Revision2](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2.md) ist unabhängig [CLEAN_CONTRACT/CLEAN_ORACLE](agent-tasks/GEN-06_1_ORE_PLACEMENT_REVISION2_REVIEW.md), B1/B2/B3 auf Vorbereitungsebene geschlossen. Root nimmt 16-KiB-Katalog/16-KiB-Scratch/32-KiB-neuen Peak/49.152-B-mit-altem-Katalog und 512-B-Cursor als messpflichtige Designlimits an. [GEN-06.2 Rust-Primitive](agent-tasks/GEN-06_2_CLOSED_ORE_PLACEMENT_PRIMITIVES_RUNTIME_TASK.md) wartet auf den exklusiven Worldslot und frische akzeptierte Basis. [GEN-06.3 Review Revision2](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION2_REVIEW.md) ist FINDINGS: Query53-Abgleich, typisierte Bootstrapkonstanten und ganze Trace-Membership wurden in der [Autorenantwort Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3.md) korrigiert; der abgeschlossene [unabhängige Review Revision3](agent-tasks/GEN-06_3_ORE_ALGORITHM_REVISION3_REVIEW.md) ist CLEAN_CONTRACT/CLEAN_ORACLE im kontrollierten Präparationsumfang. Root hat vollständige Bytes/Membership geprüft und nimmt nur diese Vorbereitung an. Neue Regionschnittstellen/-limits bleiben unangenommen; H2 und whole-FEATURES offen. |
 | 3 | Natürlichen Generator vollständig mit Chunkmodell, Biomen/Heightmaps, Licht und Generatorpersistenz verbinden (GEN-03/GEN-11/GEN-12) | Getrennte Producer-/Consumer-/App-Tickets mit Generation außerhalb des Netzwerk- und Tickpfads. Bestehende Flat-Welten behalten ihre gespeicherte Generatoridentität. Noch keine Naturweltaktivierung. |
 | 4 | Neue Naturwelt am echten Client und nach Save/Restart prüfen; Strukturen und weitere Dimensionen fortsetzen | Keine Spielbarkeits- oder vollständige Seedparitätsabnahme aus Bibliothekstests ableiten. Vollständige Features/Strukturen, Nether und End bleiben im Gesamtbacklog. |
@@ -272,7 +272,7 @@ Stored-biome-Resolver müssen im Review getrennt bewertet werden: gleiche
 Corpuswerte allein belegen keine Gleichheit bei allen Seeds/RTree-Gleichständen.
 Diese Prüfung und RR10-H1–H5 bleiben Bedingungen des nächsten Worldtickets.
 
-Der GEN-05.11 RR11-M1-Runtimekorrekturreview ist abgeschlossen; Root prüft die finale Lieferung zur Integration.
+Der GEN-05.11 RR11-M1-Runtimekorrekturreview ist CLEAN_RUNTIME_REVIEW; Root hat die finale Lieferung geprüft und nimmt den bounded kalten Producer an. Der vollständige Worldstand wird integriert; neue Whole-CI folgt.
 GEN-06.3 Revision3 ist unabhängig CLEAN_CONTRACT/CLEAN_ORACLE im kontrollierten Präparationsumfang. Der unabhängige
 Storage-Review DUR-03.3b ist CLEAN_RUNTIME_REVIEW abgeschlossen. GEN-06.1 Review Runde 2
 ist fertig; Root hat alle 494 Dateien/307.996.259 Bytes erneut geprüft und nimmt
@@ -430,8 +430,8 @@ Dateien einschließlich362 eingefrorener Worlddateien und Delivery. Alle202
 bisherigen World-Fixture-/Referenzdateien und1166 Outside-Dateien der Autorenbasis
 sind unverändert. Die beobachteten null Allokationen/Deallokationen im kalten
 vorbereiteten Aufruf sind Autorenmessungen; unabhängige Runtimeabnahme und
-Live-Performance bleiben offen. Das nächste World-Runtimeticket GEN-06.2 bleibt
-bis zur Entscheidung über diesen Kandidaten ohne Ausführungsowner.
+Live-Performance bleiben offen. Dies beschreibt die historische044-Reviewbasis;
+Root hat inzwischen die vollständige korrigierte World09-Lieferung angenommen.
 
 Root hat den vollständigen392-member Carverreviewfreeze, den9-member finalen
 Verifikationsseal, Referenz-/Bindingpins, unveränderte362 Kandidatenquellen und
@@ -450,6 +450,11 @@ kompiliert und scheitert in beiden Profilen an der tatsächlichen Cast-Assertion
 Der neue unabhängige Runde2-Review nutzt ein echtes main5602-Archiv1515 plus
 ganze World09/Delivery als explizit unangenommenen1556-Dateien-Reviewstand.
 Autorenbasisb179 und alte044-/Review-/f305-Nachweise bleiben getrennt erhalten.
+Der abgeschlossene [Runde2-Review](agent-tasks/GEN-05_11_CARVER_PRECHARGE_CORRECTION_REVIEW.md)
+schließt RR11-M1. Root hat483 Reviewpaket- und4 Seal-Mitglieder exakt geprüft,
+die364 Worlddateien gegen Author/Review und Gitindex bytegleich verifiziert
+und nimmt den bounded kalten Carverproducer an. Frische Kombinations-CI folgt;
+App-/Naturweltaktivierung und Live-Performance bleiben offen.
 
 GEN-03.1a Round1 lieferte [G31A-CLOSE-1](agent-tasks/GEN-03_1a_REGISTRY_STATE_FACTS_RUNTIME_DELIVERY.md)
 vor Implementierung: safe std Fileclose meldet keinen Fehler. Root prüfte1552

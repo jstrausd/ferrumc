@@ -37,6 +37,12 @@ pub struct SurfaceChunkBuffer {
 }
 
 impl SurfaceChunkBuffer {
+    pub(crate) fn carver_contents(
+        &self,
+    ) -> Option<(&[BlockStateId], &[u64], &WorldSurfaceHeights)> {
+        self.published?;
+        Some((&self.states, &self.fluid, &self.heights))
+    }
     /// Allocates an `Empty` buffer after checking its retained-byte cap.
     pub fn new() -> Result<Self, SurfaceColumnError> {
         Self::new_with(MAX_SURFACE_CHUNK_BUFFER_BYTES)
@@ -103,5 +109,19 @@ impl SurfaceChunkBuffer {
         }
         let (lx, lz) = ((pos.x() & 15) as usize, (pos.z() & 15) as usize);
         Some((level * 16 + lx) * 16 + lz)
+    }
+}
+
+#[cfg(test)]
+impl SurfaceChunkBuffer {
+    pub(crate) fn carver_test_identity(
+        &mut self,
+        identity: Option<(ChunkPos, WorldSeed, NoiseSettingsResourceId)>,
+    ) {
+        self.published = identity.map(|(chunk, seed, resource)| Published {
+            chunk,
+            seed,
+            resource,
+        });
     }
 }

@@ -208,21 +208,30 @@ impl WorldgenRandomSource {
     // Material callers provide the original positive constants 10/9/10. Each
     // rejection draw shares their session meter; a refused draw changes no RNG
     // bits. Public primitive sampling retains its established unmetered API.
+    #[cfg(test)]
     pub(crate) fn bounded_positive_metered(
         &mut self,
         bound: u32,
         work: &mut crate::sample_work::SampleWork,
     ) -> Result<u32, crate::sample_work::SampleWorkExceeded> {
+        self.bounded_positive_metered_core(bound, work)
+            .map_err(crate::sample_work::ChargeFault::into_public)
+    }
+    pub(crate) fn bounded_positive_metered_core(
+        &mut self,
+        bound: u32,
+        work: &mut crate::sample_work::SampleWork,
+    ) -> Result<u32, crate::sample_work::ChargeFault> {
         match &mut self.state {
             State::Legacy(seed) => {
                 if bound.is_power_of_two() {
-                    work.charge()?;
+                    work.charge_core()?;
                     return Ok(
                         ((u64::from(bound) * u64::from(legacy_bits(seed, 31))) >> 31) as u32,
                     );
                 }
                 loop {
-                    work.charge()?;
+                    work.charge_core()?;
                     let bits = legacy_bits(seed, 31);
                     let value = bits % bound;
                     if bits
@@ -238,7 +247,7 @@ impl WorldgenRandomSource {
             State::Xoroshiro(seed) => {
                 let threshold = bound.wrapping_neg() % bound;
                 loop {
-                    work.charge()?;
+                    work.charge_core()?;
                     let product = u64::from(xoroshiro_long(seed) as u32) * u64::from(bound);
                     if product as u32 >= threshold {
                         return Ok((product >> 32) as u32);

@@ -8,7 +8,10 @@
 use ferrumc_math::{BlockPos, Vec3};
 
 use super::state::{Cache, ChunkState};
-use super::{charge, fail, NoiseChunkError, NoiseChunkErrorKind};
+use super::{
+    core_charge as charge, core_fail as fail, NoiseChunkCoreError as NoiseChunkError,
+    NoiseChunkErrorKind,
+};
 use crate::density::bind::{java_max, java_min, BoundKind, BoundRouter, BoundView};
 use crate::density::evaluate;
 use crate::density::graph::{Binary, NodeKind, Unit};
@@ -154,7 +157,7 @@ impl ChunkState {
         charge(work)?;
         #[cfg(test)]
         if let Some(result) = super::tests::requests::fill_declared(self, root, values, work) {
-            return result;
+            return result.map_err(Into::into);
         }
         match &node.kind {
             BoundKind::Alias(target) => self.fill(data, view, *target, values, provider, work)?,
@@ -347,7 +350,7 @@ impl ChunkState {
                         let pos = self.for_index(provider, i, work)?;
                         let rarity = evaluate::rarity_value(*rarity, *slot);
                         let value = rarity
-                            * evaluate::normal(
+                            * evaluate::normal_core(
                                 data,
                                 node,
                                 Vec3::new(

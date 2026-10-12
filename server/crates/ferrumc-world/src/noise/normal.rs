@@ -1,5 +1,7 @@
 use ferrumc_math::Vec3;
 
+use super::ConsumerNoiseCoreError;
+#[cfg(test)]
 use super::ConsumerNoiseError;
 use super::{finite, octave_max_value, validate_input, validate_octaves, NoiseError, PerlinNoise};
 use crate::random::WorldgenRandomSource;
@@ -30,9 +32,16 @@ impl NormalNoise {
         &self,
         work: &mut SampleWork,
     ) -> Result<Self, crate::sample_work::SampleWorkExceeded> {
+        self.paper_build60_basis_core(work)
+            .map_err(crate::sample_work::ChargeFault::into_public)
+    }
+    pub(crate) fn paper_build60_basis_core(
+        &self,
+        work: &mut SampleWork,
+    ) -> Result<Self, crate::sample_work::ChargeFault> {
         Ok(Self {
-            first: self.first.paper_build60_basis(work)?,
-            second: self.second.paper_build60_basis(work)?,
+            first: self.first.paper_build60_basis_core(work)?,
+            second: self.second.paper_build60_basis_core(work)?,
             value_factor: self.value_factor,
             max_value: self.max_value,
         })
@@ -131,11 +140,20 @@ impl NormalNoise {
         finite((self.first.sample(position)? + self.second.sample(second)?) * self.value_factor)
     }
 
+    #[cfg(test)]
     pub(crate) fn sample_consumer(
         &self,
         position: Vec3,
         work: &mut SampleWork,
     ) -> Result<f64, ConsumerNoiseError> {
+        self.sample_consumer_core(position, work)
+            .map_err(ConsumerNoiseCoreError::into_public)
+    }
+    pub(crate) fn sample_consumer_core(
+        &self,
+        position: Vec3,
+        work: &mut SampleWork,
+    ) -> Result<f64, ConsumerNoiseCoreError> {
         let second = Vec3::new(
             position.x * SECOND_INPUT_FACTOR,
             position.y * SECOND_INPUT_FACTOR,
@@ -150,8 +168,8 @@ impl NormalNoise {
             return Err(NoiseError::InvalidInput.into());
         }
         Ok(finite(
-            (self.first.sample_consumer(position, work)?
-                + self.second.sample_consumer(second, work)?)
+            (self.first.sample_consumer_core(position, work)?
+                + self.second.sample_consumer_core(second, work)?)
                 * self.value_factor,
         )?)
     }

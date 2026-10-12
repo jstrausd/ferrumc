@@ -8,16 +8,19 @@
 use ferrumc_math::{BlockPos, ChunkPos};
 
 use super::{
-    bytes, charge, fail, limit, pack_column, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit,
+    bytes, core_charge as charge, core_fail as fail, limit, pack_column,
+    NoiseChunkCoreError as NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit,
 };
 use crate::density::bind::{BoundRouter, BoundView};
-use crate::density::evaluate::{self, EndRadialReference, MarkerEvaluator};
+use crate::density::evaluate::{self, DensityCoreError, EndRadialReference, MarkerEvaluator};
 use crate::density::graph::Marker;
 use crate::density::seeded::{DensitySampleError, DensitySampleErrorKind};
 use crate::density::NoiseGeometry;
 use crate::sample_work::SampleWork;
+use crate::sample_work::{ChargeFault, CoreError};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) enum Lifecycle {
     Fresh,
     Running,
@@ -36,6 +39,7 @@ impl Lifecycle {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(test, derive(Debug))]
 pub(super) enum DriverPhase {
     Dormant,
     FirstSlice,
@@ -63,6 +67,7 @@ impl DriverPhase {
     }
 }
 
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Interpolator {
     pub slice0: Vec<f64>,
     pub slice1: Vec<f64>,
@@ -71,6 +76,7 @@ pub(super) struct Interpolator {
     pub x_values: [f64; 2],
     pub value: f64,
 }
+#[cfg_attr(test, derive(Debug))]
 pub(super) enum Cache {
     Interpolated(Interpolator),
     Flat(Vec<f64>),
@@ -87,6 +93,7 @@ pub(super) enum Cache {
     },
     Cell(Vec<f64>),
 }
+#[cfg_attr(test, derive(Debug))]
 pub(super) struct Wrapper {
     pub node: usize,
     pub input: usize,
@@ -180,7 +187,7 @@ impl ChunkState {
         let normal_noises = data
             .noises
             .iter()
-            .map(|(_, noise)| noise.paper_build60_basis(work))
+            .map(|(_, noise)| noise.paper_build60_basis_core(work))
             .collect::<Result<Vec<_>, _>>()?
             .into_boxed_slice();
         let mut state = Self {
@@ -336,14 +343,14 @@ impl ChunkState {
     ) -> Result<f64, NoiseChunkError> {
         let prior = self.own_context;
         self.own_context = own;
-        let value = evaluate::visit_with(data, view, root, pos, work, "noise_chunk", self);
+        let value = evaluate::visit_with_core(data, view, root, pos, work, "noise_chunk", self);
         self.own_context = prior;
         if let Some(error) = self.marker_error.take() {
             return Err(error);
         }
         value.map_err(Into::into)
     }
-    fn lifecycle_error(&mut self, pos: BlockPos) -> DensitySampleError {
+    fn lifecycle_error(&mut self, pos: BlockPos) -> DensityCoreError {
         self.marker_error = Some(fail(NoiseChunkErrorKind::Lifecycle {
             operation: "compute_owned_wrapper",
             phase: "outside_interpolation",
@@ -373,10 +380,6 @@ impl MarkerEvaluator for ChunkState {
     ) -> Option<&'a crate::noise::NormalNoise> {
         self.normal_noises.get(index)
     }
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Original five-wrapper dispatch preserves distinct own/foreign cache and failure timing."
-    )]
     fn sample_marker(
         &mut self,
         data: &BoundRouter,
@@ -387,6 +390,23 @@ impl MarkerEvaluator for ChunkState {
         work: &mut SampleWork,
         field: &'static str,
     ) -> Result<f64, DensitySampleError> {
+        self.sample_marker_core(data, view, root, input, pos, work, field)
+            .map_err(CoreError::into_public)
+    }
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Original five-wrapper dispatch preserves cache and failure timing."
+    )]
+    fn sample_marker_core(
+        &mut self,
+        data: &BoundRouter,
+        view: &BoundView,
+        root: usize,
+        input: usize,
+        pos: BlockPos,
+        work: &mut SampleWork,
+        field: &'static str,
+    ) -> Result<f64, DensityCoreError> {
         let id = self
             .wrapper_nodes
             .get(root)
@@ -397,7 +417,7 @@ impl MarkerEvaluator for ChunkState {
         match &mut self.wrappers[id].cache {
             Cache::Interpolated(interp) => {
                 if !own {
-                    return evaluate::visit_with(data, view, input, pos, work, field, self);
+                    return evaluate::visit_with_core(data, view, input, pos, work, field, self);
                 }
                 if !self.interpolating {
                     return Err(self.lifecycle_error(pos));
@@ -408,7 +428,7 @@ impl MarkerEvaluator for ChunkState {
                     let y = f64::from(self.in_y) / self.height as f64;
                     let z = f64::from(self.in_z) / self.width as f64;
                     for _ in 0..7 {
-                        work.charge().map_err(|e| density_budget(pos, e))?;
+                        work.charge_core().map_err(|e| density_budget(pos, e))?;
                     }
                     Ok(lerp(
                         z,
@@ -433,7 +453,7 @@ impl MarkerEvaluator for ChunkState {
                 if (0..5).contains(&x) && (0..5).contains(&z) {
                     Ok(values[(x * 5 + z) as usize])
                 } else {
-                    evaluate::visit_with(data, view, input, pos, work, field, self)
+                    evaluate::visit_with_core(data, view, input, pos, work, field, self)
                 }
             }
             Cache::TwoD { key, value } => {
@@ -442,7 +462,7 @@ impl MarkerEvaluator for ChunkState {
                     return Ok(*value);
                 }
                 *key = current;
-                let result = evaluate::visit_with(data, view, input, pos, work, field, self)?;
+                let result = evaluate::visit_with_core(data, view, input, pos, work, field, self)?;
                 if let Cache::TwoD { value, .. } = &mut self.wrappers[id].cache {
                     *value = result;
                 }
@@ -456,7 +476,7 @@ impl MarkerEvaluator for ChunkState {
                 valid_len,
             } => {
                 if !own {
-                    return evaluate::visit_with(data, view, input, pos, work, field, self);
+                    return evaluate::visit_with_core(data, view, input, pos, work, field, self);
                 }
                 if let Some(len) = valid_len {
                     if *array_counter == self.array_counter {
@@ -471,7 +491,7 @@ impl MarkerEvaluator for ChunkState {
                     return Ok(*value);
                 }
                 *counter = self.scalar_counter;
-                let result = evaluate::visit_with(data, view, input, pos, work, field, self)?;
+                let result = evaluate::visit_with_core(data, view, input, pos, work, field, self)?;
                 if let Cache::Once { value, .. } = &mut self.wrappers[id].cache {
                     *value = result;
                 }
@@ -479,7 +499,7 @@ impl MarkerEvaluator for ChunkState {
             }
             Cache::Cell(values) => {
                 if !own {
-                    return evaluate::visit_with(data, view, input, pos, work, field, self);
+                    return evaluate::visit_with_core(data, view, input, pos, work, field, self);
                 }
                 if !self.interpolating {
                     return Err(self.lifecycle_error(pos));
@@ -496,7 +516,7 @@ impl MarkerEvaluator for ChunkState {
                         * self.width
                         + self.in_z as usize])
                 } else {
-                    evaluate::visit_with(data, view, input, pos, work, field, self)
+                    evaluate::visit_with_core(data, view, input, pos, work, field, self)
                 }
             }
         }
@@ -505,7 +525,7 @@ impl MarkerEvaluator for ChunkState {
 pub(super) fn lerp(delta: f64, start: f64, end: f64) -> f64 {
     start + delta * (end - start)
 }
-fn invalid(pos: BlockPos) -> DensitySampleError {
+fn invalid(pos: BlockPos) -> DensityCoreError {
     DensitySampleError {
         resource: "noise_chunk",
         field: "$",
@@ -513,13 +533,71 @@ fn invalid(pos: BlockPos) -> DensitySampleError {
         batch_index: None,
         kind: DensitySampleErrorKind::InvalidGraph,
     }
+    .into()
 }
-fn density_budget(pos: BlockPos, e: crate::sample_work::SampleWorkExceeded) -> DensitySampleError {
-    DensitySampleError {
-        kind: DensitySampleErrorKind::WorkExceeded {
-            limit: e.limit,
-            used: e.used,
-        },
-        ..invalid(pos)
+fn density_budget(pos: BlockPos, fault: ChargeFault) -> DensityCoreError {
+    match fault {
+        ChargeFault::Public { limit, used } => DensitySampleError {
+            resource: "noise_chunk",
+            field: "$",
+            position: Some(pos),
+            batch_index: None,
+            kind: DensitySampleErrorKind::WorkExceeded { limit, used },
+        }
+        .into(),
+        fault @ ChargeFault::Carver { .. } => CoreError::Work(fault),
+    }
+}
+
+#[cfg(test)]
+impl ChunkState {
+    pub(super) fn carver_history(&self) -> String {
+        format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}",
+            (
+                &self.normal_noises,
+                self.graph_bytes,
+                self.scratch_bytes,
+                self.lifecycle,
+                self.driver_phase,
+                self.driver_x,
+                self.origin,
+                self.geometry
+            ),
+            (
+                self.width,
+                self.height,
+                self.count_xz,
+                self.count_y,
+                self.min_cell_y,
+                &self.wrappers,
+                &self.wrapper_nodes,
+                &self.interpolators,
+                &self.cells,
+                self.cache_bytes
+            ),
+            (
+                &self.scratch,
+                self.interpolating,
+                self.filling_cell,
+                self.start,
+                self.in_x,
+                self.in_y,
+                self.in_z
+            ),
+            (
+                self.scalar_counter,
+                self.array_counter,
+                self.array_index,
+                self.own_context,
+                &self.marker_error
+            ),
+            (
+                self.requests.is_none(),
+                self.material_floats.is_none(),
+                self.material_context_override,
+                self.material_picker.is_none()
+            )
+        )
     }
 }

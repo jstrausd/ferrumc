@@ -1,8 +1,9 @@
 //! One chunk's evaluation session with the original lazy per-column/per-block state.
 
 use std::mem::size_of;
+use std::num::NonZeroU64;
 
-use ferrumc_math::{BlockPos, Vec3};
+use ferrumc_math::{BlockPos, ChunkPos, Vec3};
 use ferrumc_registry::biome::{BiomeParametersResourceId, BiomeResourceId};
 
 use super::bind::SeededSurfaceRules;
@@ -26,6 +27,36 @@ use crate::BlockStateId;
 const WORDS: usize = MAX_SURFACE_RULE_NODES / 64;
 /// Original `HOW_FAR_BELOW_PRELIMINARY_SURFACE_LEVEL_TO_BUILD_SURFACE`.
 const BELOW_PRELIMINARY_SURFACE: i32 = 8;
+
+/// Exact finite-double memo with a niche for the uncomputed value. `NormalNoise`
+/// rejects nonfinite samples, so this NaN bit pattern cannot be a cached value.
+/// This keeps the accepted 400-byte session while retaining the direct centre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SecondaryCache(Option<NonZeroU64>);
+
+impl SecondaryCache {
+    const SENTINEL: u64 = 0x7ff8_0000_0000_0000;
+    const EMPTY: Self = Self(None);
+
+    pub(super) fn get(self) -> Option<f64> {
+        self.0
+            .map(|bits| f64::from_bits(bits.get() ^ Self::SENTINEL))
+    }
+
+    #[cfg(test)]
+    pub(super) const fn is_none(self) -> bool {
+        self.0.is_none()
+    }
+
+    fn sampled(value: f64) -> Result<Self, SurfaceRuleError> {
+        if !value.is_finite() {
+            return Err(SurfaceRuleError::new(Kind::Noise));
+        }
+        NonZeroU64::new(value.to_bits() ^ Self::SENTINEL)
+            .map(|bits| Self(Some(bits)))
+            .ok_or_else(|| SurfaceRuleError::new(Kind::Noise))
+    }
+}
 
 /// Fixed node bitset; one bit per compiled node (cap 512).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +88,7 @@ pub(super) struct Column {
     /// First steep test: result and the four heights it read.
     pub steep: Option<(bool, [i32; 4])>,
     pub hole: Option<bool>,
-    pub secondary: Option<f64>,
+    pub secondary: SecondaryCache,
     pub min_surface: Option<i32>,
 }
 
@@ -93,7 +124,8 @@ struct Frame {
 #[derive(Debug)]
 pub struct SurfaceRuleSession<'a> {
     rules: &'a SeededSurfaceRules,
-    resolver: &'a SurfaceBiomeResolver<'a>,
+    resolver: Option<&'a SurfaceBiomeResolver<'a>>,
+    center: ChunkPos,
     temperatures: &'a BuiltinBiomeTemperatures,
     corners: PreliminarySurfaceCorners,
     allowance: u32,
@@ -101,6 +133,30 @@ pub struct SurfaceRuleSession<'a> {
     poisoned: bool,
     pub(super) column: Option<Column>,
     pub(super) block: Block,
+}
+
+/// Closed concrete providers share precisely the existing lazy memo miss.
+enum BiomeProvider<'call, 'stored> {
+    Stored(&'call SurfaceBiomeResolver<'stored>),
+    DirectCarver(&'call mut crate::carver::DirectCarverBiomes<'call>),
+}
+
+pub(crate) enum RuleCoreError {
+    Rule(SurfaceRuleError),
+    Direct(crate::carver::CarverError),
+}
+impl From<SurfaceRuleError> for RuleCoreError {
+    fn from(error: SurfaceRuleError) -> Self {
+        Self::Rule(error)
+    }
+}
+impl RuleCoreError {
+    fn public(self) -> SurfaceRuleError {
+        match self {
+            Self::Rule(error) => error,
+            Self::Direct(_) => unreachable!("Stored provider cannot produce a direct fault"),
+        }
+    }
 }
 
 /// Units spent by the current call, checked against the pre-check bound.
@@ -163,7 +219,8 @@ impl<'a> SurfaceRuleSession<'a> {
         )?;
         Ok(Self {
             rules,
-            resolver,
+            resolver: Some(resolver),
+            center,
             temperatures,
             corners,
             allowance: budget.units(),
@@ -172,6 +229,91 @@ impl<'a> SurfaceRuleSession<'a> {
             column: None,
             block: Block::EMPTY,
         })
+    }
+
+    pub(crate) fn new_carver(
+        rules: &'a SeededSurfaceRules,
+        temperatures: &'a BuiltinBiomeTemperatures,
+        corners: PreliminarySurfaceCorners,
+        center: ChunkPos,
+        budget: SurfaceRuleWorkBudget,
+    ) -> Result<Self, SurfaceRuleError> {
+        admit_chunk(center).map_err(|_| {
+            SurfaceRuleError::new(Kind::Biome(StoredBiomeErrorKind::CoordinateDomain))
+        })?;
+        limit(
+            SurfaceRuleLimit::SessionBytes,
+            size_of::<Self>(),
+            MAX_SURFACE_RULE_SESSION_BYTES,
+        )?;
+        Ok(Self {
+            rules,
+            resolver: None,
+            center,
+            temperatures,
+            corners,
+            allowance: budget.units(),
+            used: 0,
+            poisoned: false,
+            column: None,
+            block: Block::EMPTY,
+        })
+    }
+
+    pub(crate) const fn carver_rules(&self) -> &'a SeededSurfaceRules {
+        self.rules
+    }
+    pub(crate) const fn carver_remaining(&self) -> u32 {
+        self.remaining()
+    }
+
+    /// Rechecks the private direct context in the same identity order as Stored.
+    pub(crate) fn admit_carver(
+        &self,
+        identity: crate::stored_biome::StoredBiomeIdentity,
+        semantics: BiomeZoomSemantics,
+        center: ChunkPos,
+    ) -> Result<(), SurfaceRuleError> {
+        admit_identity(self.rules, identity, semantics)?;
+        if self.center != center || self.resolver.is_some() {
+            return Err(SurfaceRuleError::new(Kind::ColumnOutsideCentre));
+        }
+        self.admit()
+    }
+
+    pub(crate) fn evaluate_carver<'call>(
+        &mut self,
+        input: SurfaceBlockInput,
+        heights: &WorldSurfaceHeights,
+        direct: &'call mut crate::carver::DirectCarverBiomes<'call>,
+    ) -> Result<SurfaceRuleOutcome, RuleCoreError> {
+        let column = self.active()?;
+        let pos = BlockPos::new(column.pos.block_x(), input.y(), column.pos.block_z());
+        self.admit_input(input)
+            .map_err(|error| error.with_block(pos))?;
+        let m = u32::from(column.min_surface.is_none());
+        self.work_refusal(self.template().evaluate_work + m)
+            .map_err(|error| error.with_block(pos))?;
+        self.block = Block::EMPTY;
+        let mut meter = Meter(0);
+        let result = self.run(
+            input,
+            heights,
+            &mut meter,
+            &mut BiomeProvider::DirectCarver(direct),
+        );
+        self.used += meter.0;
+        match result {
+            Ok(Some(state)) => Ok(SurfaceRuleOutcome::State(state)),
+            Ok(None) => Ok(SurfaceRuleOutcome::NoRule),
+            Err(error) => {
+                self.poisoned = true;
+                Err(match error {
+                    RuleCoreError::Rule(error) => RuleCoreError::Rule(error.with_block(pos)),
+                    other @ RuleCoreError::Direct(_) => other,
+                })
+            }
+        }
     }
 
     /// Units charged so far; readable on a poisoned session.
@@ -219,7 +361,7 @@ impl<'a> SurfaceRuleSession<'a> {
     /// cache and computes the surface depth.
     pub fn begin_column(&mut self, pos: SurfaceColumnPos) -> Result<(), SurfaceRuleError> {
         self.admit()?;
-        if pos.chunk() != self.resolver.center() {
+        if pos.chunk() != self.center {
             return Err(SurfaceRuleError::new(Kind::ColumnOutsideCentre));
         }
         self.work_refusal(SURFACE_RULE_COLUMN_WORK)?;
@@ -236,7 +378,7 @@ impl<'a> SurfaceRuleSession<'a> {
             noise_value: NodeBits::EMPTY,
             steep: None,
             hole: None,
-            secondary: None,
+            secondary: SecondaryCache::EMPTY,
             min_surface: None,
         };
         self.column = Some(column);
@@ -287,12 +429,20 @@ impl<'a> SurfaceRuleSession<'a> {
             .map_err(|error| error.with_block(pos))?;
         self.block = Block::EMPTY;
         let mut meter = Meter(0);
-        let result = self.run(input, heights, &mut meter);
+        let resolver = self
+            .resolver
+            .ok_or_else(|| SurfaceRuleError::new(Kind::MalformedDefinition))?;
+        let result = self.run(
+            input,
+            heights,
+            &mut meter,
+            &mut BiomeProvider::Stored(resolver),
+        );
         self.used += meter.0;
         match result {
             Ok(Some(state)) => Ok(SurfaceRuleOutcome::State(state)),
             Ok(None) => Ok(SurfaceRuleOutcome::NoRule),
-            Err(error) => Err(self.poison(error.with_block(pos))),
+            Err(error) => Err(self.poison(error.public().with_block(pos))),
         }
     }
 
@@ -324,7 +474,8 @@ impl<'a> SurfaceRuleSession<'a> {
         input: SurfaceBlockInput,
         heights: &WorldSurfaceHeights,
         meter: &mut Meter,
-    ) -> Result<Option<BlockStateId>, SurfaceRuleError> {
+        provider: &mut BiomeProvider<'_, '_>,
+    ) -> Result<Option<BlockStateId>, RuleCoreError> {
         let template = self.template();
         let mut stack = [Frame {
             node: 0,
@@ -350,7 +501,7 @@ impl<'a> SurfaceRuleSession<'a> {
                 NodeKind::Condition { test, then } => {
                     if frame.entered > 0 {
                         depth -= 1;
-                    } else if self.test(usize::from(test), input, heights, meter)? {
+                    } else if self.test(usize::from(test), input, heights, meter, provider)? {
                         stack[depth - 1].entered = 1;
                         push = Some(then);
                     } else {
@@ -366,11 +517,17 @@ impl<'a> SurfaceRuleSession<'a> {
                     last = Some(self.band(input.y(), meter)?);
                     depth -= 1;
                 }
-                _ => return Err(SurfaceRuleError::new(Kind::MalformedDefinition).with_node(node)),
+                _ => {
+                    return Err(SurfaceRuleError::new(Kind::MalformedDefinition)
+                        .with_node(node)
+                        .into())
+                }
             }
             if let Some(child) = push {
                 if depth > MAX_SURFACE_RULE_DEPTH {
-                    return Err(SurfaceRuleError::new(Kind::MalformedDefinition).with_node(node));
+                    return Err(SurfaceRuleError::new(Kind::MalformedDefinition)
+                        .with_node(node)
+                        .into());
                 }
                 stack[depth] = Frame {
                     node: child,
@@ -390,7 +547,8 @@ impl<'a> SurfaceRuleSession<'a> {
         input: SurfaceBlockInput,
         heights: &WorldSurfaceHeights,
         meter: &mut Meter,
-    ) -> Result<bool, SurfaceRuleError> {
+        provider: &mut BiomeProvider<'_, '_>,
+    ) -> Result<bool, RuleCoreError> {
         let mut negate = false;
         loop {
             meter.charge();
@@ -400,7 +558,7 @@ impl<'a> SurfaceRuleSession<'a> {
                 node = usize::from(target);
                 continue;
             }
-            return Ok(self.leaf(node, kind, input, heights, meter)? != negate);
+            return Ok(self.leaf(node, kind, input, heights, meter, provider)? != negate);
         }
     }
 
@@ -411,7 +569,8 @@ impl<'a> SurfaceRuleSession<'a> {
         input: SurfaceBlockInput,
         heights: &WorldSurfaceHeights,
         meter: &mut Meter,
-    ) -> Result<bool, SurfaceRuleError> {
+        provider: &mut BiomeProvider<'_, '_>,
+    ) -> Result<bool, RuleCoreError> {
         let template = self.template();
         let rules: &'a SeededSurfaceRules = self.rules;
         let column = self
@@ -422,7 +581,7 @@ impl<'a> SurfaceRuleSession<'a> {
         let above = input.stone_depth_above();
         let value = match kind {
             NodeKind::Biome { first, len } => {
-                let biome = self.biome(y, meter)?;
+                let biome = self.biome(y, meter, provider)?;
                 let set = &template.biomes[usize::from(first)..usize::from(first + len)];
                 self.per_block(node, set.contains(&biome))
             }
@@ -477,8 +636,12 @@ impl<'a> SurfaceRuleSession<'a> {
                 hole
             }
             NodeKind::AbovePreliminarySurface => y >= self.minimum(meter),
-            NodeKind::Temperature => self.temperature(y, meter)?,
-            _ => return Err(SurfaceRuleError::new(Kind::MalformedDefinition).with_node(node)),
+            NodeKind::Temperature => self.temperature(y, meter, provider)?,
+            _ => {
+                return Err(SurfaceRuleError::new(Kind::MalformedDefinition)
+                    .with_node(node)
+                    .into())
+            }
         };
         Ok(value)
     }
@@ -490,7 +653,12 @@ impl<'a> SurfaceRuleSession<'a> {
     }
 
     /// The single memoized resolver call of this block (original `Suppliers.memoize`).
-    fn biome(&mut self, y: i32, meter: &mut Meter) -> Result<BiomeResourceId, SurfaceRuleError> {
+    fn biome(
+        &mut self,
+        y: i32,
+        meter: &mut Meter,
+        provider: &mut BiomeProvider<'_, '_>,
+    ) -> Result<BiomeResourceId, RuleCoreError> {
         if let Some(biome) = self.block.biome {
             return Ok(biome);
         }
@@ -499,20 +667,29 @@ impl<'a> SurfaceRuleSession<'a> {
             .ok_or_else(|| SurfaceRuleError::new(Kind::NoActiveColumn))?;
         meter.charge();
         let pos = BlockPos::new(column.pos.block_x(), y, column.pos.block_z());
-        let biome = self
-            .resolver
-            .biome_at_block(pos)
-            .map_err(|error| SurfaceRuleError::new(Kind::Biome(error.kind())))?;
+        let biome = match provider {
+            BiomeProvider::Stored(resolver) => resolver
+                .biome_at_block(pos)
+                .map_err(|error| SurfaceRuleError::new(Kind::Biome(error.kind())))?,
+            BiomeProvider::DirectCarver(direct) => {
+                direct.biome(pos).map_err(RuleCoreError::Direct)?
+            }
+        };
         self.block.biome = Some(biome);
         Ok(biome)
     }
 
     /// Original `TemperatureHelperCondition`: `coldEnoughToSnow(pos, seaLevel)`.
-    fn temperature(&mut self, y: i32, meter: &mut Meter) -> Result<bool, SurfaceRuleError> {
+    fn temperature(
+        &mut self,
+        y: i32,
+        meter: &mut Meter,
+        provider: &mut BiomeProvider<'_, '_>,
+    ) -> Result<bool, RuleCoreError> {
         if let Some(cold) = self.block.temperature {
             return Ok(cold);
         }
-        let biome = self.biome(y, meter)?;
+        let biome = self.biome(y, meter, provider)?;
         let column = self
             .column
             .ok_or_else(|| SurfaceRuleError::new(Kind::NoActiveColumn))?;
@@ -583,7 +760,7 @@ impl<'a> SurfaceRuleSession<'a> {
         let column = self
             .column
             .ok_or_else(|| SurfaceRuleError::new(Kind::NoActiveColumn))?;
-        if let Some(value) = column.secondary {
+        if let Some(value) = column.secondary.get() {
             return Ok(value);
         }
         meter.charge();
@@ -593,7 +770,7 @@ impl<'a> SurfaceRuleSession<'a> {
             column.pos.block_z(),
         )?;
         if let Some(column) = &mut self.column {
-            column.secondary = Some(value);
+            column.secondary = SecondaryCache::sampled(value)?;
         }
         Ok(value)
     }
@@ -674,7 +851,14 @@ fn admit_resolver(
     rules: &SeededSurfaceRules,
     resolver: &SurfaceBiomeResolver<'_>,
 ) -> Result<(), SurfaceRuleError> {
-    let identity = resolver.identity();
+    admit_identity(rules, resolver.identity(), resolver.semantics())
+}
+
+fn admit_identity(
+    rules: &SeededSurfaceRules,
+    identity: crate::stored_biome::StoredBiomeIdentity,
+    semantics: BiomeZoomSemantics,
+) -> Result<(), SurfaceRuleError> {
     let template = rules.template();
     let generation = template.generation;
     let overworld = BiomeParametersResourceId::from_name("minecraft:overworld")
@@ -692,7 +876,7 @@ fn admit_resolver(
         || geometry.height() != SURFACE_RULE_LEVEL_HEIGHT
     {
         Some(ResolverMismatch::Geometry)
-    } else if resolver.semantics() != BiomeZoomSemantics::Paper1_21_8Build60 {
+    } else if semantics != BiomeZoomSemantics::Paper1_21_8Build60 {
         Some(ResolverMismatch::ZoomSemantics)
     } else {
         None
@@ -744,7 +928,52 @@ impl SurfaceRuleSession<'_> {
         (self.column, self.used, self.poisoned)
     }
     /// Positions the remaining allowance for matrix rows the public API cannot reach.
-    pub(super) const fn set_work_used(&mut self, used: u32) {
+    pub(crate) const fn set_work_used(&mut self, used: u32) {
         self.used = used;
+    }
+}
+
+#[cfg(test)]
+impl SurfaceRuleSession<'_> {
+    pub(crate) fn carver_test_context(&mut self, center: ChunkPos, poisoned: bool) {
+        self.center = center;
+        self.poisoned = poisoned;
+    }
+}
+
+#[cfg(test)]
+mod runtime_secondary_tests {
+    use super::*;
+
+    #[test]
+    fn finite_memo_preserves_bits_and_the_accepted_layout() {
+        assert_eq!(size_of::<SecondaryCache>(), 8);
+        assert!(SecondaryCache::EMPTY.is_none());
+        assert_eq!(SecondaryCache::EMPTY.get(), None);
+        for value in [
+            0.0,
+            -0.0,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            f64::MAX,
+            -f64::MAX,
+            1.0,
+            -1.0,
+        ] {
+            let memo = SecondaryCache::sampled(value).unwrap();
+            assert!(!memo.is_none());
+            assert_eq!(memo.get().unwrap().to_bits(), value.to_bits());
+        }
+        for value in [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            f64::from_bits(SecondaryCache::SENTINEL),
+        ] {
+            assert_eq!(
+                *SecondaryCache::sampled(value).unwrap_err().kind(),
+                Kind::Noise
+            );
+        }
     }
 }

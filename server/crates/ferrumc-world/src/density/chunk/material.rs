@@ -3,8 +3,9 @@
 use ferrumc_math::BlockPos;
 
 use super::{
-    bytes, charge, fail, ChunkMaterialSamples, NoiseChunkError, NoiseChunkErrorKind,
-    NoiseChunkLimit, NoiseChunkSession,
+    bytes, core_charge as charge, core_fail as fail, ChunkMaterialSamples,
+    NoiseChunkCoreError as NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit,
+    NoiseChunkSession,
 };
 use crate::sample_work::SampleWork;
 use crate::BlockStateId;
@@ -15,6 +16,48 @@ mod ore;
 
 use aquifer::Aquifer;
 use blocks::MaterialBlocks;
+
+/// One fresh, persistent Aquifer; the same admitted Noise meter owns all work.
+pub(crate) struct CarverAquifer {
+    aquifer: Aquifer,
+    blocks: MaterialBlocks,
+    domain: MaterialDomain,
+}
+impl CarverAquifer {
+    pub(crate) fn new(session: &mut NoiseChunkSession) -> Result<Self, NoiseChunkError> {
+        let domain = MaterialDomain::new(session)?;
+        let blocks = MaterialBlocks::new(
+            session.data.metadata.default_block,
+            session.data.metadata.default_fluid,
+            &mut session.work,
+        )?;
+        let aquifer = Aquifer::new(session)?;
+        Ok(Self {
+            aquifer,
+            blocks,
+            domain,
+        })
+    }
+    pub(crate) fn compute(
+        &mut self,
+        session: &mut NoiseChunkSession,
+        pos: BlockPos,
+    ) -> Result<Option<BlockStateId>, NoiseChunkError> {
+        self.domain.center(pos)?;
+        session.state.start = pos;
+        session.state.in_x = 0;
+        session.state.in_y = 0;
+        session.state.in_z = 0;
+        self.aquifer
+            .compute(session, &self.blocks, self.domain, 0.0)
+    }
+    pub(crate) const fn schedule(&self) -> bool {
+        self.aquifer.schedule
+    }
+    pub(crate) const fn lava(&self) -> BlockStateId {
+        self.blocks.lava
+    }
+}
 
 const HALO_LIMIT: i32 = 30_000_128;
 /// States of the closed GEN-05.4 material alphabet ([`material_alphabet`]).
@@ -311,7 +354,7 @@ fn random_int(
     bound: u32,
 ) -> Result<i32, NoiseChunkError> {
     let value = random
-        .bounded_positive_metered(bound, &mut session.work)?
+        .bounded_positive_metered_core(bound, &mut session.work)?
         .cast_signed();
     #[cfg(test)]
     if let Some(requests) = session.state.requests.as_mut() {
@@ -322,3 +365,10 @@ fn random_int(
 
 #[cfg(test)]
 pub(super) mod tests;
+
+#[cfg(test)]
+impl CarverAquifer {
+    pub(crate) fn carver_history(&self) -> String {
+        format!("{:?}", self.aquifer)
+    }
+}

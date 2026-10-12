@@ -156,3 +156,5 @@ fn actual_paper_126_complete_density_chunks() {
     assert_eq!(records.lines().count(), 126);
     assert_eq!(samples, 7_077_888);
 }
+
+pub(crate) mod precharge;

@@ -5,9 +5,16 @@ use ferrumc_math::{BlockPos, Vec3};
 use super::bind::{java_max, java_min, BoundKind, BoundNode, BoundRouter, BoundView};
 use super::graph::{Binary, NodeKind, Rarity, Shift, Unary, Unit};
 use super::seeded::{DensitySampleError, DensitySampleErrorKind as ErrorKind};
-use crate::noise::ConsumerNoiseError;
-use crate::sample_work::{SampleWork, SampleWorkExceeded};
-use crate::spline::SplineSampleError;
+use crate::noise::ConsumerNoiseCoreError;
+use crate::sample_work::{ChargeFault, CoreError, SampleWork};
+use crate::spline::SplineCoreError;
+
+pub(super) type DensityCoreError = CoreError<DensitySampleError>;
+impl From<DensitySampleError> for DensityCoreError {
+    fn from(error: DensitySampleError) -> Self {
+        Self::Error(error)
+    }
+}
 
 /// Numerical reference belongs to the consumer context, never a global option.
 #[derive(Clone, Copy)]
@@ -49,6 +56,23 @@ pub(super) trait MarkerEvaluator {
         work: &mut SampleWork,
         field: &'static str,
     ) -> Result<f64, DensitySampleError>;
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Preserves the complete existing marker context."
+    )]
+    fn sample_marker_core(
+        &mut self,
+        data: &BoundRouter,
+        view: &BoundView,
+        root: usize,
+        input: usize,
+        pos: BlockPos,
+        work: &mut SampleWork,
+        field: &'static str,
+    ) -> Result<f64, DensityCoreError> {
+        self.sample_marker(data, view, root, input, pos, work, field)
+            .map_err(CoreError::Error)
+    }
 }
 struct PointEvaluator;
 impl MarkerEvaluator for PointEvaluator {
@@ -67,6 +91,18 @@ impl MarkerEvaluator for PointEvaluator {
     ) -> Result<f64, DensitySampleError> {
         visit_with(data, view, input, pos, work, field, self)
     }
+    fn sample_marker_core(
+        &mut self,
+        data: &BoundRouter,
+        view: &BoundView,
+        _root: usize,
+        input: usize,
+        pos: BlockPos,
+        work: &mut SampleWork,
+        field: &'static str,
+    ) -> Result<f64, DensityCoreError> {
+        visit_with_core(data, view, input, pos, work, field, self)
+    }
 }
 
 pub(super) fn sample(
@@ -80,11 +116,23 @@ pub(super) fn sample(
     visit_with(data, view, root, pos, work, field, &mut PointEvaluator)
 }
 
+pub(super) fn visit_with(
+    data: &BoundRouter,
+    view: &BoundView,
+    root: usize,
+    pos: BlockPos,
+    work: &mut SampleWork,
+    field: &'static str,
+    evaluator: &mut impl MarkerEvaluator,
+) -> Result<f64, DensitySampleError> {
+    visit_with_core(data, view, root, pos, work, field, evaluator).map_err(CoreError::into_public)
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "One exhaustive dispatch keeps original request and arithmetic order auditable."
 )]
-pub(super) fn visit_with(
+pub(super) fn visit_with_core(
     data: &BoundRouter,
     view: &BoundView,
     mut root: usize,
@@ -92,7 +140,7 @@ pub(super) fn visit_with(
     work: &mut SampleWork,
     field: &'static str,
     evaluator: &mut impl MarkerEvaluator,
-) -> Result<f64, DensitySampleError> {
+) -> Result<f64, DensityCoreError> {
     // Actual removed holders/markers are identity aliases, not compute calls.
     // Combined depth admission bounds this traversal without recursion.
     let mut aliases = 0;
@@ -115,7 +163,7 @@ pub(super) fn visit_with(
             break node;
         }
     };
-    work.charge()
+    work.charge_core()
         .map_err(|source| budget(node, field, pos, source))?;
     #[cfg(test)]
     work.record_density(node.resource);
@@ -135,7 +183,7 @@ pub(super) fn visit_with(
                 input,
                 argument,
             } => {
-                let value = visit_with(data, view, *input, pos, work, field, evaluator)?;
+                let value = visit_with_core(data, view, *input, pos, work, field, evaluator)?;
                 match operation {
                     Binary::Add => value + argument,
                     Binary::Mul => value * argument,
@@ -145,30 +193,32 @@ pub(super) fn visit_with(
             BoundKind::Original(kind) => match kind {
                 NodeKind::Constant(value) => *value,
                 NodeKind::Holder { target, .. } => {
-                    visit_with(data, view, *target, pos, work, field, evaluator)?
+                    visit_with_core(data, view, *target, pos, work, field, evaluator)?
                 }
                 NodeKind::Marker { input, .. } => {
-                    evaluator.sample_marker(data, view, root, *input, pos, work, field)?
+                    evaluator.sample_marker_core(data, view, root, *input, pos, work, field)?
                 }
                 NodeKind::BlendDensity(input) => {
-                    visit_with(data, view, *input, pos, work, field, evaluator)?
+                    visit_with_core(data, view, *input, pos, work, field, evaluator)?
                 }
                 NodeKind::Binary {
                     operation,
                     left,
                     right,
                 } => {
-                    let a = visit_with(data, view, *left, pos, work, field, evaluator)?;
+                    let a = visit_with_core(data, view, *left, pos, work, field, evaluator)?;
                     let right_bounds = view.nodes[*right].bounds;
                     match operation {
                         Binary::Add => {
-                            a + visit_with(data, view, *right, pos, work, field, evaluator)?
+                            a + visit_with_core(data, view, *right, pos, work, field, evaluator)?
                         }
                         Binary::Mul => {
                             if a == 0.0 {
                                 0.0
                             } else {
-                                a * visit_with(data, view, *right, pos, work, field, evaluator)?
+                                a * visit_with_core(
+                                    data, view, *right, pos, work, field, evaluator,
+                                )?
                             }
                         }
                         Binary::Min => {
@@ -177,7 +227,9 @@ pub(super) fn visit_with(
                             } else {
                                 java_min(
                                     a,
-                                    visit_with(data, view, *right, pos, work, field, evaluator)?,
+                                    visit_with_core(
+                                        data, view, *right, pos, work, field, evaluator,
+                                    )?,
                                 )
                             }
                         }
@@ -187,7 +239,9 @@ pub(super) fn visit_with(
                             } else {
                                 java_max(
                                     a,
-                                    visit_with(data, view, *right, pos, work, field, evaluator)?,
+                                    visit_with_core(
+                                        data, view, *right, pos, work, field, evaluator,
+                                    )?,
                                 )
                             }
                         }
@@ -195,10 +249,10 @@ pub(super) fn visit_with(
                 }
                 NodeKind::Unary { operation, input } => unary(
                     *operation,
-                    visit_with(data, view, *input, pos, work, field, evaluator)?,
+                    visit_with_core(data, view, *input, pos, work, field, evaluator)?,
                 ),
                 NodeKind::Clamp { input, min, max } => clamp(
-                    visit_with(data, view, *input, pos, work, field, evaluator)?,
+                    visit_with_core(data, view, *input, pos, work, field, evaluator)?,
                     *min,
                     *max,
                 ),
@@ -209,8 +263,8 @@ pub(super) fn visit_with(
                     inside,
                     outside,
                 } => {
-                    let value = visit_with(data, view, *input, pos, work, field, evaluator)?;
-                    visit_with(
+                    let value = visit_with_core(data, view, *input, pos, work, field, evaluator)?;
+                    visit_with_core(
                         data,
                         view,
                         if value >= *min && value < *max {
@@ -234,7 +288,7 @@ pub(super) fn visit_with(
                         / (f64::from(*to_y) - f64::from(*from_y));
                     clamped_lerp(*from_value, *to_value, delta)
                 }
-                NodeKind::Noise { xz, y, .. } => normal(
+                NodeKind::Noise { xz, y, .. } => normal_core(
                     data,
                     node,
                     Vec3::new(
@@ -253,7 +307,7 @@ pub(super) fn visit_with(
                         Shift::A => (pos.x(), 0, pos.z()),
                         Shift::B => (pos.z(), pos.x(), 0),
                     };
-                    normal(
+                    normal_core(
                         data,
                         node,
                         Vec3::new(
@@ -276,18 +330,18 @@ pub(super) fn visit_with(
                     ..
                 } => {
                     let x = f64::from(pos.x()) * xz
-                        + visit_with(data, view, *shift_x, pos, work, field, evaluator)?;
+                        + visit_with_core(data, view, *shift_x, pos, work, field, evaluator)?;
                     let y = f64::from(pos.y()) * y
-                        + visit_with(data, view, *shift_y, pos, work, field, evaluator)?;
+                        + visit_with_core(data, view, *shift_y, pos, work, field, evaluator)?;
                     let z = f64::from(pos.z()) * xz
-                        + visit_with(data, view, *shift_z, pos, work, field, evaluator)?;
-                    normal(data, node, Vec3::new(x, y, z), pos, work, field, evaluator)?
+                        + visit_with_core(data, view, *shift_z, pos, work, field, evaluator)?;
+                    normal_core(data, node, Vec3::new(x, y, z), pos, work, field, evaluator)?
                 }
                 NodeKind::Weird { input, rarity, .. } => {
-                    let value = visit_with(data, view, *input, pos, work, field, evaluator)?;
+                    let value = visit_with_core(data, view, *input, pos, work, field, evaluator)?;
                     let rarity = rarity_value(*rarity, value);
                     rarity
-                        * normal(
+                        * normal_core(
                             data,
                             node,
                             Vec3::new(
@@ -303,14 +357,14 @@ pub(super) fn visit_with(
                         .abs()
                 }
                 NodeKind::Blended { .. } => {
-                    work.charge()
+                    work.charge_core()
                         .map_err(|source| budget(node, field, pos, source))?;
                     let sampler = node
                         .blended
                         .as_ref()
                         .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
                     sampler
-                        .sample_consumer(pos, work)
+                        .sample_consumer_core(pos, work)
                         .map_err(|source| noise_error(node, field, pos, source))?
                 }
                 NodeKind::Unit(unit) => match unit {
@@ -332,41 +386,33 @@ pub(super) fn visit_with(
                         .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?;
                     let value = spline
                         .spline
-                        .sample_shared(work, &mut |coordinate, work| {
+                        .sample_shared_core(work, &mut |coordinate, work| {
                             let id = spline
                                 .coordinates
                                 .get(coordinate.index() as usize)
                                 .ok_or_else(|| {
                                     error(node.resource, field, pos, ErrorKind::InvalidGraph)
                                 })?;
-                            Ok(visit_with(data, view, *id, pos, work, field, evaluator)? as f32)
+                            Ok(
+                                visit_with_core(data, view, *id, pos, work, field, evaluator)?
+                                    as f32,
+                            )
                         })
                         .map_err(|source| match source {
-                            SplineSampleError::CoordinateSource { source, .. } => source,
-                            SplineSampleError::BudgetExceeded { limit } => error(
-                                node.resource,
-                                field,
-                                pos,
-                                ErrorKind::WorkExceeded {
-                                    limit,
-                                    used: work.used(),
-                                },
-                            ),
-                            SplineSampleError::NonFiniteCoordinate { bits, .. } => error(
+                            SplineCoreError::CoordinateSource { source, .. } => source,
+                            SplineCoreError::Work(fault) => budget(node, field, pos, fault),
+                            SplineCoreError::NonFiniteCoordinate { bits, .. } => error(
                                 node.resource,
                                 field,
                                 pos,
                                 ErrorKind::NonFiniteCoordinate { bits },
                             ),
-                            SplineSampleError::NonFiniteResult { bits, .. } => error(
+                            SplineCoreError::NonFiniteResult { bits, .. } => error(
                                 node.resource,
                                 field,
                                 pos,
                                 ErrorKind::NonFiniteSpline { bits },
                             ),
-                            SplineSampleError::InvalidBudget { .. } => {
-                                error(node.resource, field, pos, ErrorKind::InvalidGraph)
-                            }
                         })?;
                     f64::from(value)
                 }
@@ -392,7 +438,7 @@ pub(super) fn visit_with(
     }
 }
 
-pub(super) fn normal(
+pub(super) fn normal_core(
     data: &BoundRouter,
     node: &BoundNode,
     position: Vec3,
@@ -400,8 +446,8 @@ pub(super) fn normal(
     work: &mut SampleWork,
     field: &'static str,
     evaluator: &impl MarkerEvaluator,
-) -> Result<f64, DensitySampleError> {
-    work.charge()
+) -> Result<f64, DensityCoreError> {
+    work.charge_core()
         .map_err(|source| budget(node, field, pos, source))?;
     let index = node
         .noise
@@ -409,7 +455,7 @@ pub(super) fn normal(
     evaluator
         .normal_sampler(data, index)
         .ok_or_else(|| error(node.resource, field, pos, ErrorKind::InvalidGraph))?
-        .sample_consumer(position, work)
+        .sample_consumer_core(position, work)
         .map_err(|source| noise_error(node, field, pos, source))
 }
 
@@ -417,37 +463,37 @@ fn noise_error(
     node: &BoundNode,
     field: &'static str,
     pos: BlockPos,
-    source: ConsumerNoiseError,
-) -> DensitySampleError {
+    source: ConsumerNoiseCoreError,
+) -> DensityCoreError {
     match source {
-        ConsumerNoiseError::Noise(source) => {
+        ConsumerNoiseCoreError::Noise(source) => {
             error(node.resource, field, pos, ErrorKind::Noise(source))
         }
-        ConsumerNoiseError::Work(source) => budget(node, field, pos, source),
+        ConsumerNoiseCoreError::Work(source) => budget(node, field, pos, source),
     }
 }
 fn budget(
     node: &BoundNode,
     field: &'static str,
     pos: BlockPos,
-    source: SampleWorkExceeded,
-) -> DensitySampleError {
-    error(
-        node.resource,
-        field,
-        pos,
-        ErrorKind::WorkExceeded {
-            limit: source.limit,
-            used: source.used,
-        },
-    )
+    source: ChargeFault,
+) -> DensityCoreError {
+    match source {
+        ChargeFault::Public { limit, used } => error(
+            node.resource,
+            field,
+            pos,
+            ErrorKind::WorkExceeded { limit, used },
+        ),
+        fault @ ChargeFault::Carver { .. } => CoreError::Work(fault),
+    }
 }
 fn error(
     resource: &'static str,
     field: &'static str,
     pos: BlockPos,
     kind: ErrorKind,
-) -> DensitySampleError {
+) -> DensityCoreError {
     DensitySampleError {
         resource,
         field,
@@ -455,6 +501,7 @@ fn error(
         batch_index: None,
         kind,
     }
+    .into()
 }
 
 pub(super) fn unary(operation: Unary, value: f64) -> f64 {
@@ -536,7 +583,7 @@ fn end_islands_with_reference(
     work: &mut SampleWork,
     field: &'static str,
     reference: EndRadialReference,
-) -> Result<f64, DensitySampleError> {
+) -> Result<f64, DensityCoreError> {
     let x = pos.x() / 8;
     let z = pos.z() / 8;
     let center_x = x / 2;
@@ -557,12 +604,12 @@ fn end_islands_with_reference(
     height = clamp_f32(height, -100.0, 80.0);
     for dx in -12..=12 {
         for dz in -12..=12 {
-            work.charge()
+            work.charge_core()
                 .map_err(|source| budget(node, field, pos, source))?;
             let nx = i64::from(center_x + dx);
             let nz = i64::from(center_z + dz);
             if nx * nx + nz * nz > 4096 {
-                work.charge()
+                work.charge_core()
                     .map_err(|source| budget(node, field, pos, source))?;
                 let sample = data
                     .end

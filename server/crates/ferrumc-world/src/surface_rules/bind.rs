@@ -256,3 +256,62 @@ fn make_bands(
         }
     }
 }
+
+/// Synthetic source controls; never a natural-world expectation or public tree API.
+#[cfg(test)]
+impl SeededSurfaceRules {
+    pub(crate) fn carver_test_rule(&mut self, control: u8) {
+        use super::compile::{Node, NodeKind};
+        let template = Arc::get_mut(&mut self.template).unwrap();
+        let node = |kind, parent, depth| Node {
+            kind,
+            parent,
+            depth,
+        };
+        match control {
+            0 => {
+                template.nodes = vec![node(NodeKind::Sequence { first: 0, len: 0 }, u16::MAX, 0)]
+                    .into_boxed_slice();
+                template.children = Box::new([]);
+            }
+            1 => {
+                template.nodes = vec![node(NodeKind::Block(0), u16::MAX, 0)].into_boxed_slice();
+                template.children = Box::new([]);
+            }
+            2 => {
+                template.nodes = vec![
+                    node(NodeKind::Sequence { first: 0, len: 2 }, u16::MAX, 0),
+                    node(NodeKind::Condition { test: 2, then: 3 }, 0, 1),
+                    node(
+                        NodeKind::Biome {
+                            first: 0,
+                            len: template.biomes.len() as u16,
+                        },
+                        1,
+                        2,
+                    ),
+                    node(NodeKind::Sequence { first: 0, len: 0 }, 1, 2),
+                    node(NodeKind::Condition { test: 5, then: 6 }, 0, 1),
+                    node(NodeKind::Temperature, 4, 2),
+                    node(NodeKind::Sequence { first: 0, len: 0 }, 4, 2),
+                ]
+                .into_boxed_slice();
+                template.children = vec![1, 4].into_boxed_slice();
+            }
+            3 => {
+                let water = template
+                    .states
+                    .iter()
+                    .position(|s| {
+                        ferrumc_registry::block_state::state_id_to_block_name(s.as_u32())
+                            == Some("water")
+                    })
+                    .unwrap();
+                template.nodes =
+                    vec![node(NodeKind::Block(water as u16), u16::MAX, 0)].into_boxed_slice();
+                template.children = Box::new([]);
+            }
+            _ => unreachable!(),
+        }
+    }
+}

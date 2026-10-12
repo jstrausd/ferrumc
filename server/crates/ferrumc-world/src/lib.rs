@@ -88,3 +88,6 @@ pub use network::{
 };
 pub use packed_array::PackedArray;
 pub use paletted_container::{ContainerKind, PalettedContainer};
+
+/// Closed cold Overworld Carver producer.
+pub mod carver;

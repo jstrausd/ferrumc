@@ -5,7 +5,10 @@ use std::mem::size_of;
 use ferrumc_math::BlockPos;
 
 use super::state::{Cache, ChunkState};
-use super::{bytes, charge, fail, limit, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit};
+use super::{
+    bytes, core_charge as charge, core_fail as fail, limit, NoiseChunkCoreError as NoiseChunkError,
+    NoiseChunkErrorKind, NoiseChunkLimit,
+};
 use crate::density::bind::{self, BoundKind, BoundNode, BoundRouter, BoundView, VisitorPass};
 use crate::density::graph::{Binary, HolderOrigin, Marker, NodeKind, Unit};
 use crate::sample_work::SampleWork;
@@ -451,7 +454,7 @@ impl<'a> Cold<'a> {
                 2 * 1024 * 1024,
             )?;
             node.blended = Some(std::sync::Arc::new(
-                original.paper_build60_basis(self.work)?,
+                original.paper_build60_basis_core(self.work)?,
             ));
         }
         if let BoundKind::Original(NodeKind::Spline(root)) = node.kind {

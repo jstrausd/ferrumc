@@ -6,7 +6,10 @@ use ferrumc_registry::block_state::{
     block_default_state, block_metadata, compute_state_id, state_id_to_block_name,
 };
 
-use super::super::{charge, fail, limit, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit};
+use super::super::{
+    core_charge as charge, core_fail as fail, limit, NoiseChunkCoreError as NoiseChunkError,
+    NoiseChunkErrorKind, NoiseChunkLimit,
+};
 use crate::density::json::{self, ValueKind};
 use crate::sample_work::SampleWork;
 use crate::BlockStateId;

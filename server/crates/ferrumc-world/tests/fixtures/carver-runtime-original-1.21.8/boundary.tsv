@@ -1,0 +1,21 @@
+case	script	genuine_result
+UniformFloat.of(0.75/3f400000,1.0/3f800000).sample	nextFloat=0.0/0	0.75/3f400000
+UniformFloat.of(0.75/3f400000,1.0/3f800000).sample	nextFloat=0.99999994/3f7fffff	1.0/3f800000
+UniformFloat.of(0.7/3f333333,1.4/3fb33333).sample	nextFloat=0.0/0	0.7/3f333333
+UniformFloat.of(0.7/3f333333,1.4/3fb33333).sample	nextFloat=0.99999994/3f7fffff	1.3999999/3fb33332
+UniformFloat.of(0.8/3f4ccccd,1.3/3fa66666).sample	nextFloat=0.0/0	0.8/3f4ccccd
+UniformFloat.of(0.8/3f4ccccd,1.3/3fa66666).sample	nextFloat=0.99999994/3f7fffff	1.3/3fa66666
+UniformFloat.of(0.1/3dcccccd,0.9/3f666666).sample	nextFloat=0.0/0	0.1/3dcccccd
+UniformFloat.of(0.1/3dcccccd,0.9/3f666666).sample	nextFloat=0.99999994/3f7fffff	0.8999999/3f666665
+UniformFloat.of(-1.0/bf800000,-0.4/becccccd).sample	nextFloat=0.0/0	-1.0/bf800000
+UniformFloat.of(-1.0/bf800000,-0.4/becccccd).sample	nextFloat=0.99999994/3f7fffff	-0.40000004/beccccce
+UniformFloat.of(-0.125/be000000,0.125/3e000000).sample	nextFloat=0.0/0	-0.125/be000000
+UniformFloat.of(-0.125/be000000,0.125/3e000000).sample	nextFloat=0.99999994/3f7fffff	0.124999985/3dfffffe
+TrapezoidFloat.of(0,6,2).sample	nextFloat=0.0/0x2	0.0/0
+Mth.randomBetween(0.75,1.0)	nextFloat=0.0/0	0.75/3f400000
+TrapezoidFloat.of(0,6,2).sample	nextFloat=0.99999994/3f7fffffx2	5.9999995/40bfffff
+Mth.randomBetween(0.75,1.0)	nextFloat=0.99999994/3f7fffff	1.0/3f800000
+CaveWorldCarver.getThickness	nextFloat=max,max;nextInt(10)=1	2.9999998/403fffff
+CaveWorldCarver.getThickness	nextFloat=max,max;nextInt(10)=0;nextFloat=max,max	11.999998/413ffffe
+Mth.sin((float)(PI/2))	-	1.0/3f800000
+canyon distance_factor at max draw	nextFloat=max	1.0/3f800000

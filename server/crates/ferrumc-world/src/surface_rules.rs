@@ -285,11 +285,11 @@ impl WorldSurfaceHeights {
             .get(usize::from(local_z))
             .copied()
     }
-    const fn at(&self, local_x: usize, local_z: usize) -> i32 {
+    pub(crate) const fn at(&self, local_x: usize, local_z: usize) -> i32 {
         self.0[local_x][local_z]
     }
     /// Live update by the column driver (`Heightmap.update` result).
-    const fn set(&mut self, local_x: usize, local_z: usize, height: i32) {
+    pub(crate) const fn set(&mut self, local_x: usize, local_z: usize, height: i32) {
         self.0[local_x][local_z] = height;
     }
 }
@@ -343,3 +343,5 @@ impl SurfaceBlockInput {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) use session::RuleCoreError;

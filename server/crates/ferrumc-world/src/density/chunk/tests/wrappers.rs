@@ -88,6 +88,7 @@ fn sample(
 ) -> Result<f64, NoiseChunkError> {
     s.state
         .sample(&s.data, &s.view, root, pos, own, &mut s.work)
+        .map_err(Into::into)
 }
 fn reset_trace(s: &mut NoiseChunkSession) {
     s.work.enable_density_trace(4096);

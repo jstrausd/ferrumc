@@ -279,6 +279,41 @@ pub enum SplineSampleError<E> {
     NonFiniteResult { node: SplineNodeId, bits: u32 },
 }
 
+/// Closed shared evaluator result, before a public or private consumer adapter.
+pub(crate) enum SplineCoreError<E> {
+    Work(crate::sample_work::ChargeFault),
+    CoordinateSource {
+        coordinate: SplineCoordinateId,
+        source: E,
+    },
+    NonFiniteCoordinate {
+        coordinate: SplineCoordinateId,
+        bits: u32,
+    },
+    NonFiniteResult {
+        node: SplineNodeId,
+        bits: u32,
+    },
+}
+impl<E> SplineCoreError<E> {
+    fn into_public(self) -> SplineSampleError<E> {
+        match self {
+            Self::Work(fault) => SplineSampleError::BudgetExceeded {
+                limit: fault.into_public().limit,
+            },
+            Self::CoordinateSource { coordinate, source } => {
+                SplineSampleError::CoordinateSource { coordinate, source }
+            }
+            Self::NonFiniteCoordinate { coordinate, bits } => {
+                SplineSampleError::NonFiniteCoordinate { coordinate, bits }
+            }
+            Self::NonFiniteResult { node, bits } => {
+                SplineSampleError::NonFiniteResult { node, bits }
+            }
+        }
+    }
+}
+
 /// Immutable owned constant/multipoint DAG with original float32 diagnostics.
 /// Cloning shares one immutable graph; input slices are never retained.
 #[derive(Debug, Clone)]
@@ -375,14 +410,14 @@ impl CubicSpline {
         evaluate::sample(&self.graph, budget, coordinate)
     }
 
-    pub(crate) fn sample_shared<E>(
+    pub(crate) fn sample_shared_core<E>(
         &self,
         work: &mut crate::sample_work::SampleWork,
         coordinate: &mut impl FnMut(
             SplineCoordinateId,
             &mut crate::sample_work::SampleWork,
         ) -> Result<f32, E>,
-    ) -> Result<f32, SplineSampleError<E>> {
+    ) -> Result<f32, SplineCoreError<E>> {
         evaluate::sample_shared(&self.graph, work, coordinate)
     }
 

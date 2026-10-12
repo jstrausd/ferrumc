@@ -340,3 +340,39 @@ out of scope; no performance claim is made.
 ## Invariants
 
 See `INVARIANTS.md` in this directory.
+
+## Cold original overworld Carvers
+
+`carver::SeededCarvers` binds the closed overworld alphabet and original
+replaceability tag. `prepare_run` admits identities, the private source halo,
+native capacities and cumulative producer work before creating fresh Paper
+Noise, Aquifer and selector state. `carve_chunk` consumes that run once and
+publishes an independent `CarvedChunkBuffer` only on complete success. Every
+refusal first empties the output; the input Surface remains Published and
+unchanged. Preliminary corners retain the caller-trusted provenance contract.
+
+Every one of the 289 source queries executes in X-outer/Z-inner order before
+its constant original carver list is used. Actual lazy fix-ups interleave with
+that history through the same surface-rule evaluator as Stored evaluation.
+Only a biome memo miss calls the concrete private `DirectCarver` provider;
+temperature shares that memo. Noise caches, selector history and Aquifer caches
+and stale Lava flags persist through the whole run. Each fix-up refreshes only
+the rule column/block context. The private derived halo and quart Y −17 are
+unclamped; public coordinate and budget domains retain their existing caps.
+
+Noise and selector work use a private checked three-u64 cumulative meter.
+Bounded segments are bookkeeping; they cannot reset producers or narrow a
+fault. Public counters and errors retain their public contracts. The runtime
+preserves original Legacy geometry RNG, f32 arithmetic, SIN rawbits, mask and
+write order, and live `WORLD_SURFACE_WG` rescans. The SIN table is an immutable
+262144-byte static imported mechanically from all 65536 genuine original bits.
+Fluid output is a declared set policy; the fixture retains original ordered,
+duplicate postprocessing evidence for later consumers.
+
+The [Carver reference](tests/reference/carver-runtime/README.md) describes the
+full producer replay, labelled controls, native layouts and cold allocator
+checks. The very large finite Aquifer RNG period bound is counter accounting,
+not a timing guarantee. Original unmetered Legacy geometry rejections and
+shuffling during earlier immutable router binding remain explicitly scoped
+policies. This producer does not activate natural-world generation, warm
+thread history, features, persistence, lighting, or App behavior.

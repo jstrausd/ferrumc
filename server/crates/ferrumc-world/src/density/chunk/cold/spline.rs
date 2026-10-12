@@ -1,7 +1,8 @@
 //! Rebuild actual mapped spline diagnostics with retained source-array identity.
 
 use super::super::{
-    bytes, charge, fail, limit, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit,
+    bytes, core_charge as charge, core_fail as fail, limit, NoiseChunkCoreError as NoiseChunkError,
+    NoiseChunkErrorKind, NoiseChunkLimit,
 };
 use crate::density::bind::{BoundKind, BoundNode, BoundSpline};
 use crate::density::graph::{NodeKind, Point};

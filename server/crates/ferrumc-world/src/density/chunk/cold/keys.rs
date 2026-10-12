@@ -3,7 +3,8 @@
 use std::mem::size_of;
 
 use super::super::{
-    bytes, charge, fail, limit, NoiseChunkError, NoiseChunkErrorKind, NoiseChunkLimit,
+    bytes, core_charge as charge, core_fail as fail, limit, NoiseChunkCoreError as NoiseChunkError,
+    NoiseChunkErrorKind, NoiseChunkLimit,
 };
 use crate::density::bind::{BoundKind, BoundNode};
 use crate::density::graph::{NodeKind, Unit};

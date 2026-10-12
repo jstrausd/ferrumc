@@ -605,3 +605,5 @@ fn session_refusals_inside_the_loop_are_typed_and_carry_their_block() {
         SurfaceColumnRefusalCategory::Consistency
     );
 }
+
+mod rr10;

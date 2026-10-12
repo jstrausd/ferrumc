@@ -8,7 +8,7 @@ use std::sync::Arc;
 use ferrumc_registry::biome::{BiomeParametersResourceId, BiomeResourceId};
 
 use crate::density::{ClimateSample, NoiseChunkError};
-use crate::sample_work::SampleWork;
+use crate::sample_work::{CarverCumulativeMeter, ChargeFault, CoreError, SampleWork};
 
 mod arrays;
 mod build;
@@ -112,6 +112,24 @@ impl From<crate::sample_work::SampleWorkExceeded> for BiomeError {
             used: error.used,
         })
     }
+}
+
+pub(crate) type BiomeCoreError = CoreError<BiomeError>;
+impl From<BiomeError> for BiomeCoreError {
+    fn from(error: BiomeError) -> Self {
+        Self::Error(error)
+    }
+}
+fn core_charge(work: &mut SampleWork) -> Result<(), BiomeCoreError> {
+    work.charge_core().map_err(|fault| match fault {
+        ChargeFault::Public { limit, used } => {
+            CoreError::Error(fail(BiomeErrorKind::WorkExceeded { limit, used }))
+        }
+        fault @ ChargeFault::Carver { .. } => CoreError::Work(fault),
+    })
+}
+fn core_fail(kind: BiomeErrorKind) -> BiomeCoreError {
+    fail(kind).into()
 }
 
 /// Checked work allowance for one complete immutable tree construction.
@@ -278,6 +296,28 @@ pub struct BiomeSelectionSession {
     poisoned: bool,
 }
 impl BiomeSelectionSession {
+    #[cfg(test)]
+    pub(crate) fn carver_native_tree(&self) -> (usize, usize) {
+        (self.tree.retained_bytes(), Arc::strong_count(&self.tree))
+    }
+    pub(crate) fn new_with_carver_meter(
+        tree: Arc<BiomeTree>,
+        meter: CarverCumulativeMeter,
+    ) -> Self {
+        Self {
+            tree,
+            last: None,
+            work: SampleWork::with_carver_meter(meter),
+            poisoned: false,
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn carver_meter_mut(&mut self) -> &mut crate::sample_work::CarverCumulativeMeter {
+        self.work.carver_meter_mut()
+    }
+    pub(crate) fn carver_meter(&self) -> &CarverCumulativeMeter {
+        self.work.carver_meter()
+    }
     /// Starts deliberately cold with the chosen aggregate allowance.
     pub fn new(tree: Arc<BiomeTree>, allowance: BiomeWorkBudget) -> Self {
         Self {
@@ -306,10 +346,16 @@ impl BiomeSelectionSession {
     /// Runs the original strict tree search using retained leaf history.
     /// Failure publishes no new leaf and poisons the session.
     pub fn select(&mut self, target: BiomeClimateTarget) -> Result<BiomeSelection, BiomeError> {
+        self.select_core(target).map_err(CoreError::into_public)
+    }
+    pub(crate) fn select_core(
+        &mut self,
+        target: BiomeClimateTarget,
+    ) -> Result<BiomeSelection, BiomeCoreError> {
         if self.poisoned {
-            return Err(fail(BiomeErrorKind::Poisoned));
+            return Err(core_fail(BiomeErrorKind::Poisoned));
         }
-        let result = search::select(&self.tree, target, self.last, &mut self.work);
+        let result = search::select_core(&self.tree, target, self.last, &mut self.work);
         match result {
             Ok((node, selection)) => {
                 self.last = Some(node);
@@ -357,3 +403,10 @@ fn charge(work: &mut SampleWork) -> Result<(), BiomeError> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+impl BiomeSelectionSession {
+    pub(crate) fn carver_history(&self) -> (Option<u16>, bool) {
+        (self.last, self.poisoned)
+    }
+}

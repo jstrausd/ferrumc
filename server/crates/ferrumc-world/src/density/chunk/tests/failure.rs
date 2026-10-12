@@ -246,7 +246,7 @@ fn one_shared_meter_refuses_exact_next_operation_without_partial_output() {
             op,
             Operation::Climate | Operation::Surface | Operation::Driver
         ) {
-            assert!(short.state.lifecycle == Lifecycle::Poisoned);
+            assert_eq!(short.state.lifecycle, Lifecycle::Poisoned);
             let old = fingerprint(&short);
             assert!(short
                 .sample_climate(ClimateQuartPos::new(0, 0, 0).unwrap())
@@ -257,7 +257,7 @@ fn one_shared_meter_refuses_exact_next_operation_without_partial_output() {
             assert!(short.sample_chunk_densities().is_err());
             assert_eq!(fingerprint(&short), old);
             short.reset(budget()).unwrap();
-            assert!(short.state.lifecycle == Lifecycle::Fresh);
+            assert_eq!(short.state.lifecycle, Lifecycle::Fresh);
         }
     }
 }
@@ -304,11 +304,11 @@ fn surface_threshold_sentinel_capacity_hits_and_failure_publication() {
         }
     ));
     assert_eq!(s.surface.len, MAX_SURFACE_COLUMNS);
-    assert!(s.state.lifecycle == Lifecycle::Poisoned);
+    assert_eq!(s.state.lifecycle, Lifecycle::Poisoned);
     let mut s = probe(vec![(original(NodeKind::Constant(f64::NAN)), "initial")], 0);
     assert!(s.preliminary_surface_level(BlockPos::new(0, 0, 0)).is_err());
     assert_eq!(s.surface.len, 0);
-    assert!(s.state.lifecycle == Lifecycle::Poisoned);
+    assert_eq!(s.state.lifecycle, Lifecycle::Poisoned);
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn climate_float_overflow_reports_original_axis_and_poison() {
     assert!(
         matches!(error.kind(),DensitySampleErrorKind::NonFiniteCoordinate {bits} if *bits==f32::INFINITY.to_bits())
     );
-    assert!(s.state.lifecycle == Lifecycle::Poisoned);
+    assert_eq!(s.state.lifecycle, Lifecycle::Poisoned);
 }
 
 #[test]
@@ -360,14 +360,14 @@ fn private_driver_phase_admission_precedes_every_mutation() {
     use crate::density::chunk::state::DriverPhase;
     type Request = fn(&mut NoiseChunkSession) -> Result<(), NoiseChunkError>;
     let requests: [Request; 8] = [
-        |s| s.initialize_driver(),
-        |s| s.fill_slice(true, 0),
-        |s| s.fill_slice(false, 1),
-        |s| s.select_cell(0, 0),
-        |s| s.update_y(0.5),
-        |s| s.update_x(0.5),
-        |s| s.update_z(0.5),
-        |s| s.swap_slices(),
+        |s| s.initialize_driver().map_err(Into::into),
+        |s| s.fill_slice(true, 0).map_err(Into::into),
+        |s| s.fill_slice(false, 1).map_err(Into::into),
+        |s| s.select_cell(0, 0).map_err(Into::into),
+        |s| s.update_y(0.5).map_err(Into::into),
+        |s| s.update_x(0.5).map_err(Into::into),
+        |s| s.update_z(0.5).map_err(Into::into),
+        |s| s.swap_slices().map_err(Into::into),
     ];
     let mut s = router("minecraft:nether", 0)
         .fresh_paper_noise_chunk(ChunkPos::ORIGIN, budget())
@@ -436,7 +436,7 @@ fn private_driver_phase_admission_precedes_every_mutation() {
     s.update_x(0.5).unwrap();
     s.update_z(0.5).unwrap();
     s.swap_slices().unwrap();
-    assert!(s.state.driver_phase == DriverPhase::NeedAdvance);
+    assert_eq!(s.state.driver_phase, DriverPhase::NeedAdvance);
     let before = fingerprint(&s);
     assert!(matches!(
         s.sample_material().unwrap_err().kind(),

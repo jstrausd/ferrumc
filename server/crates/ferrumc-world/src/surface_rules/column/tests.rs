@@ -1130,3 +1130,7 @@ pub(super) fn heights_text(heights: &WorldSurfaceHeights) -> String {
 pub(super) fn column_pos(chunk: ChunkPos, lx: u8, lz: u8) -> SurfaceColumnPos {
     SurfaceColumnPos::new(chunk, lx, lz).unwrap()
 }
+
+mod carver_runtime;
+
+mod rr10_allocation;

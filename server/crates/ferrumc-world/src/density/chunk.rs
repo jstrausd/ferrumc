@@ -11,7 +11,7 @@ use super::{
     ClimateAxis, ClimateQuartPos, ClimateSample, DensitySampleError, DensitySampleErrorKind,
     NoiseGeometry, SeededRouter,
 };
-use crate::sample_work::SampleWork;
+use crate::sample_work::{ChargeFault, CoreError, SampleWork};
 use crate::{BlockStateId, WorldSeed};
 
 mod cold;
@@ -21,6 +21,7 @@ mod material;
 mod state;
 
 // GEN-05.10 derives its closed state alphabet from the material producer.
+pub(crate) use material::CarverAquifer;
 pub(crate) use material::{material_alphabet, MATERIAL_ALPHABET_STATES};
 use state::{ChunkState, Lifecycle};
 
@@ -132,6 +133,61 @@ impl From<crate::sample_work::SampleWorkExceeded> for NoiseChunkError {
             used: value.used,
         })
     }
+}
+
+pub(crate) type NoiseChunkCoreError = CoreError<NoiseChunkError>;
+impl From<NoiseChunkError> for NoiseChunkCoreError {
+    fn from(error: NoiseChunkError) -> Self {
+        Self::Error(error)
+    }
+}
+impl From<DensitySampleError> for NoiseChunkCoreError {
+    fn from(error: DensitySampleError) -> Self {
+        Self::Error(error.into())
+    }
+}
+impl From<super::evaluate::DensityCoreError> for NoiseChunkCoreError {
+    fn from(error: super::evaluate::DensityCoreError) -> Self {
+        match error {
+            CoreError::Error(error) => Self::Error(error.into()),
+            CoreError::Work(fault) => Self::Work(fault),
+        }
+    }
+}
+impl From<ChargeFault> for NoiseChunkCoreError {
+    fn from(fault: ChargeFault) -> Self {
+        match fault {
+            ChargeFault::Public { limit, used } => {
+                Self::Error(fail(NoiseChunkErrorKind::WorkExceeded { limit, used }))
+            }
+            fault @ ChargeFault::Carver { .. } => Self::Work(fault),
+        }
+    }
+}
+#[cfg(test)]
+impl NoiseChunkCoreError {
+    pub(super) fn kind(&self) -> &NoiseChunkErrorKind {
+        match self {
+            Self::Error(error) => error.kind(),
+            Self::Work(_) => unreachable!("private work fault requires exact run adapter"),
+        }
+    }
+}
+
+// Historical public-mode test helpers retain their original error assertions.
+// This conversion is absent from production and cannot enter a private run.
+#[cfg(test)]
+impl From<NoiseChunkCoreError> for NoiseChunkError {
+    fn from(error: NoiseChunkCoreError) -> Self {
+        error.into_public()
+    }
+}
+
+fn core_fail(kind: NoiseChunkErrorKind) -> NoiseChunkCoreError {
+    fail(kind).into()
+}
+fn core_charge(work: &mut SampleWork) -> Result<(), NoiseChunkCoreError> {
+    work.charge_core().map_err(Into::into)
 }
 
 /// An explicitly admitted aggregate budget shared until successful reset.
@@ -279,6 +335,28 @@ pub struct NoiseChunkSession {
     biome_phase: Lifecycle,
 }
 impl SeededRouter {
+    pub(crate) fn fresh_carver_noise_chunk(
+        &self,
+        chunk: ChunkPos,
+        meter: crate::sample_work::CarverCumulativeMeter,
+    ) -> Result<NoiseChunkSession, NoiseChunkCoreError> {
+        NoiseChunkSession::new_with_work(
+            Arc::clone(&self.data),
+            chunk,
+            SampleWork::with_carver_meter(meter),
+        )
+    }
+    pub(crate) fn carver_geometry(&self) -> NoiseGeometry {
+        self.data.metadata.geometry
+    }
+    #[cfg(test)]
+    pub(crate) fn carver_test_router_geometry(&mut self) {
+        Arc::get_mut(&mut self.data)
+            .unwrap()
+            .metadata
+            .geometry
+            .min_y += 1;
+    }
     /// Binds a complete fresh 16×16 Paper-noise chunk, without blending,
     /// structures, retrogen or height-accessor clamping. Construction and every
     /// later query share this single work allowance until successful reset.
@@ -291,14 +369,42 @@ impl SeededRouter {
     }
 }
 impl NoiseChunkSession {
+    #[cfg(test)]
+    pub(crate) fn carver_meter_mut(&mut self) -> &mut crate::sample_work::CarverCumulativeMeter {
+        self.work.carver_meter_mut()
+    }
+    pub(crate) fn carver_meter(&self) -> &crate::sample_work::CarverCumulativeMeter {
+        self.work.carver_meter()
+    }
+    pub(crate) fn sample_carver_climate(
+        &mut self,
+        request: crate::carver::CarverClimateQuart,
+    ) -> Result<ClimateSample, NoiseChunkCoreError> {
+        if request.center() != self.chunk {
+            return Err(core_fail(NoiseChunkErrorKind::InvalidGraph));
+        }
+        self.state.require_query("sample_carver_climate")?;
+        let result = self.climate_sample(request.origin());
+        if result.is_err() {
+            self.state.lifecycle = Lifecycle::Poisoned;
+        }
+        result
+    }
     fn new(
         data: Arc<BoundRouter>,
         chunk: ChunkPos,
         budget: NoiseChunkWorkBudget,
     ) -> Result<Self, NoiseChunkError> {
+        Self::new_with_work(data, chunk, SampleWork::new(budget.0 as usize))
+            .map_err(CoreError::into_public)
+    }
+    fn new_with_work(
+        data: Arc<BoundRouter>,
+        chunk: ChunkPos,
+        mut work: SampleWork,
+    ) -> Result<Self, NoiseChunkCoreError> {
         admit_chunk(chunk)?;
         let geometry = data.metadata.geometry;
-        let mut work = SampleWork::new(budget.0 as usize);
         let state = ChunkState::new(&data, chunk, geometry, &mut work)?;
         let (view, state, fields, material, climate) = cold::bind(&data, state, &mut work)?;
         Ok(Self {
@@ -338,9 +444,10 @@ impl NoiseChunkSession {
     /// A failure poisons this session and publishes no partial density array.
     pub fn sample_chunk_densities(&mut self) -> Result<ChunkDensitySamples, NoiseChunkError> {
         self.state
-            .require(Lifecycle::Fresh, "sample_chunk_densities")?;
+            .require(Lifecycle::Fresh, "sample_chunk_densities")
+            .map_err(CoreError::into_public)?;
         self.state.lifecycle = Lifecycle::Running;
-        let result = self.drive();
+        let result = self.drive().map_err(CoreError::into_public);
         self.state.lifecycle = if result.is_ok() {
             Lifecycle::Complete
         } else {
@@ -354,9 +461,10 @@ impl NoiseChunkSession {
     /// partial states or fluid flags. Private material caches live for this run.
     pub fn sample_chunk_materials(&mut self) -> Result<ChunkMaterialSamples, NoiseChunkError> {
         self.state
-            .require(Lifecycle::Fresh, "sample_chunk_materials")?;
+            .require(Lifecycle::Fresh, "sample_chunk_materials")
+            .map_err(CoreError::into_public)?;
         self.state.lifecycle = Lifecycle::Running;
-        let result = self.drive_materials();
+        let result = self.drive_materials().map_err(CoreError::into_public);
         self.state.lifecycle = if result.is_ok() {
             Lifecycle::Complete
         } else {
@@ -368,8 +476,10 @@ impl NoiseChunkSession {
     /// `i32::MAX` when no density exceeds the original strict threshold.
     pub fn preliminary_surface_level(&mut self, pos: BlockPos) -> Result<i32, NoiseChunkError> {
         check_position(pos)?;
-        self.state.require_query("preliminary_surface_level")?;
-        let result = self.preliminary(pos);
+        self.state
+            .require_query("preliminary_surface_level")
+            .map_err(CoreError::into_public)?;
+        let result = self.preliminary(pos).map_err(CoreError::into_public);
         if result.is_err() {
             self.state.lifecycle = Lifecycle::Poisoned;
         }
@@ -380,8 +490,12 @@ impl NoiseChunkSession {
         &mut self,
         pos: ClimateQuartPos,
     ) -> Result<ClimateSample, NoiseChunkError> {
-        self.state.require_query("sample_climate")?;
-        let result = self.climate_sample(pos.block_origin());
+        self.state
+            .require_query("sample_climate")
+            .map_err(CoreError::into_public)?;
+        let result = self
+            .climate_sample(pos.block_origin())
+            .map_err(CoreError::into_public);
         if result.is_err() {
             self.state.lifecycle = Lifecycle::Poisoned;
         }
@@ -396,7 +510,8 @@ impl NoiseChunkSession {
     }
     pub(crate) fn begin_biome_array(&mut self) -> Result<(), NoiseChunkError> {
         self.state
-            .require(Lifecycle::Fresh, "sample_chunk_biomes")?;
+            .require(Lifecycle::Fresh, "sample_chunk_biomes")
+            .map_err(CoreError::into_public)?;
         if self.biome_phase != Lifecycle::Fresh {
             return Err(fail(NoiseChunkErrorKind::Lifecycle {
                 operation: "sample_chunk_biomes",
@@ -418,21 +533,26 @@ impl NoiseChunkSession {
     // compares f64 directly; a quantized/f32 ClimateSample changes thresholds.
     pub(crate) fn cached_biome_erosion(&mut self, pos: BlockPos) -> Result<f64, NoiseChunkError> {
         check_position(pos)?;
-        self.state.require_query("cached_biome_erosion")?;
-        let result = self.state.sample(
-            &self.data,
-            &self.view,
-            self.climate[ClimateAxis::Erosion as usize],
-            pos,
-            false,
-            &mut self.work,
-        );
+        self.state
+            .require_query("cached_biome_erosion")
+            .map_err(CoreError::into_public)?;
+        let result = self
+            .state
+            .sample(
+                &self.data,
+                &self.view,
+                self.climate[ClimateAxis::Erosion as usize],
+                pos,
+                false,
+                &mut self.work,
+            )
+            .map_err(CoreError::into_public);
         if result.is_err() {
             self.state.lifecycle = Lifecycle::Poisoned;
         }
         result
     }
-    fn preliminary(&mut self, pos: BlockPos) -> Result<i32, NoiseChunkError> {
+    fn preliminary(&mut self, pos: BlockPos) -> Result<i32, NoiseChunkCoreError> {
         let x = (pos.x() >> 2) * 4;
         let z = (pos.z() >> 2) * 4;
         let key = pack_column(x, z);
@@ -444,7 +564,7 @@ impl NoiseChunkSession {
         let mut y = geometry.min_y() + geometry.height().cast_signed();
         let mut level = i32::MAX;
         while y >= geometry.min_y() {
-            charge(&mut self.work)?;
+            core_charge(&mut self.work)?;
             if self.state.sample(
                 &self.data,
                 &self.view,
@@ -459,22 +579,27 @@ impl NoiseChunkSession {
             }
             y -= geometry.cell_height().cast_signed();
         }
-        charge(&mut self.work)?;
+        core_charge(&mut self.work)?;
         self.surface.insert(key, level)?;
         Ok(level)
     }
-    fn climate_sample(&mut self, pos: BlockPos) -> Result<ClimateSample, NoiseChunkError> {
+    fn climate_sample(&mut self, pos: BlockPos) -> Result<ClimateSample, NoiseChunkCoreError> {
         let mut values = [0.0_f32; 6];
         for axis in ClimateAxis::ALL {
             let value = &mut values[axis as usize];
-            *value = self.state.sample(
+            let sampled = self.state.sample(
                 &self.data,
                 &self.view,
                 self.climate[axis as usize],
                 pos,
                 false,
                 &mut self.work,
-            )? as f32;
+            )?;
+            // The root owns its charges; conversion needs its own admission.
+            core_charge(&mut self.work)?;
+            *value = sampled as f32;
+            #[cfg(test)]
+            tests::precharge::observe_conversion(value.to_bits());
             if !value.is_finite() {
                 return Err(DensitySampleError {
                     resource: self.resource().resource_location(),
@@ -487,7 +612,6 @@ impl NoiseChunkSession {
                 }
                 .into());
             }
-            charge(&mut self.work)?;
         }
         Ok(ClimateSample {
             values,
@@ -509,9 +633,9 @@ impl SurfaceCache {
             len: 0,
         }
     }
-    fn get(&self, key: u64, work: &mut SampleWork) -> Result<Option<i32>, NoiseChunkError> {
+    fn get(&self, key: u64, work: &mut SampleWork) -> Result<Option<i32>, NoiseChunkCoreError> {
         for (i, &prior) in self.keys[..self.len].iter().enumerate() {
-            charge(work)?;
+            core_charge(work)?;
             if prior == key {
                 return Ok(Some(self.values[i]));
             }
@@ -604,3 +728,46 @@ fn output_index(chunk: ChunkPos, geometry: NoiseGeometry, pos: BlockPos) -> Opti
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+impl NoiseChunkSession {
+    pub(crate) fn observe_climate_conversions<T>(
+        run: impl FnOnce() -> T,
+    ) -> (T, (usize, [u32; 6])) {
+        let (result, conversions) = tests::precharge::observe(run);
+        (result, (conversions.len, conversions.bits))
+    }
+    pub(crate) fn carver_native_categories(&self) -> [usize; 6] {
+        [
+            self.state.graph_bytes,
+            self.state.cache_bytes,
+            self.state.scratch_bytes,
+            std::mem::size_of_val(&*self.surface.keys)
+                + std::mem::size_of_val(&*self.surface.values),
+            Arc::strong_count(&self.data),
+            self.data.definitions.len() + self.data.registered_definitions.len(),
+        ]
+    }
+    pub(crate) fn carver_history(&self) -> String {
+        format!(
+            "{:?}|{}|{:?}|{:?}",
+            (
+                self.chunk,
+                self.fields,
+                self.material,
+                self.climate,
+                self.biome_phase
+            ),
+            self.state.carver_history(),
+            (&self.surface.keys, &self.surface.values),
+            self.surface.len
+        )
+    }
+}
+
+#[cfg(test)]
+impl NoiseChunkSession {
+    pub(crate) fn carver_test_geometry(&mut self) {
+        self.state.geometry.min_y += 1;
+    }
+}

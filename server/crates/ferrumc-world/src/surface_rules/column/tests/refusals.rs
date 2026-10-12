@@ -201,7 +201,7 @@ fn seed_precedes_settings_when_both_mismatch() {
 /// Replay class `refused:InconsistentResolver(Source)` (group
 /// `policy/single_biome_surface/0`): only the typed refusal and `Empty`.
 #[test]
-fn refused_source_group_yields_only_the_typed_refusal() {
+pub(super) fn refused_source_group_yields_only_the_typed_refusal() {
     let group = fixture()
         .groups
         .iter()
@@ -288,7 +288,7 @@ fn resolver_kind(center: ChunkPos) -> StoredBiomeErrorKind {
 /// refuses `ChunkOutOfRange`, the GEN-05.8 resolver `CoordinateDomain`;
 /// `build_chunk` is never reached and the buffer stays `Empty`.
 #[test]
-fn refused_centre_outside_domain_is_refused_by_the_producers() {
+pub(super) fn refused_centre_outside_domain_is_refused_by_the_producers() {
     let group = fixture()
         .groups
         .iter()
