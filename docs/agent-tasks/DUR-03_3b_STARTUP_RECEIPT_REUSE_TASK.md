@@ -23,6 +23,14 @@ before editing. Preserve its readonly copy and all previous logs/freezes.
 Use the Root-supplied current-main archive and its baseline manifest under
 `.codex-tmp/dur03_3b-root-base/` for private builds. Only Root integrates.
 
+Root baseline pin correction after intake: the actual `base.freeze.json` SHA256
+is `15bd5568c69ce57f0df68365a2f600f26f7f6deea3a4b4de6fce52eb30ea5b33`,
+accepted main `55f362f6884ca3c4ab5e51cce545c3a5fb11d364`, 1,438 files freshly
+reverified. Root's initial dispatch mistakenly reported the archive's
+`.dockerignore` hash `35e2556e39d97afafa314e42c58ccfcc8791d69d655f403ffde8b8de91fa86f8`
+as the manifest hash. No baseline bytes changed; the corrected pin is binding.
+Preserve the first intake report and proceed on this exact supplied archive.
+
 Binding input pins:
 
 - Original contract SHA256 `2edfc588fd8d7e96753f6beb4bb7c2ad50a064e4c266681ab5ff94550c4342ab`.
