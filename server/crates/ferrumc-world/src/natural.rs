@@ -70,7 +70,11 @@ struct Binding {
 /// budgets. Revision 1 omits placed features, trees, structures, fluid ticks and
 /// full lighting; it is a terrain preview. Clones share immutable seed bindings.
 #[derive(Clone)]
-pub struct NaturalWorldGenerator(Arc<Binding>, Option<Arc<crate::grass::GrassPreview>>);
+pub struct NaturalWorldGenerator(
+    Arc<Binding>,
+    Option<Arc<crate::grass::GrassPreview>>,
+    Option<Arc<crate::trees::TreePreview>>,
+);
 impl std::fmt::Debug for NaturalWorldGenerator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NaturalWorldGenerator")
@@ -144,6 +148,7 @@ impl NaturalWorldGenerator {
                 carvers,
             }),
             None,
+            None,
         ))
     }
     /// Binds revision 2: original plains/forest short-grass patches with isolated sources.
@@ -155,10 +160,20 @@ impl NaturalWorldGenerator {
         generator.1 = Some(Arc::new(crate::grass::GrassPreview::new()?));
         Ok(generator)
     }
+    /// Binds revision 3: original undecorated oak/birch shape subset and short grass.
+    ///
+    /// Full selectors, decorations and other tree species remain outside this preview.
+    pub fn with_tree_preview(seed: WorldSeed) -> Result<Self, WorldError> {
+        let mut generator = Self::with_grass_preview(seed)?;
+        generator.2 = Some(Arc::new(crate::trees::TreePreview::new()?));
+        Ok(generator)
+    }
     /// Returns the selected immutable terrain-preview revision identity.
     #[must_use]
     pub fn identity(&self) -> GenerationIdentity {
-        if self.1.is_some() {
+        if self.2.is_some() {
+            GenerationIdentity::natural_overworld_with_trees(self.0.seed)
+        } else if self.1.is_some() {
             GenerationIdentity::natural_overworld_with_grass(self.0.seed)
         } else {
             GenerationIdentity::natural_overworld(self.0.seed)
@@ -166,10 +181,24 @@ impl NaturalWorldGenerator {
     }
     /// Generates a complete real chunk or returns the refusing producer's error.
     pub fn try_generate_chunk(&self, center: ChunkPos) -> Result<Chunk, WorldError> {
+        if let Some(trees) = &self.2 {
+            return trees.generate(
+                self,
+                self.0.seed,
+                center,
+                self.1.as_deref().ok_or_else(|| {
+                    refusal(NaturalGenerationStage::Features, "missing tree raw binding")
+                })?,
+            );
+        }
         if let Some(grass) = &self.1 {
             return grass.generate(self, self.0.seed, center);
         }
         self.generate_raw_chunk(center)
+    }
+    #[cfg(test)]
+    pub(crate) fn tree_preview(&self) -> Option<&crate::trees::TreePreview> {
+        self.2.as_deref()
     }
     #[cfg(test)]
     pub(crate) fn grass_preview(&self) -> Option<&crate::grass::GrassPreview> {
@@ -380,6 +409,10 @@ impl RuntimeWorldGenerator {
     /// Selects the explicit revision-2 original short-grass subset preview.
     pub fn natural_with_grass(seed: WorldSeed) -> Result<Self, WorldError> {
         NaturalWorldGenerator::with_grass_preview(seed).map(Self::Natural)
+    }
+    /// Selects the separately versioned oak/birch shape-and-grass preview.
+    pub fn natural_with_trees(seed: WorldSeed) -> Result<Self, WorldError> {
+        NaturalWorldGenerator::with_tree_preview(seed).map(Self::Natural)
     }
     /// Returns the selected complete baseline identity.
     #[must_use]

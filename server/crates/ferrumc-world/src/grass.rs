@@ -213,7 +213,7 @@ impl Random {
         Ok(())
     }
 }
-trait Region {
+pub(crate) trait Region {
     fn height(&mut self, x: i32, z: i32) -> Result<i32, WorldError>;
     fn biome(&mut self, pos: BlockPos) -> Result<BiomeResourceId, WorldError>;
     fn relevant(&self, pos: BlockPos) -> bool;
@@ -282,7 +282,7 @@ impl GrassPreview {
             cache: Mutex::new(Cache::default()),
         })
     }
-    fn raw(
+    pub(crate) fn raw(
         &self,
         generator: &NaturalWorldGenerator,
         pos: ChunkPos,
@@ -309,7 +309,7 @@ impl GrassPreview {
         cache.raw.push_back((pos, Arc::clone(&chunk)));
         Ok(chunk)
     }
-    fn biome(
+    pub(crate) fn biome(
         &self,
         generator: &NaturalWorldGenerator,
         zoom: BiomeZoom,
@@ -352,6 +352,30 @@ impl GrassPreview {
         }
         cache.biomes.push_back((chunk, array));
         Ok(result)
+    }
+    #[cfg(test)]
+    pub(crate) fn clear_raw_caches(&self) {
+        let mut cache = self.cache.lock().unwrap();
+        cache.raw.clear();
+        cache.biomes.clear();
+    }
+    pub(crate) fn apply_source(
+        &self,
+        generator: &NaturalWorldGenerator,
+        seed: WorldSeed,
+        source: ChunkPos,
+        region: &mut impl Region,
+    ) -> Result<(), WorldError> {
+        place(
+            &self.catalog,
+            seed,
+            source,
+            [generator.grass_plain_count(source)?, 2],
+            region,
+        )
+    }
+    pub(crate) const fn grass_state(&self) -> BlockStateId {
+        self.catalog.grass
     }
     pub(crate) fn generate(
         &self,

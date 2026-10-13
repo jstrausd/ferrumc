@@ -418,3 +418,47 @@ are combined deterministically. A bounded immutable terrain cache amortizes
 adjacent requests, but first generation needs up to nine terrain chunks.
 Revision 1 and its saved baseline remain unchanged. This subset does not include
 other plants, trees, placed-feature ores, structures or mobs.
+
+## Oak/birch subset preview (revision 3)
+
+`NaturalWorldGenerator::with_tree_preview` and `RuntimeWorldGenerator::natural_with_trees`
+select algorithm 2 revision 3. Earlier revisions retain their baseline and stored
+identity; edited terrain cannot silently migrate between these identities.
+
+This preview adds straight oak and birch trunks/crowns using original Minecraft
+1.21.8 Paper build 60 configured `TreeFeature`, `StraightTrunkPlacer`, `BlobFoliagePlacer`
+and `TwoLayersFeatureSize` logic. It preserves original Java hash-set bucket
+chronology, leaf distances, configured RNG draws and original all-state predicates.
+Placed features use original global step-9 indices 24/25/52 followed by accepted
+short-grass indices 54/59. Count-extra, square offsets, water-depth filter,
+`OCEAN_FLOOR` (blocksMotion) heights, sapling guards and biome membership follow
+original order. Original selector floats are consumed; fancy/fallen branches are
+skipped. Bees and leaf-litter decorators are omitted without their draws. Thus
+this is an explicit subset with different downstream RNG from the full Paper route.
+
+Each source owns a complete cold 3x3 CARVERS region. All source-local tree writes,
+including neighboring crowns, update its live history before grass placement.
+Different sources remain isolated. Target projection merges nine complete source
+outputs with logs above soil above leaves above grass; equal ranks use canonical
+source X/Z order. This protects trunks from independent neighboring crowns and is
+a deliberate scheduling policy. Static leaf distances follow their own source
+history; no cross-source or gameplay leaf ticking is claimed. Raw/biome cache
+capacity remains 32/64; tree cache retains 32 immutable source diffs of at most
+4096 cells each (at most 2 MiB scalar diff payload). Caches never observe edits.
+
+Each kernel owns a 7x12x7 complete region (588 states), a bounded 65536-draw RNG,
+and checked set/shape/distance limits. Frozen facts enumerate 27946 original
+states; 628 closed terrain/log/leaf states are admitted. Unknown/reactive inputs
+refuse. Original short-grass removal and snowy-soil flag updates are applied;
+unsupported `SnowLayer` removal refuses the whole candidate without publication.
+The updated first face state feeds the opposite face. Admitted transitions commute
+for final states and leaf-tick sets, so no original tick ordering is claimed.
+Fluid/falling-block/farmland delayed ticks and full lighting remain unimplemented.
+
+The [original fixture record](tests/fixtures/tree-original-1.21.8/SOURCE.md)
+contains reproducible actual-JAR tests: 1260 configured cases, 576 original-method
+placement cases for this explicitly modified selector subset and all-state facts.
+Seed 0 in the nine columns around origin yields 177 log cells and 1812 leaf cells;
+complete chunks remain identical after cache eviction and reverse request order.
+The preview omits spruce/jungle/acacia/dark-oak/mangrove/cherry, fancy/fallen trees,
+decorators, structures, most vegetation and full Survival.

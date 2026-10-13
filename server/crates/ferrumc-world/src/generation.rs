@@ -97,7 +97,7 @@ impl GenerationDimension {
 /// Complete supported identity of a reproducible generated chunk baseline.
 ///
 /// Supports Minecraft 1.21.8 / Overworld, with distinct flat revision 1 and
-/// natural terrain preview revisions 1 and 2. Decode rejects other metadata
+/// natural terrain preview revisions 1, 2 and 3. Decode rejects other metadata
 /// explicitly. Seeds are retained even when an algorithm is seed-independent.
 ///
 /// This is a value contract. It does not persist the identity or guard the
@@ -150,6 +150,15 @@ impl GenerationIdentity {
         identity
     }
 
+    /// Selects separately versioned original oak/birch shapes and short grass.
+    ///
+    /// Revision 3 has an explicit isolated-source selector/decorator subset policy.
+    #[must_use]
+    pub const fn natural_overworld_with_trees(seed: WorldSeed) -> Self {
+        let mut identity = Self::natural_overworld(seed);
+        identity.generator_revision = 3;
+        identity
+    }
     /// Returns the Minecraft release whose rules this baseline uses.
     #[must_use]
     pub const fn minecraft_version(self) -> GenerationMinecraftVersion {
@@ -245,7 +254,8 @@ impl GenerationIdentity {
         };
         let revision = u32::from_be_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]);
         if revision != supported_revision
-            && !(generator_kind == GeneratorKind::FerrumcNaturalPreview && revision == 2)
+            && !(generator_kind == GeneratorKind::FerrumcNaturalPreview
+                && matches!(revision, 2 | 3))
         {
             return Err(GenerationError::UnsupportedGeneratorRevision {
                 kind: generator_kind,
@@ -262,6 +272,9 @@ impl GenerationIdentity {
         }
         Ok(match generator_kind {
             GeneratorKind::FerrumcFlat => Self::flat_overworld(WorldSeed::new(seed)),
+            GeneratorKind::FerrumcNaturalPreview if revision == 3 => {
+                Self::natural_overworld_with_trees(WorldSeed::new(seed))
+            }
             GeneratorKind::FerrumcNaturalPreview if revision == 2 => {
                 Self::natural_overworld_with_grass(WorldSeed::new(seed))
             }

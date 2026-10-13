@@ -306,7 +306,7 @@ fn natural_identity_is_distinct_roundtrips_and_rejects_unknown_revisions() {
             flat.ensure_compatible(natural),
             Err(GenerationError::IncompatibleIdentity { .. })
         ));
-        for revision in [0_u32, 3, u32::MAX] {
+        for revision in [0_u32, 4, u32::MAX] {
             expected[14..18].copy_from_slice(&revision.to_be_bytes());
             assert_eq!(
                 GenerationIdentity::decode(&expected),
@@ -328,6 +328,22 @@ fn grass_preview_revision_roundtrips_and_never_matches_revision_one() {
         assert_eq!(GenerationIdentity::decode(&grass.encode()).unwrap(), grass);
         assert!(grass
             .ensure_compatible(GenerationIdentity::natural_overworld(seed))
+            .is_err());
+    }
+}
+
+#[test]
+fn tree_identity_roundtrips_and_refuses_prior_baselines() {
+    for seed in [0, -1, i64::MIN, i64::MAX] {
+        let seed = WorldSeed::new(seed);
+        let trees = GenerationIdentity::natural_overworld_with_trees(seed);
+        assert_eq!(trees.generator_revision(), 3);
+        assert_eq!(GenerationIdentity::decode(&trees.encode()).unwrap(), trees);
+        assert!(trees
+            .ensure_compatible(GenerationIdentity::natural_overworld(seed))
+            .is_err());
+        assert!(trees
+            .ensure_compatible(GenerationIdentity::natural_overworld_with_grass(seed))
             .is_err());
     }
 }

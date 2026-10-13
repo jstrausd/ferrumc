@@ -63,6 +63,8 @@ mod sample_work;
 pub mod spline;
 pub mod stored_biome;
 pub mod surface_rules;
+mod tree_kernel;
+mod trees;
 
 pub use block_entity::{
     is_chest_state, sign_kind_for_state, BlockEntity, ChestInventory, Sign, SignFace, SignKind,
