@@ -220,6 +220,35 @@ impl SeededCarvers {
             RUN_VALUE_CAP,
         )
     }
+    /// Reuses a checked immutable builtin tree while constructing fresh run state.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Internal preparation also accepts the immutable source binding."
+    )]
+    pub(crate) fn prepare_run_with_tree<'a>(
+        &self,
+        router: &SeededRouter,
+        rules: &'a SeededSurfaceRules,
+        temperatures: &'a BuiltinBiomeTemperatures,
+        source: BiomeSourceIdentity,
+        chunk: ChunkPos,
+        corners: PreliminarySurfaceCorners,
+        tree: &Arc<BiomeTree>,
+    ) -> Result<PreparedCarverRun<'a>, CarverError> {
+        self.prepare_with_tree(
+            router,
+            rules,
+            temperatures,
+            source,
+            chunk,
+            corners,
+            NOISE_TOTAL,
+            Unsigned192::from_u64(SELECTOR_WORK),
+            RULE_WORK,
+            RUN_VALUE_CAP,
+            Some(tree),
+        )
+    }
     #[expect(
         clippy::too_many_arguments,
         reason = "Private admission controls mirror separate contractual authorities."
@@ -236,6 +265,38 @@ impl SeededCarvers {
         selector_limit: Unsigned192,
         rule_limit: u32,
         native_cap: usize,
+    ) -> Result<PreparedCarverRun<'a>, CarverError> {
+        self.prepare_with_tree(
+            router,
+            rules,
+            temperatures,
+            source,
+            chunk,
+            corners,
+            noise_limit,
+            selector_limit,
+            rule_limit,
+            native_cap,
+            None,
+        )
+    }
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Private admission controls and immutable tree remain separate authorities."
+    )]
+    fn prepare_with_tree<'a>(
+        &self,
+        router: &SeededRouter,
+        rules: &'a SeededSurfaceRules,
+        temperatures: &'a BuiltinBiomeTemperatures,
+        source: BiomeSourceIdentity,
+        chunk: ChunkPos,
+        corners: PreliminarySurfaceCorners,
+        noise_limit: Unsigned192,
+        selector_limit: Unsigned192,
+        rule_limit: u32,
+        native_cap: usize,
+        tree: Option<&Arc<BiomeTree>>,
     ) -> Result<PreparedCarverRun<'a>, CarverError> {
         self.admit_binding(rules)?;
         let preset = BiomeParametersResourceId::from_name("minecraft:overworld")
@@ -281,14 +342,24 @@ impl SeededCarvers {
             Unsigned192::from_u64(u64::from(rule_limit)),
             Unsigned192::ZERO,
         )?;
-        let tree = Arc::new(
-            BiomeTree::from_builtin(
-                preset,
-                BiomeBuildBudget::new(MAX_BIOME_BUILD_WORK)
-                    .map_err(|e| CarverError::new(CarverErrorKind::Biome(e.kind().clone())))?,
+        let tree = if let Some(tree) = tree {
+            // BiomeTree has only the checked builtin constructor and no mutable
+            // access; its preset proves provenance independently of run history.
+            // Check at the original tree-binding stage to preserve refusal order.
+            if tree.preset() != preset {
+                return Err(producer_mismatch(ProducerMismatch::Source));
+            }
+            Arc::clone(tree)
+        } else {
+            Arc::new(
+                BiomeTree::from_builtin(
+                    preset,
+                    BiomeBuildBudget::new(MAX_BIOME_BUILD_WORK)
+                        .map_err(|e| CarverError::new(CarverErrorKind::Biome(e.kind().clone())))?,
+                )
+                .map_err(|e| CarverError::new(CarverErrorKind::Biome(e.kind().clone())))?,
             )
-            .map_err(|e| CarverError::new(CarverErrorKind::Biome(e.kind().clone())))?,
-        );
+        };
         let mut noise = router
             .fresh_carver_noise_chunk(chunk, CarverCumulativeMeter::new(noise_limit))
             .map_err(noise_error)?;
@@ -666,3 +737,7 @@ const _: () = {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "carver/tests/tree_reuse.rs"]
+mod tree_reuse_tests;

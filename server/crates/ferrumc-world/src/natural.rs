@@ -321,13 +321,14 @@ impl NaturalWorldGenerator {
             .map_err(|e| refusal(S::Surface, e))?;
         let mut run = b
             .carvers
-            .prepare_run(
+            .prepare_run_with_tree(
                 &b.router,
                 &b.rules,
                 &b.temperatures,
                 b.source,
                 center,
                 corners,
+                &b.tree,
             )
             .map_err(|e| refusal(S::Carvers, e))?;
         let mut output = CarvedChunkBuffer::new().map_err(|e| refusal(S::Carvers, e))?;

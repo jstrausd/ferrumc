@@ -102,3 +102,67 @@ Exact logs, manifests, independent review and client results are retained under
 leaf decay, sapling growth, complete lighting and complete Survival remain open.
 
 See [local commands and limits](LOCAL_NATURAL_WORLD.md).
+
+## Loading optimization (13 October 2026)
+
+The successor to `ad49110d9a67b588e631be71e26152553809091c` preserves algorithm 2
+revision 3 and every generated baseline. Natural Carver runs reuse the already
+checked immutable Overworld biome tree from their Binding, with fresh selector,
+noise, aquifer, surface context, meters and lifecycle for each run. A tree source
+reads matching center biome arrays it already owns after shared-cache eviction.
+Successful concurrent raw/biome publication rechecks the key to retain one slot;
+it does not suppress concurrent computation. FIFO ordering and raw/biome/source
+capacities remain **32/64/32**. No generator revision, new species, runtime budgets
+or cache payload limits change. Existing revision-3 worlds remain compatible.
+
+Root checked the exact final **396-file World** source, canonical SHA256
+`8937d0c3c59ca3615a5445b4f6b037ae72348f9cfbc1c4782c8e598d5f137804`, on the clean
+accepted baseline in a private copy:
+
+- Complete World Release: **439 passed, 7 existing ignored**.
+- Four new focused Debug probes: **4 passed, none ignored**.
+- Workspace formatting, all-target workspace Clippy with `-D warnings`, public
+  World rustdoc with warnings denied, and standard Release App build: pass.
+- Independent final Release review: **3 public and 4 private instrumented probes
+  passed**. All 24 complete accepted snapshots cover revisions 1/2/3, seeds 0/17
+  and signed seams; real eviction, reverse/concurrent generation, edit isolation,
+  FIFO bounds, held biomes and independent shared-tree runs are checked.
+
+The standard executable SHA256 is `43d09b6aab7892217827a5de22402d6b21e661e242de62e5831a78559dee8e16`.
+The unchanged independent protocol harness received all 169 columns at view 6,
+with the same complete initial block/biome snapshots, tree counts and seam as the
+previous delivery. Player-body placement refusals, creative placement, generated
+log removal, positive/negative exploration and graceful restart all pass. All 169
+edited/restarted snapshots also match the previous delivery exactly. No private
+instrumentation is present in the deployment executable. App/Config tests from
+the preceding delivery remain historical; they were not repeated for this
+World-only change.
+
+| Full 169-column receipt | Previous standard run | Current standard run | Less time |
+| --- | ---: | ---: | ---: |
+| Initial view | 173.439 s | 129.838 s | 25.14% |
+| After restart | 172.998 s | 125.120 s | 27.68% |
+
+These are one previous and one current same-host observation with the same seed,
+preset, view and harness; private ports/save paths differ. Current timing was
+recorded after build/profiling jobs stopped. It measures the complete view rather
+than first-chunk latency and is not a repeated benchmark, TPS/RSS measurement or
+comparison with a complete Paper server. Cold loading remains substantial.
+
+The separate instrumented 25-target server-ring comparison retains identical
+complete output and 119 raw builds. It eliminates 119 repeated constructions of
+an immutable tree whose native retained capacity is 1,181,618 bytes; the existing
+Binding already owns that tree. This is avoided temporary payload construction,
+not a measured RSS reduction. Global biome lookups fall from 1,724 to 88. Carver
+preparation falls from 8.936 s to 1.059 s in that diagnostic; other phases and
+whole-run timing were contended, so only the standard client supports the elapsed
+loading result above. Repeated raw production is still open. A discarded LRU
+experiment increased raw rebuilds, so the accepted implementation retains FIFO.
+
+Final evidence is under `.codex-tmp/trees-loading-20261013/`:
+`world-candidate-final.json`, `checks.json`, `binary.json`,
+`cache-review/final-assessment.json`, `profile/findings.md`,
+`client-final-view6/acceptance.json` and `client-comparison.json`.
+Tree species/decorators, gameplay leaf ticks and complete Survival remain open.
+The personal server stays stopped; the delivered executable is updated without
+altering its existing configuration or save.

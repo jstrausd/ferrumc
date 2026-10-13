@@ -1,7 +1,7 @@
 //! Explicit isolated-source oak/birch shape subset, before the accepted grass patches.
 use crate::{
     biome_zoom::{BiomeZoom, BiomeZoomSeed, BiomeZoomSemantics},
-    grass::{GrassPreview, Region},
+    grass::{biome_at, biome_location, GrassPreview, Region},
     tree_kernel::{Facts, Random, TreeKernel, TreeRegion, TREE_REGION_STATES},
     BlockStateId, Chunk, NaturalGenerationStage, NaturalWorldGenerator, WorldError, WorldSeed,
 };
@@ -369,6 +369,12 @@ impl Region for SourceRegion<'_> {
         self.source_heights(x, z).map(|h| h.0)
     }
     fn biome(&mut self, pos: BlockPos) -> Result<BiomeResourceId, WorldError> {
+        let (owner, index) = biome_location(self.zoom, pos);
+        // A source owns its raw halo for the full attempt history. Global-cache
+        // eviction must not cause this already-held biome array to be sampled again.
+        if let Some((_, raw)) = self.raw.iter().find(|(key, _)| *key == owner) {
+            return biome_at(raw, index);
+        }
         self.grass.biome(self.generator, self.zoom, pos)
     }
     fn relevant(&self, pos: BlockPos) -> bool {
@@ -407,6 +413,50 @@ impl Region for SourceRegion<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_biomes_use_retained_raw_arrays_after_global_eviction() {
+        let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
+        let grass = generator.grass_preview().unwrap();
+        let zoom = BiomeZoom::new(
+            BiomeZoomSeed::from_world_seed(WorldSeed::new(0)),
+            BiomeZoomSemantics::Paper1_21_8Build60,
+        );
+        let sentinel = BiomeResourceId::from_name("minecraft:the_void").unwrap();
+        let mut region = SourceRegion {
+            generator: &generator,
+            grass,
+            source: ChunkPos::new(-1, -1),
+            zoom,
+            raw: Vec::with_capacity(9),
+            writes: BTreeMap::new(),
+        };
+        for pos in [
+            BlockPos::new(-1, -1000, -1),
+            BlockPos::new(-17, 1000, -17),
+            BlockPos::new(0, 64, 0),
+        ] {
+            let (owner, index) = biome_location(zoom, pos);
+            let mut raw = Chunk::new(owner);
+            raw.install_generated_biomes(vec![sentinel; 1536].into_boxed_slice())
+                .unwrap();
+            region.raw.clear();
+            region.raw.push((owner, Arc::new(raw)));
+            grass.clear_raw_caches();
+            assert_eq!(
+                region.biome(pos).unwrap(),
+                sentinel,
+                "retained owner {owner:?}, index{index}"
+            );
+            assert!(grass.cache_is_empty_for_test());
+        }
+        region.raw.clear();
+        let pos = BlockPos::new(-1, 64, -1);
+        assert_eq!(
+            region.biome(pos).unwrap(),
+            grass.biome(&generator, zoom, pos).unwrap()
+        );
+    }
+
     struct Controlled {
         floor: BlockStateId,
         slope: bool,

@@ -898,6 +898,15 @@ a deliberate scheduling policy. Static leaf distances follow their own source
 history; no cross-source or gameplay leaf ticking is claimed. Raw/biome cache
 capacity remains 32/64; tree cache retains 32 immutable source diffs of at most
 4096 cells each (at most 2 MiB scalar diff payload). Caches never observe edits.
+Preview caches keep their established FIFO ordering and 32/64/32 entry bounds.
+Cold computation remains outside the cache locks; publication rechecks the key,
+so concurrent successful misses occupy one entry rather than duplicate slots.
+Concurrent computation itself is not suppressed. A source may reuse the center
+biome array of a matching raw chunk it already holds after global-cache eviction.
+Zoom quart selection, Y clamp and array indexing remain unchanged, as do the
+canonical fresh 3x3 biome traversal and its history-dependent tie behavior.
+Neighbor arrays produced during a different centered traversal are not cached
+as interchangeable independent center arrays.
 
 Each kernel owns a 7x12x7 complete region (588 states), a bounded 65536-draw RNG,
 and checked set/shape/distance limits. Frozen facts enumerate 27946 original
@@ -915,3 +924,20 @@ Seed 0 in the nine columns around origin yields 177 log cells and 1812 leaf cell
 complete chunks remain identical after cache eviction and reverse request order.
 The preview omits spruce/jungle/acacia/dark-oak/mangrove/cherry, fancy/fallen trees,
 decorators, structures, most vegetation and full Survival.
+
+## Immutable natural Carver biome-tree reuse
+
+Natural composition supplies its already checked immutable builtin Overworld
+`BiomeTree` to the private Carver preparation path. Its preset is verified at
+exactly the former tree-construction stage, after every previous binding,
+seed/settings/source/geometry/quart/native/allowance admission. The existing
+public `prepare_run` and private contractual `prepare_with` keep their signatures
+and cold owned-tree behavior. Shared-tree runs construct fresh noise, aquifer,
+selector (cold last leaf and work), surface context and lifecycle state. The
+sealed tree is immutable and has only its checked builtin constructor; sharing
+an Arc cannot share selector history or work. Public layouts, budgets, native
+caps, geometry and revision identities are unchanged. The existing natural
+Binding owns the shared tree; preparation only retains a selector Arc reference,
+and it releases that reference on failure/drop. The legacy owned-tree census
+is separate from shared-tree reference counts. This removes repeated immutable
+construction without caching any per-run sampling or changing producer work.

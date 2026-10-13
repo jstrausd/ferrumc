@@ -462,3 +462,16 @@ Seed 0 in the nine columns around origin yields 177 log cells and 1812 leaf cell
 complete chunks remain identical after cache eviction and reverse request order.
 The preview omits spruce/jungle/acacia/dark-oak/mangrove/cherry, fancy/fallen trees,
 decorators, structures, most vegetation and full Survival.
+
+Tree-preview loading retains the established bounded FIFO queues (raw 32,
+biome 64, tree source 32). Concurrent publication keeps a
+single slot per key; producers still run outside locks. Source-owned raw biome
+arrays remain usable after shared-cache eviction. These changes preserve
+revision-3 blocks, biome chronology, generation masks and edited-world identity;
+they do not activate new tree species or gameplay ticks.
+
+Natural terrain preparation also reuses the Binding's checked immutable
+Overworld biome tree for Carver runs. Each run still starts with independent
+cold selector history, producer sessions, meters and lifecycle. The existing
+public standalone preparation path retains its owned-tree behavior and refusal
+order. No new native tree, cache capacity or generation revision is introduced.

@@ -266,6 +266,21 @@ fn place(
     }
     Ok(())
 }
+pub(super) fn biome_at(raw: &Chunk, index: usize) -> Result<BiomeResourceId, WorldError> {
+    raw.biomes()
+        .and_then(|values| values.get(index))
+        .copied()
+        .ok_or_else(|| error("raw biomes missing"))
+}
+
+pub(super) fn biome_location(zoom: BiomeZoom, pos: BlockPos) -> (ChunkPos, usize) {
+    let quart = zoom.select_quart(pos);
+    let owner = ChunkPos::new(quart.x() >> 2, quart.z() >> 2);
+    let index = (((quart.y().clamp(-16, 79) + 16) as usize * 4 + (quart.x() & 3) as usize) * 4)
+        + (quart.z() & 3) as usize;
+    (owner, index)
+}
+
 #[derive(Default)]
 struct Cache {
     raw: VecDeque<(ChunkPos, Arc<Chunk>)>,
@@ -287,22 +302,36 @@ impl GrassPreview {
         generator: &NaturalWorldGenerator,
         pos: ChunkPos,
     ) -> Result<Arc<Chunk>, WorldError> {
-        if let Some(chunk) = self
-            .cache
-            .lock()
-            .map_err(|_| error("raw baseline cache poisoned"))?
-            .raw
-            .iter()
-            .find(|(p, _)| *p == pos)
-            .map(|(_, c)| Arc::clone(c))
         {
-            return Ok(chunk);
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| error("raw baseline cache poisoned"))?;
+            if let Some(chunk) = cache
+                .raw
+                .iter()
+                .find(|(key, _)| *key == pos)
+                .map(|(_, chunk)| Arc::clone(chunk))
+            {
+                return Ok(chunk);
+            }
         }
         let chunk = Arc::new(generator.generate_raw_chunk(pos)?);
         let mut cache = self
             .cache
             .lock()
             .map_err(|_| error("raw baseline cache poisoned"))?;
+        // Another cold worker may have published this immutable baseline while
+        // we computed outside the lock. Keep one slot per key without changing
+        // the established FIFO ordering or retaining more terrain.
+        if let Some(existing) = cache
+            .raw
+            .iter()
+            .find(|(key, _)| *key == pos)
+            .map(|(_, chunk)| Arc::clone(chunk))
+        {
+            return Ok(existing);
+        }
         if cache.raw.len() == 32 {
             cache.raw.pop_front();
         }
@@ -315,23 +344,26 @@ impl GrassPreview {
         zoom: BiomeZoom,
         pos: BlockPos,
     ) -> Result<BiomeResourceId, WorldError> {
-        let q = zoom.select_quart(pos);
-        let chunk = ChunkPos::new(q.x() >> 2, q.z() >> 2);
-        let index = (((q.y().clamp(-16, 79) + 16) as usize * 4 + (q.x() & 3) as usize) * 4)
-            + (q.z() & 3) as usize;
+        let (chunk, index) = biome_location(zoom, pos);
         {
             let cache = self
                 .cache
                 .lock()
                 .map_err(|_| error("raw baseline cache poisoned"))?;
-            if let Some((_, raw)) = cache.raw.iter().find(|(p, _)| *p == chunk) {
-                return raw
-                    .biomes()
-                    .and_then(|v| v.get(index))
-                    .copied()
-                    .ok_or_else(|| error("raw biomes missing"));
+            if let Some(raw) = cache
+                .raw
+                .iter()
+                .find(|(key, _)| *key == chunk)
+                .map(|(_, raw)| Arc::clone(raw))
+            {
+                return biome_at(&raw, index);
             }
-            if let Some((_, array)) = cache.biomes.iter().find(|(p, _)| *p == chunk) {
+            if let Some(array) = cache
+                .biomes
+                .iter()
+                .find(|(key, _)| *key == chunk)
+                .map(|(_, array)| Arc::clone(array))
+            {
                 return array
                     .get(index)
                     .copied()
@@ -347,11 +379,27 @@ impl GrassPreview {
             .cache
             .lock()
             .map_err(|_| error("raw baseline cache poisoned"))?;
+        if let Some(existing) = cache
+            .biomes
+            .iter()
+            .find(|(key, _)| *key == chunk)
+            .map(|(_, array)| Arc::clone(array))
+        {
+            return existing
+                .get(index)
+                .copied()
+                .ok_or_else(|| error("biome projection invalid"));
+        }
         if cache.biomes.len() == 64 {
             cache.biomes.pop_front();
         }
         cache.biomes.push_back((chunk, array));
         Ok(result)
+    }
+    #[cfg(test)]
+    pub(crate) fn cache_is_empty_for_test(&self) -> bool {
+        let cache = self.cache.lock().unwrap();
+        cache.raw.is_empty() && cache.biomes.is_empty()
     }
     #[cfg(test)]
     pub(crate) fn clear_raw_caches(&self) {
@@ -491,6 +539,73 @@ impl Region for Projected<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn concurrent_raw_and_biome_publications_keep_one_slot_per_key() {
+        let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
+        let barrier = std::sync::Barrier::new(4);
+        let values = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        generator
+                            .grass_preview()
+                            .unwrap()
+                            .raw(&generator, ChunkPos::ORIGIN)
+                            .unwrap()
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|job| job.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        for value in &values {
+            assert!(Arc::ptr_eq(value, &values[0]));
+            assert!(!value.persist_dirty_sections().any());
+            assert!(!value.persist_edited_sections().any());
+        }
+        assert_eq!(
+            generator
+                .grass_preview()
+                .unwrap()
+                .cache
+                .lock()
+                .unwrap()
+                .raw
+                .len(),
+            1
+        );
+        let zoom = BiomeZoom::new(
+            BiomeZoomSeed::from_world_seed(WorldSeed::new(0)),
+            BiomeZoomSemantics::Paper1_21_8Build60,
+        );
+        let pos = BlockPos::new(-2000, 64, 2000);
+        let (owner, _) = biome_location(zoom, pos);
+        assert_ne!(owner, ChunkPos::ORIGIN);
+        let biomes = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        generator
+                            .grass_preview()
+                            .unwrap()
+                            .biome(&generator, zoom, pos)
+                            .unwrap()
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|job| job.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(biomes.iter().all(|biome| *biome == biomes[0]));
+        let cache = generator.grass_preview().unwrap().cache.lock().unwrap();
+        assert_eq!(cache.biomes.len(), 1);
+        assert_eq!(cache.biomes.front().unwrap().0, owner);
+    }
+
     struct Probe {
         support: BlockStateId,
         slope: bool,
