@@ -281,6 +281,35 @@ pub(super) fn biome_location(zoom: BiomeZoom, pos: BlockPos) -> (ChunkPos, usize
     (owner, index)
 }
 
+const PRODUCTION_GATE_COUNT: usize = 32;
+
+/// Fixed key stripes coalesce misses without retaining in-flight terrain or keys.
+/// A collision can wait, but generation never holds a cache mutex. SOURCE gates
+/// may call RAW/BIOME gates; RAW and BIOME producers never call SOURCE or each
+/// other. A thread holds at most one gate of each kind, so this order is acyclic.
+/// Poisoning refuses new production; successful immutable cache hits stay usable.
+pub(super) struct ProductionGates([Mutex<()>; PRODUCTION_GATE_COUNT]);
+impl ProductionGates {
+    /// Creates 32 bounded stripes without retained keys or producer results.
+    pub(super) fn new() -> Self {
+        Self(std::array::from_fn(|_| Mutex::new(())))
+    }
+    fn stripe(pos: ChunkPos) -> usize {
+        let mut key =
+            (u64::from(pos.x().cast_unsigned()) << 32) | u64::from(pos.z().cast_unsigned());
+        key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        key ^= key >> 31;
+        usize::from(key.to_le_bytes()[0] & 31)
+    }
+    /// Owns production for this key stripe, refusing a poisoned producer.
+    pub(super) fn lock(&self, pos: ChunkPos) -> Result<std::sync::MutexGuard<'_, ()>, WorldError> {
+        self.0[Self::stripe(pos)]
+            .lock()
+            .map_err(|_| error("natural producer gate poisoned"))
+    }
+}
+
 #[derive(Default)]
 struct Cache {
     raw: VecDeque<(ChunkPos, Arc<Chunk>)>,
@@ -289,12 +318,24 @@ struct Cache {
 pub(crate) struct GrassPreview {
     catalog: Catalog,
     cache: Mutex<Cache>,
+    raw_gates: ProductionGates,
+    biome_gates: ProductionGates,
+    #[cfg(test)]
+    raw_computations: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    biome_computations: std::sync::atomic::AtomicUsize,
 }
 impl GrassPreview {
     pub(crate) fn new() -> Result<Self, WorldError> {
         Ok(Self {
             catalog: Catalog::compile()?,
             cache: Mutex::new(Cache::default()),
+            raw_gates: ProductionGates::new(),
+            biome_gates: ProductionGates::new(),
+            #[cfg(test)]
+            raw_computations: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            biome_computations: std::sync::atomic::AtomicUsize::new(0),
         })
     }
     pub(crate) fn raw(
@@ -316,14 +357,28 @@ impl GrassPreview {
                 return Ok(chunk);
             }
         }
+        let _production = self.raw_gates.lock(pos)?;
+        // A waiter must observe the owner's publication before rebuilding. This
+        // lookup owns only the short cache lock, not the numerical computation.
+        {
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| error("raw baseline cache poisoned"))?;
+            if let Some((_, chunk)) = cache.raw.iter().find(|(key, _)| *key == pos) {
+                return Ok(Arc::clone(chunk));
+            }
+        }
+        #[cfg(test)]
+        self.raw_computations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let chunk = Arc::new(generator.generate_raw_chunk(pos)?);
         let mut cache = self
             .cache
             .lock()
             .map_err(|_| error("raw baseline cache poisoned"))?;
-        // Another cold worker may have published this immutable baseline while
-        // we computed outside the lock. Keep one slot per key without changing
-        // the established FIFO ordering or retaining more terrain.
+        // Preserve the defensive one-slot publication check and FIFO policy.
+        // Same-key producers are gated; no cache lock covers numeric work.
         if let Some(existing) = cache
             .raw
             .iter()
@@ -370,6 +425,25 @@ impl GrassPreview {
                     .ok_or_else(|| error("biome projection invalid"));
             }
         }
+        let _production = self.biome_gates.lock(chunk)?;
+        {
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| error("raw baseline cache poisoned"))?;
+            if let Some((_, raw)) = cache.raw.iter().find(|(key, _)| *key == chunk) {
+                return biome_at(raw, index);
+            }
+            if let Some((_, array)) = cache.biomes.iter().find(|(key, _)| *key == chunk) {
+                return array
+                    .get(index)
+                    .copied()
+                    .ok_or_else(|| error("biome projection invalid"));
+            }
+        }
+        #[cfg(test)]
+        self.biome_computations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let array: Arc<[BiomeResourceId]> = generator.sample_center_biomes(chunk)?.into();
         let result = array
             .get(index)
@@ -540,6 +614,119 @@ impl Region for Projected<'_> {
 mod tests {
     use super::*;
     #[test]
+    fn production_gates_serialize_same_key_and_allow_distinct_stripes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let gates = ProductionGates::new();
+        let key = ChunkPos::ORIGIN;
+        let active = AtomicUsize::new(0);
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        for _ in 0..16 {
+                            let _guard = gates.lock(key).unwrap();
+                            assert_eq!(active.fetch_add(1, Ordering::SeqCst), 0);
+                            std::thread::yield_now();
+                            assert_eq!(active.fetch_sub(1, Ordering::SeqCst), 1);
+                        }
+                    })
+                })
+                .collect();
+            for job in jobs {
+                job.join().unwrap();
+            }
+        });
+        let other = (1..128)
+            .map(|x| ChunkPos::new(x, 0))
+            .find(|pos| ProductionGates::stripe(*pos) != ProductionGates::stripe(key))
+            .unwrap();
+        let entered = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                let _guard = gates.lock(key).unwrap();
+                entered.wait();
+            });
+            let second = scope.spawn(|| {
+                let _guard = gates.lock(other).unwrap();
+                entered.wait();
+            });
+            first.join().unwrap();
+            second.join().unwrap();
+        });
+        assert_eq!(gates.0.len(), 32);
+        println!(
+            "PRODUCTION_GATES_NATIVE one={} three={}",
+            std::mem::size_of::<ProductionGates>(),
+            3 * std::mem::size_of::<ProductionGates>()
+        );
+        for pos in [ChunkPos::new(i32::MIN, i32::MAX), ChunkPos::new(-1, -1)] {
+            assert!(ProductionGates::stripe(pos) < 32);
+            drop(gates.lock(pos).unwrap());
+        }
+    }
+
+    #[test]
+    fn producer_errors_release_gate_and_poisoning_refuses_new_production() {
+        let gates = ProductionGates::new();
+        let key = ChunkPos::ORIGIN;
+        let failed = || -> Result<(), WorldError> {
+            let _guard = gates.lock(key)?;
+            Err(error("injected numerical refusal"))
+        };
+        assert!(failed().is_err());
+        drop(gates.lock(key).unwrap());
+        assert!(std::panic::catch_unwind(|| {
+            let _guard = gates.lock(key).unwrap();
+            panic!("injected producer panic");
+        })
+        .is_err());
+        let refusal = gates.lock(key).unwrap_err();
+        assert!(matches!(refusal, WorldError::NaturalGeneration {
+            stage: NaturalGenerationStage::Features, detail,
+        } if detail == "natural producer gate poisoned"));
+    }
+
+    #[test]
+    fn refused_raw_production_retries_without_a_retained_gate_or_cache_entry() {
+        use std::sync::atomic::Ordering;
+        let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
+        let grass = generator.grass_preview().unwrap();
+        let invalid = ChunkPos::new(i32::MAX, 0);
+        for _ in 0..2 {
+            assert!(grass.raw(&generator, invalid).is_err());
+        }
+        assert_eq!(grass.raw_computations.load(Ordering::Relaxed), 2);
+        assert!(grass.cache.lock().unwrap().raw.is_empty());
+    }
+
+    #[test]
+    fn poisoned_production_stripe_keeps_completed_raw_hits_but_refuses_new_keys() {
+        use std::sync::atomic::Ordering;
+        let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
+        let grass = generator.grass_preview().unwrap();
+        let key = ChunkPos::ORIGIN;
+        let original = grass.raw(&generator, key).unwrap();
+        assert!(std::panic::catch_unwind(|| {
+            let _guard = grass.raw_gates.lock(key).unwrap();
+            panic!("injected producer panic");
+        })
+        .is_err());
+        assert!(Arc::ptr_eq(&original, &grass.raw(&generator, key).unwrap()));
+        let collision = (1..512)
+            .map(|x| ChunkPos::new(x, 0))
+            .find(|pos| ProductionGates::stripe(*pos) == ProductionGates::stripe(key))
+            .unwrap();
+        let refused = grass.raw(&generator, collision).unwrap_err();
+        assert!(matches!(refused, WorldError::NaturalGeneration {
+            stage: NaturalGenerationStage::Features, detail,
+        } if detail == "natural producer gate poisoned"));
+        assert_eq!(grass.raw_computations.load(Ordering::Relaxed), 1);
+        assert_eq!(grass.cache.lock().unwrap().raw.len(), 1);
+    }
+
+    #[test]
     fn concurrent_raw_and_biome_publications_keep_one_slot_per_key() {
         let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
         let barrier = std::sync::Barrier::new(4);
@@ -560,6 +747,14 @@ mod tests {
                 .map(|job| job.join().unwrap())
                 .collect::<Vec<_>>()
         });
+        assert_eq!(
+            generator
+                .grass_preview()
+                .unwrap()
+                .raw_computations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
         for value in &values {
             assert!(Arc::ptr_eq(value, &values[0]));
             assert!(!value.persist_dirty_sections().any());
@@ -601,6 +796,14 @@ mod tests {
                 .collect::<Vec<_>>()
         });
         assert!(biomes.iter().all(|biome| *biome == biomes[0]));
+        assert_eq!(
+            generator
+                .grass_preview()
+                .unwrap()
+                .biome_computations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
         let cache = generator.grass_preview().unwrap().cache.lock().unwrap();
         assert_eq!(cache.biomes.len(), 1);
         assert_eq!(cache.biomes.front().unwrap().0, owner);

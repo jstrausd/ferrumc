@@ -2466,6 +2466,74 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn initial_fenced_login_backlog_stays_strict_until_consumed() {
+        use ferrumc_session::SessionRouter;
+        let (commands, _inbox) = mpsc::channel(8);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let player = PlayerId::offline("PumpProbe");
+        let mut router = SessionRouter::new();
+        let _shard = router.register_shard(ShardPos::new(0, 0));
+        let mut handle = router
+            .join_player(player, "PumpProbe", Vec3::new(8.0, 64.0, 8.0))
+            .expect("join");
+        router.send_play_packet_to(
+            player,
+            ClientboundPlayPacket::GameEvent(GameEvent::new(1, 0.0)),
+        );
+        let mut decoder = ferrumc_net::InboundDecoder::new(ctx.limits);
+        decoder
+            .push(&[1, 0x0c].repeat(601))
+            .expect("initial tick-end frames");
+        let mut liveness =
+            play_liveness(tokio::time::Instant::now(), ctx.io_timeout).expect("tracker");
+        let mut pending = PendingTeleport::default();
+        let mut ingress = IngressFence::default();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let mut budget =
+            ServerboundBudget::new(tokio::time::Instant::now().into_std(), 300.0, 600.0);
+        let mut chunk_stream = ChunkStream::new(&ctx);
+        let mut chat = ChatRateLimiter::new(ctx.clock.now());
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut window = WindowState::new();
+        let mut yaw = 0.0;
+        let mut pitch = 0.0;
+        let mut debug = SessionDebug::new("PumpProbe");
+        macro_rules! pump {
+            () => {
+                pump_serverbound(
+                    &mut decoder,
+                    &CompressionState::disabled(),
+                    &ctx,
+                    player,
+                    "PumpProbe",
+                    &mut writer,
+                    &mut chunk_stream,
+                    &mut chat,
+                    &mut budget,
+                    &mut inventory,
+                    &mut window,
+                    &mut yaw,
+                    &mut pitch,
+                    &mut debug,
+                    &mut liveness,
+                    &mut pending,
+                    &mut ingress,
+                    &mut handle,
+                )
+                .await
+            };
+        }
+        pump!().expect("first input freezes the output prefix");
+        assert!(ingress.is_fenced());
+        while ingress.pop_outbound().is_some() {}
+        let error = pump!().expect_err("601 initial frames still fail strictly");
+        assert!(error
+            .downcast_ref::<super::super::serverbound_budget::ServerboundBudgetExceeded>()
+            .is_some());
+        assert_eq!(ingress.quota_ready(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn exact_keep_alive_head_bypasses_ready_output_with_or_without_pending_teleport() {
         use ferrumc_session::{SessionRouter, DEFAULT_OUTBOUND_CAPACITY};
         for teleport_pending in [false, true] {

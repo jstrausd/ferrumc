@@ -38,7 +38,7 @@ use super::outbound::{
     observe_queue_len, send_mandatory,
 };
 use super::rate_limiter::ChatRateLimiter;
-use super::serverbound_budget::ServerboundBudget;
+use super::serverbound_budget::{BudgetAdmission, ServerboundBudget, ServerboundBudgetExceeded};
 use super::teleport::{PendingTeleport, TeleportConfirmationError};
 use super::{send_sim_command_accepted, Connection, GAME_EVENT_CHANGE_GAMEMODE, READ_CHUNK};
 
@@ -201,7 +201,7 @@ pub(super) async fn enter_play(
     // play packets. Like the chat limiter, it lives in the connection task (allowed
     // a non-deterministic clock) and never touches the deterministic tick path.
     let mut budget = ServerboundBudget::new(
-        std::time::Instant::now(),
+        Instant::now().into_std(),
         ctx.budget.sustained_rate,
         ctx.budget.burst,
     );
@@ -378,7 +378,8 @@ pub(super) async fn enter_play(
                 "Play liveness closed without a disconnect reason"
             ));
         };
-        let fenced = ingress.is_fenced();
+        let quota_ready = ingress.quota_ready();
+        let fenced = ingress.is_fenced() || quota_ready.is_some();
         let wake = tokio::select! {
             biased;
             _ = shutdown.changed() => break Ok(()),
@@ -402,6 +403,7 @@ pub(super) async fn enter_play(
                     }
                 },
                 operator_changes.changed(),
+                quota_ready,
             ) => wake,
         };
         match wake {
@@ -577,6 +579,34 @@ pub(super) async fn enter_play(
                 // The router dropped the session.
                 None => break Ok(()),
             },
+            PlayWake::Quota => {
+                if let Err(err) = read_and_pump(
+                    &mut decoder,
+                    &compression,
+                    ctx,
+                    player,
+                    name.as_str(),
+                    &mut writer,
+                    &mut stream,
+                    &mut chunk_stream,
+                    &mut chat_limiter,
+                    &mut budget,
+                    &mut inventory,
+                    &mut window_state,
+                    &mut player_yaw,
+                    &mut player_pitch,
+                    &mut debug,
+                    &[],
+                    &mut liveness,
+                    &mut pending_teleport,
+                    &mut ingress,
+                    &mut handle,
+                )
+                .await
+                {
+                    break Err(err);
+                }
+            }
             PlayWake::Read(read) => {
                 let outcome = match read {
                     Err(err) => break Err(err.into()),
@@ -783,6 +813,9 @@ fn disconnect_reason_for_result(result: &anyhow::Result<()>) -> DisconnectReason
     let Err(error) = result else {
         return DisconnectReason::ServerShutdown;
     };
+    if error.downcast_ref::<ServerboundBudgetExceeded>().is_some() {
+        return DisconnectReason::BudgetExceeded;
+    }
     if let Some(error) = error.downcast_ref::<DecodeError>() {
         return DisconnectReason::from_disconnect_class(error.disconnect_class());
     }
@@ -843,6 +876,7 @@ enum PlayWake {
     KeepAlive,
     Chunks,
     Operators(Result<(), watch::error::RecvError>),
+    Quota,
 }
 
 /// Rotates the first-polled source after every selection. A continuously ready
@@ -855,13 +889,20 @@ async fn next_play_wake<O, R, P>(
     outbound: O,
     read: R,
     operators: P,
+    quota_ready: Option<Instant>,
 ) -> PlayWake
 where
     O: std::future::Future<Output = Option<OutboundMessage>>,
     R: std::future::Future<Output = std::io::Result<usize>>,
     P: std::future::Future<Output = Result<(), watch::error::RecvError>>,
 {
-    tokio::pin!(outbound, read, operators);
+    let quota = async {
+        match quota_ready {
+            Some(ready) => sleep_until(ready).await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::pin!(outbound, read, operators, quota);
     let wake = match *next_work {
         0 => tokio::select! {
             biased;
@@ -870,6 +911,7 @@ where
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
             result = &mut operators => PlayWake::Operators(result),
+            () = &mut quota => PlayWake::Quota,
         },
         1 => tokio::select! {
             biased;
@@ -877,6 +919,7 @@ where
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
             result = &mut operators => PlayWake::Operators(result),
+            () = &mut quota => PlayWake::Quota,
             result = &mut read => PlayWake::Read(result),
         },
         2 => tokio::select! {
@@ -884,6 +927,7 @@ where
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
             result = &mut operators => PlayWake::Operators(result),
+            () = &mut quota => PlayWake::Quota,
             result = &mut read => PlayWake::Read(result),
             result = &mut outbound => PlayWake::Outbound(result),
         },
@@ -891,17 +935,28 @@ where
             biased;
             _ = chunks.tick() => PlayWake::Chunks,
             result = &mut operators => PlayWake::Operators(result),
+            () = &mut quota => PlayWake::Quota,
             result = &mut read => PlayWake::Read(result),
             result = &mut outbound => PlayWake::Outbound(result),
             _ = keep_alive.tick() => PlayWake::KeepAlive,
         },
-        _ => tokio::select! {
+        4 => tokio::select! {
             biased;
             result = &mut operators => PlayWake::Operators(result),
+            () = &mut quota => PlayWake::Quota,
             result = &mut read => PlayWake::Read(result),
             result = &mut outbound => PlayWake::Outbound(result),
             _ = keep_alive.tick() => PlayWake::KeepAlive,
             _ = chunks.tick() => PlayWake::Chunks,
+        },
+        _ => tokio::select! {
+            biased;
+            () = &mut quota => PlayWake::Quota,
+            result = &mut read => PlayWake::Read(result),
+            result = &mut outbound => PlayWake::Outbound(result),
+            _ = keep_alive.tick() => PlayWake::KeepAlive,
+            _ = chunks.tick() => PlayWake::Chunks,
+            result = &mut operators => PlayWake::Operators(result),
         },
     };
     *next_work = match wake {
@@ -909,7 +964,8 @@ where
         PlayWake::Outbound(_) => 2,
         PlayWake::KeepAlive => 3,
         PlayWake::Chunks => 4,
-        PlayWake::Operators(_) => 0,
+        PlayWake::Operators(_) => 5,
+        PlayWake::Quota => 0,
     };
     wake
 }
@@ -1029,12 +1085,7 @@ pub(super) async fn pump_serverbound(
     ingress: &mut IngressFence,
     handle: &mut PlayerSessionHandle,
 ) -> anyhow::Result<()> {
-    // One real-time reading for the whole drained batch: every frame buffered from
-    // this read is charged against the budget at the same instant, so a single
-    // flood read deterministically drains the bucket regardless of wall-clock
-    // jitter. `std::time::Instant` (not the `tokio::time::Instant` alias in scope)
-    // is what the token bucket expects.
-    let now = std::time::Instant::now();
+    // Refresh actual admission time per attempt; Tokio clock supports paused tests.
     loop {
         // A previous callback may have consumed the deadline; even an
         // unmodelled buffered packet must not postpone its enforcement.
@@ -1044,9 +1095,14 @@ pub(super) async fn pump_serverbound(
         if Instant::now() >= deadline.at() {
             return Err(deadline.timeout().into());
         }
-        if ingress.is_fenced() {
+        if ingress.is_fenced()
+            || ingress
+                .quota_ready()
+                .is_some_and(|ready| Instant::now() < ready)
+        {
             return Ok(());
         }
+        let quota_retry = ingress.quota_ready().is_some();
         let body = if let Some(body) = ingress.take_ready_body() {
             body
         } else {
@@ -1075,20 +1131,21 @@ pub(super) async fn pump_serverbound(
                 body
             }
         };
-        // Charge this serverbound frame against the per-connection packet budget
-        // BEFORE handling it. Once the burst is drained and the sustained rate is
-        // exceeded, the connection is dropped (`BudgetExceeded`) rather than left to
-        // process an unbounded flood, so a hostile client cannot exhaust the server.
-        if let Err(reason) = budget.admit(now) {
-            tracing::warn!(
-                player = name,
-                ?reason,
-                "serverbound packet budget exceeded; dropping connection"
-            );
-            debug.dump("play_budget_exceeded");
-            return Err(anyhow::anyhow!(
-                "serverbound packet budget exceeded ({reason:?})"
-            ));
+        match budget.admit_or_defer(Instant::now().into_std(), quota_retry) {
+            Ok(BudgetAdmission::Admitted) => {}
+            Ok(BudgetAdmission::Deferred(ready)) => {
+                ingress.defer_for_quota(body, Instant::from_std(ready));
+                return Ok(());
+            }
+            Err(reason) => {
+                tracing::warn!(
+                    player = name,
+                    ?reason,
+                    "serverbound packet budget exceeded; dropping connection"
+                );
+                debug.dump("play_budget_exceeded");
+                return Err(ServerboundBudgetExceeded.into());
+            }
         }
         handle_play_body(
             ctx,
@@ -1108,6 +1165,11 @@ pub(super) async fn pump_serverbound(
             pending_teleport,
         )
         .await?;
+    }
+    // A frozen prefix may have returned before this point. Keep every initial
+    // buffered frame (including a partial tail) strict until it actually drains.
+    if decoder.buffered_len() == 0 {
+        budget.establish_play();
     }
     Ok(())
 }
@@ -1365,6 +1427,7 @@ mod tests {
                 ready(None),
                 ready(Ok(9)),
                 pending(),
+                None,
             )
             .await
             {
@@ -1372,6 +1435,7 @@ mod tests {
                 PlayWake::KeepAlive => choices.push("keep-alive"),
                 PlayWake::Chunks => choices.push("chunks"),
                 PlayWake::Operators(_) => panic!("no operator changes"),
+                PlayWake::Quota => panic!("no quota wait"),
                 PlayWake::Read(_) => {
                     liveness
                         .keep_alive_received(7, Instant::now())
@@ -1406,11 +1470,13 @@ mod tests {
                 ready(None),
                 ready(Ok(9)),
                 changes.changed(),
+                None,
             )
             .await
             {
                 PlayWake::Operators(Ok(())) => choices.push("operators"),
                 PlayWake::Operators(Err(_)) => panic!("revision sender live"),
+                PlayWake::Quota => panic!("no quota wait"),
                 PlayWake::Read(_) => {
                     liveness
                         .keep_alive_received(7, Instant::now())
@@ -1427,6 +1493,121 @@ mod tests {
             ["operators", "read", "outbound", "keep-alive", "chunks"]
         );
         assert_eq!(liveness.outstanding_keep_alive(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quota_wake_rotates_with_all_ready_sources_without_starvation() {
+        use std::future::ready;
+        use std::time::Duration;
+        let mut keep_alive = interval_at(Instant::now(), Duration::from_secs(1));
+        let mut chunks = interval_at(Instant::now(), Duration::from_secs(1));
+        let mut next = 1;
+        let mut choices = Vec::new();
+        for _ in 0..6 {
+            let wake = next_play_wake(
+                &mut next,
+                &mut keep_alive,
+                &mut chunks,
+                ready(None),
+                ready(Ok(1)),
+                ready(Ok(())),
+                Some(Instant::now()),
+            )
+            .await;
+            choices.push(match wake {
+                PlayWake::Outbound(_) => "outbound",
+                PlayWake::KeepAlive => "keep-alive",
+                PlayWake::Chunks => "chunks",
+                PlayWake::Operators(_) => "operators",
+                PlayWake::Quota => "quota",
+                PlayWake::Read(_) => "read",
+            });
+        }
+        assert_eq!(
+            choices,
+            [
+                "outbound",
+                "keep-alive",
+                "chunks",
+                "operators",
+                "quota",
+                "read"
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn continuous_outbound_cannot_starve_a_due_quota_retry() {
+        use std::future::{pending, ready};
+        use std::time::Duration;
+        let mut keep_alive = interval_at(
+            Instant::now() + Duration::from_secs(10),
+            Duration::from_secs(10),
+        );
+        let mut chunks = interval_at(
+            Instant::now() + Duration::from_secs(10),
+            Duration::from_secs(10),
+        );
+        let mut next = 1;
+        assert!(matches!(
+            next_play_wake(
+                &mut next,
+                &mut keep_alive,
+                &mut chunks,
+                ready(None),
+                pending(),
+                pending(),
+                Some(Instant::now())
+            )
+            .await,
+            PlayWake::Outbound(_)
+        ));
+        assert!(matches!(
+            next_play_wake(
+                &mut next,
+                &mut keep_alive,
+                &mut chunks,
+                ready(None),
+                pending(),
+                pending(),
+                Some(Instant::now())
+            )
+            .await,
+            PlayWake::Quota
+        ));
+    }
+    #[tokio::test(start_paused = true)]
+    async fn held_quota_does_not_renew_absolute_progress_deadline() {
+        use std::future::pending;
+        use std::time::Duration;
+        let liveness = play_liveness(Instant::now(), Duration::from_secs(1)).expect("tracker");
+        let mut keep_alive = interval_at(
+            Instant::now() + Duration::from_secs(10),
+            Duration::from_secs(10),
+        );
+        let mut chunks = interval_at(
+            Instant::now() + Duration::from_secs(10),
+            Duration::from_secs(10),
+        );
+        let mut next = 5;
+        let result = guard_play_work(liveness.next_deadline(), async {
+            Ok(next_play_wake(
+                &mut next,
+                &mut keep_alive,
+                &mut chunks,
+                pending(),
+                pending(),
+                pending(),
+                Some(Instant::now() + Duration::from_secs(2)),
+            )
+            .await)
+        })
+        .await;
+        assert!(result
+            .err()
+            .expect("unchanged one-second deadline wins")
+            .downcast_ref::<LivenessTimeout>()
+            .is_some());
     }
 
     #[tokio::test(start_paused = true)]

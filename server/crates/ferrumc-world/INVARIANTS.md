@@ -901,7 +901,8 @@ capacity remains 32/64; tree cache retains 32 immutable source diffs of at most
 Preview caches keep their established FIFO ordering and 32/64/32 entry bounds.
 Cold computation remains outside the cache locks; publication rechecks the key,
 so concurrent successful misses occupy one entry rather than duplicate slots.
-Concurrent computation itself is not suppressed. A source may reuse the center
+Concurrent same-key misses use the bounded production gates documented below.
+A source may reuse the center
 biome array of a matching raw chunk it already holds after global-cache eviction.
 Zoom quart selection, Y clamp and array indexing remain unchanged, as do the
 canonical fresh 3x3 biome traversal and its history-dependent tie behavior.
@@ -941,3 +942,24 @@ Binding owns the shared tree; preparation only retains a selector Arc reference,
 and it releases that reference on failure/drop. The legacy owned-tree census
 is separate from shared-tree reference counts. This removes repeated immutable
 construction without caching any per-run sampling or changing producer work.
+
+## Bounded immutable preview miss coalescing
+
+RAW, standalone BIOME and tree SOURCE misses each use 32 fixed key-stripe mutexes.
+Successful immutable cache hits take only their existing short cache lock. A miss
+acquires its stripe and rechecks the cache before computing; numerical generation
+never holds a cache mutex. Concurrent same-key callers reuse a successful retained
+publication, while unrelated stripe collisions may serialize cost only. No gate
+retains a key, result, Chunk or source history. Content capacities and FIFO policies
+remain 32 RAW / 64 BIOME / 32 SOURCE; eviction still permits genuine recomputation.
+
+The order is SOURCE gate -> RAW or BIOME gate -> short corresponding cache lock.
+RAW production and standalone BIOME production never call SOURCE or each other;
+a thread holds at most one gate of each kind and releases RAW/BIOME before its
+next read. Target baseline acquisition precedes SOURCE acquisition. Thus shared
+source-local live writes, RNG, selectors, wrappers and meters remain independent,
+with no cyclic gate dependency. Calls stay on admitted blocking producer threads.
+Ordinary refusal drops guards without caching partial results and can retry;
+poisoning fails closed with a typed Features refusal on a new production miss,
+while already completed immutable cache hits remain usable. No numeric producer,
+public budget, generation revision, dependency or baseline output changes.

@@ -17,6 +17,7 @@ use ferrumc_session::{OutboundMessage, PlayerSessionHandle, DEFAULT_OUTBOUND_CAP
 pub(super) struct IngressFence {
     body: Option<Bytes>,
     prefix: VecDeque<OutboundMessage>,
+    quota_ready: Option<tokio::time::Instant>,
 }
 
 impl IngressFence {
@@ -34,7 +35,12 @@ impl IngressFence {
 
     /// Takes the held frame after every message in its finite prefix was sent.
     pub(super) fn take_ready_body(&mut self) -> Option<Bytes> {
-        if self.prefix.is_empty() {
+        if self.prefix.is_empty()
+            && self
+                .quota_ready
+                .is_none_or(|ready| tokio::time::Instant::now() >= ready)
+        {
+            self.quota_ready = None;
             self.body.take()
         } else {
             None
@@ -44,6 +50,17 @@ impl IngressFence {
     /// Whether socket reads/input dispatch must yield to the frozen prefix.
     pub(super) fn is_fenced(&self) -> bool {
         !self.prefix.is_empty()
+    }
+
+    /// Reuses the one-frame slot after its output prefix has been sent.
+    pub(super) fn defer_for_quota(&mut self, body: Bytes, ready: tokio::time::Instant) {
+        self.body = Some(body);
+        self.quota_ready = Some(ready);
+    }
+
+    /// Refill wake; socket reads stop while this one retained frame exists.
+    pub(super) fn quota_ready(&self) -> Option<tokio::time::Instant> {
+        self.quota_ready
     }
 
     /// Delivers one retained output; called only by the selected output turn.
@@ -79,5 +96,18 @@ mod tests {
         body.extend_from_slice(&[0]);
         assert!(!is_exact_keep_alive(&body));
         assert!(!is_exact_keep_alive(&[0, 1]));
+    }
+    #[tokio::test(start_paused = true)]
+    async fn quota_retains_one_body_until_ready_and_keeps_prefix_empty() {
+        let mut fence = IngressFence::default();
+        let ready = tokio::time::Instant::now() + std::time::Duration::from_millis(10);
+        fence.defer_for_quota(Bytes::from_static(&[0x0c]), ready);
+        assert!(!fence.is_fenced());
+        assert_eq!(fence.quota_ready(), Some(ready));
+        assert_eq!(fence.take_ready_body(), None);
+        tokio::time::advance(std::time::Duration::from_millis(10)).await;
+        assert_eq!(fence.take_ready_body(), Some(Bytes::from_static(&[0x0c])));
+        assert_eq!(fence.quota_ready(), None);
+        assert_eq!(fence.take_ready_body(), None);
     }
 }

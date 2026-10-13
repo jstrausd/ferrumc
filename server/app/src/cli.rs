@@ -251,7 +251,7 @@ impl Cli {
 /// applies the CLI overrides and fills the runtime defaults.
 ///
 /// Behaviour:
-/// - **Missing file (first run):** writes [`CONFIG_TEMPLATE`] to `path`, logs a
+/// - **Missing file (first run):** writes `CONFIG_TEMPLATE` to `path`, logs a
 ///   clear message, and continues with [`AppConfig::default`]. The server never
 ///   dies just because no config exists yet. Using the defaults directly (rather
 ///   than re-parsing the file just written) guarantees first run cannot fail even

@@ -100,10 +100,13 @@ saves cannot be silently upgraded: their generation identity is deliberately
 checked before startup. Short grass is passable for spawn and replaceable by
 other blocks during placement.
 
-To test oak and birch trees together with grass, create a fresh revision-3 world:
+To test oak and birch trees together with grass, create a fresh revision-3 world.
+The directory name does not select a generator: `ferrumc_natural_preview`
+generates terrain without trees or grass, even in a directory named `tree-preview`.
+Use a new directory if that name already contains a terrain-only world:
 
 ```sh
-FERRUMC_NATURAL_DIR="$PWD/local-natural/tree-preview" \
+FERRUMC_NATURAL_DIR="$PWD/local-natural/tree-preview-v3" \
 FERRUMC_NATURAL_PRESET=ferrumc_natural_tree_preview \
 ./scripts/run-natural-preview.sh
 ```
@@ -114,6 +117,27 @@ configuration. Spawn chooses dry ground below the canopy with two passable
 body cells, rather than placing the player on leaves or inside a trunk.
 Trees can naturally be absent in biomes that do not admit the implemented
 routes. This preset is not complete Minecraft tree or Survival generation.
+
+A normal client can accumulate packets during a server pause. Established Play
+uses a short, bounded catch-up window to drain those frames at the configured
+packet rate. It retains one frame, keeps absolute liveness deadlines, and still
+disconnects a sustained flood. This cannot mask an arbitrarily long stall.
+
+If a client reports `Connection reset`, keep the server output around the
+disconnect and check whether the server process is still running. The client
+message alone does not identify a process crash. For a reproducible log:
+
+```sh
+set -o pipefail
+RUST_BACKTRACE=1 RUST_LOG=info \
+FERRUMC_SERVER_BIN="$PWD/server/target/release/ferrumc" \
+FERRUMC_NATURAL_DIR="$PWD/local-natural/tree-preview-v3" \
+FERRUMC_NATURAL_PRESET=ferrumc_natural_tree_preview \
+./scripts/run-natural-preview.sh 2>&1 | tee tree-preview.log
+```
+
+This keeps existing saves and configs. A preset environment variable cannot
+upgrade a previously generated world; the launcher warns when reusing its config.
 
 Player placement checks final collision shapes against live nonspectator
 players before any mutation, including refined slabs and both door/bed cells.

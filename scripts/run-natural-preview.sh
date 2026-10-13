@@ -55,6 +55,9 @@ builtin_plugins = false
 seed = 0
 preset = "$PRESET"
 TOML
+elif [[ -n "${FERRUMC_NATURAL_PRESET:-}" ]]; then
+  echo "Existing config kept: FERRUMC_NATURAL_PRESET only selects a newly created config." >&2
+  echo "Check [world].preset in $RUN_DIR/config.toml; use a fresh directory to change the generator." >&2
 fi
 echo "Minecraft Java 1.21.8: listening on 0.0.0.0:$PORT (connect using localhost or this host’s IP)"
 echo "Executable: $SERVER_BIN"

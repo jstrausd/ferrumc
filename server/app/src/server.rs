@@ -520,7 +520,9 @@ async fn accept_loop(
                     let _permit = permit;
                     let _ip_guard = ip_guard;
                     if let Err(err) = handle_connection(stream, &ctx, conn_shutdown).await {
-                        tracing::debug!(%err, "connection ended with an error");
+                        // Operators need the actual cause at the default log level
+                        // when a client can report only a generic connection reset.
+                        tracing::warn!(peer = %addr, error = %format_args!("{err:#}"), "connection ended with an error");
                     }
                 });
             }

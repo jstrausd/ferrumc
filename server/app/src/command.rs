@@ -121,7 +121,7 @@ pub const REGION_EDIT_LEVEL: u8 = 2;
 /// affect, used by the arg-less [`build_command_tree`]. Mirrors the configuration
 /// default `max_region_fill_volume` and `ferrumc_sim`'s built-in region cap; the
 /// running server threads its configured value through
-/// [`build_command_tree_with_limits`].
+/// `build_command_tree_with_limits`.
 pub const DEFAULT_REGION_VOLUME_CAP: u64 = 32_768;
 
 /// Usage shown when `/fill` arguments do not parse.
@@ -170,9 +170,9 @@ const PARTICLE_COUNT: i32 = 1;
 const DUST_DEFAULT_COLOR: (f32, f32, f32, f32) = (1.0, 0.0, 0.0, 1.0);
 
 /// Builds the application's [`CommandTree`] with the default region-edit volume
-/// cap ([`DEFAULT_REGION_VOLUME_CAP`]).
+/// cap (`DEFAULT_REGION_VOLUME_CAP`).
 ///
-/// A convenience wrapper over [`build_command_tree_with_limits`] for tests and
+/// A convenience wrapper over `build_command_tree_with_limits` for tests and
 /// any caller that does not thread configuration; the running server passes its
 /// configured cap. See that function for the full command set.
 pub fn build_command_tree() -> CommandTree {

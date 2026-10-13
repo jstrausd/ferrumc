@@ -71,6 +71,15 @@
   capped at 10 seconds and never renew on drips. Pipelined tails retain their
   original read timestamp; pre-Play output and shutdown observe these deadlines.
 
+- Established Play retains at most one decoded frame on token exhaustion and
+  stops socket reads until real configured-rate refill. The first exhaustion
+  starts one recovery episode no longer than burst/rate or two seconds; only
+  actual half-burst refill resets it. Continued starvation after the episode is
+  a typed BudgetExceeded disconnect. Initial login-handoff drain remains strict.
+  The quota wake participates in normal bounded round-robin work; shutdown and
+  absolute liveness deadlines keep priority. Held bodies cause no packet effects
+  or deadline renewal. Burst/rate ceilings remain unchanged. This finite FerrumC
+  policy can still reject larger accumulated backlogs and is not Paper parity.
 - Play has absolute inbound-progress and Keep Alive response deadlines. Chunk,
   output, and Keep Alive timer wakeups never extend them.
 - Each Play connection has at most one unanswered Keep Alive. Its exact ID must

@@ -1,7 +1,7 @@
 //! Explicit isolated-source oak/birch shape subset, before the accepted grass patches.
 use crate::{
     biome_zoom::{BiomeZoom, BiomeZoomSeed, BiomeZoomSemantics},
-    grass::{biome_at, biome_location, GrassPreview, Region},
+    grass::{biome_at, biome_location, GrassPreview, ProductionGates, Region},
     tree_kernel::{Facts, Random, TreeKernel, TreeRegion, TREE_REGION_STATES},
     BlockStateId, Chunk, NaturalGenerationStage, NaturalWorldGenerator, WorldError, WorldSeed,
 };
@@ -27,6 +27,9 @@ pub(crate) struct TreePreview {
     kernels: [TreeKernel; 2],
     members: Vec<(BiomeResourceId, [bool; 3])>,
     sources: Mutex<VecDeque<(ChunkPos, Writes)>>,
+    source_gates: ProductionGates,
+    #[cfg(test)]
+    source_computations: std::sync::atomic::AtomicUsize,
 }
 impl TreePreview {
     pub(crate) fn new() -> Result<Self, WorldError> {
@@ -104,6 +107,9 @@ impl TreePreview {
             kernels: [TreeKernel::compile("oak")?, TreeKernel::compile("birch")?],
             members,
             sources: Mutex::new(VecDeque::with_capacity(SOURCE_CACHE)),
+            source_gates: ProductionGates::new(),
+            #[cfg(test)]
+            source_computations: std::sync::atomic::AtomicUsize::new(0),
         })
     }
     fn member(&self, biome: BiomeResourceId, feature: usize) -> bool {
@@ -128,6 +134,19 @@ impl TreePreview {
         {
             return Ok(v);
         }
+        let _production = self.source_gates.lock(source)?;
+        if let Some((_, writes)) = self
+            .sources
+            .lock()
+            .map_err(|_| error("tree source cache poisoned"))?
+            .iter()
+            .find(|(key, _)| *key == source)
+        {
+            return Ok(Arc::clone(writes));
+        }
+        #[cfg(test)]
+        self.source_computations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let zoom = BiomeZoom::new(
             BiomeZoomSeed::from_world_seed(seed),
             BiomeZoomSemantics::Paper1_21_8Build60,
@@ -413,6 +432,52 @@ impl Region for SourceRegion<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn concurrent_sources_coalesce_one_complete_isolated_history() {
+        use std::sync::atomic::Ordering;
+        let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
+        let trees = generator.tree_preview().unwrap();
+        let grass = generator.grass_preview().unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        let values = std::thread::scope(|scope| {
+            let jobs: Vec<_> = (0..2)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        trees
+                            .source(&generator, grass, WorldSeed::new(0), ChunkPos::ORIGIN)
+                            .unwrap()
+                    })
+                })
+                .collect();
+            jobs.into_iter()
+                .map(|job| job.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert!(Arc::ptr_eq(&values[0], &values[1]));
+        assert_eq!(trees.source_computations.load(Ordering::Relaxed), 1);
+        let cache = trees.sources.lock().unwrap();
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache[0].0, ChunkPos::ORIGIN);
+        assert_eq!(cache[0].1.as_ref(), values[0].as_ref());
+    }
+
+    #[test]
+    fn refused_source_releases_gate_without_publishing_partial_writes() {
+        use std::sync::atomic::Ordering;
+        let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
+        let trees = generator.tree_preview().unwrap();
+        let grass = generator.grass_preview().unwrap();
+        let invalid = ChunkPos::new(i32::MAX, 0);
+        for _ in 0..2 {
+            assert!(trees
+                .source(&generator, grass, WorldSeed::new(0), invalid)
+                .is_err());
+        }
+        assert_eq!(trees.source_computations.load(Ordering::Relaxed), 2);
+        assert!(trees.sources.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn source_biomes_use_retained_raw_arrays_after_global_eviction() {
         let generator = NaturalWorldGenerator::with_tree_preview(WorldSeed::new(0)).unwrap();
