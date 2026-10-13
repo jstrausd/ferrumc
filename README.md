@@ -15,8 +15,8 @@ toward complete Survival, low memory/CPU use and unmodified Java plugins. Rust o
 and networking; an optional Java 21 adapter implements the first tested Paper
 API subset.
 
-Current gameplay uses flat generation or a limited Anvil map import in an
-offline alpha. Survival, online authentication and the remaining Paper APIs
+Current gameplay uses flat generation, a versioned natural Overworld preview,
+or a limited Anvil map import in an offline alpha. Survival, online authentication and the remaining Paper APIs
 remain unfinished. The client protocol is 772; see
 [`SUPPORTED_VERSION.md`](SUPPORTED_VERSION.md).
 
@@ -33,6 +33,7 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 
 - Join a vanilla 1.21.8 client in offline mode (no "Loading terrain" hang).
 - A flat creative world; build by placing blocks from the hotbar with **correct block states** — logs/slabs/stairs/torches/fences rotate and orient the way a real client expects.
+- Optional natural Overworld terrain, biomes and caves, with separately versioned grass and oak/birch tree subsets. See [local preview commands](docs/LOCAL_NATURAL_WORLD.md) and the [tree validation scope](docs/TREE_GENERATION_VALIDATION.md).
 - Multiplayer: other players are visible and move, **face the right way** (body + head rotation), and you can **see their held main-hand item**.
 - In-game chat and `/` command autocomplete (`/spawn`, `/gamemode`, permission-filtered).
 - Server-authoritative normal left/right player-inventory clicks with component-preserving split/merge/swap, offhand updates and cursor resync. Spectators cannot exchange inventory or chest items. Recipes and additional click modes remain unfinished.
@@ -47,9 +48,9 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 
 **Limitations (not done yet):**
 
-- Flat terrain generation; Anvil import has a limited content contract, and export is unfinished.
+- Natural generation is an Overworld preview: complete placed ores, structures and vegetation remain unfinished. The tree subset omits other species, fancy/fallen trees and decorators. Anvil import has a limited content contract, and export is unfinished.
 - Offline mode only — no online-mode authentication/encryption.
-- Full-bright lighting (placeholder, no light engine).
+- Flat worlds use full-bright lighting; natural worlds have vertical skylight only. A complete light engine remains unfinished.
 - No survival, mobs, redstone, or full vanilla parity.
 - Recipes, armor insertion rules, shift/drag/number-key/drop clicks need further work. Full-bag crafting input overflow stays in its input slot until ground-item entities exist. Components omitted by older saves cannot be recovered. Atomic crash recovery across player, chest/overlay and journal records remains unfinished; the experimental scheduler still uses the legacy persistence path.
 - Java world/entity/inventory APIs, scheduler, full Bukkit permissions, Paper bootstrap and NMS integration need further work.

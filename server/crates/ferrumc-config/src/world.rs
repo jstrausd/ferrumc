@@ -35,6 +35,9 @@ pub enum WorldGenerationPreset {
     /// Natural terrain with an isolated original short-grass feature subset.
     #[serde(rename = "ferrumc_natural_grass_preview")]
     FerrumcNaturalGrassPreview,
+    /// Natural grass preview with a bounded original oak/birch-tree subset.
+    #[serde(rename = "ferrumc_natural_tree_preview")]
+    FerrumcNaturalTreePreview,
 }
 
 /// Declarative world-content configuration, deserialized from the `[world]` TOML

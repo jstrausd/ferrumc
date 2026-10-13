@@ -290,6 +290,8 @@ pub(crate) async fn build_world(
             1 => RuntimeWorldGenerator::natural(identity.seed()).map_err(anyhow::Error::from),
             2 => RuntimeWorldGenerator::natural_with_grass(identity.seed())
                 .map_err(anyhow::Error::from),
+            3 => RuntimeWorldGenerator::natural_with_trees(identity.seed())
+                .map_err(anyhow::Error::from),
             _ => anyhow::bail!("unsupported natural generation revision {identity:?}"),
         },
         _ => anyhow::bail!("unsupported persisted generation identity {identity:?}"),
@@ -357,10 +359,13 @@ pub(crate) async fn build_world(
         );
     }
     let spawn_position = if identity.generator_kind() == GeneratorKind::FerrumcNaturalPreview {
-        let selected = natural_surface_spawn(shard.loaded_chunks(), config.spawn(), &positions)?;
-        tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
-            "natural Overworld preview ready: terrain/biomes/surfaces/carvers; features, ores, trees and structures are not populated");
-        tracing::warn!("preview lighting computes direct vertical skylight only; lateral light propagation and emitted block light are not implemented");
+        let selected = natural_surface_spawn(
+            shard.loaded_chunks(),
+            config.spawn(),
+            &positions,
+            identity.generator_revision() == 3,
+        )?;
+        report_natural_preview(identity.generator_revision(), selected);
         selected
     } else {
         config.spawn()
@@ -374,6 +379,19 @@ pub(crate) async fn build_world(
         player_store,
         generator,
     })
+}
+
+/// Reports only the selected preview subset; revision3 does not imply FEATURES.
+fn report_natural_preview(revision: u32, selected: Vec3) {
+    match revision {
+            3 => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
+                "natural tree preview ready: terrain/biomes/surfaces/carvers, short grass and bounded oak/birch trees; other placed features, placed ores and structures remain incomplete"),
+            2 => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
+                "natural grass preview ready: terrain/biomes/surfaces/carvers and short grass; placed ores, trees and structures are not populated"),
+            _ => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
+                "natural Overworld preview ready: terrain/biomes/surfaces/carvers; features, placed ores, trees and structures are not populated"),
+        }
+    tracing::warn!("preview lighting computes direct vertical skylight only; lateral light propagation and emitted block light are not implemented");
 }
 
 /// The two trait-object views of the one store backend opened at startup.
@@ -448,10 +466,16 @@ async fn reconcile_generation(
         Some(WorldGenerationPreset::FerrumcNaturalGrassPreview) => {
             GenerationIdentity::natural_overworld_with_grass(seed)
         }
+        Some(WorldGenerationPreset::FerrumcNaturalTreePreview) => {
+            GenerationIdentity::natural_overworld_with_trees(seed)
+        }
         Some(preset) => anyhow::bail!("unsupported world generation preset {preset:?}"),
         None => match stored {
             Some(identity) => match identity.generator_kind() {
                 GeneratorKind::FerrumcFlat => GenerationIdentity::flat_overworld(seed),
+                GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 3 => {
+                    GenerationIdentity::natural_overworld_with_trees(seed)
+                }
                 GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 2 => {
                     GenerationIdentity::natural_overworld_with_grass(seed)
                 }
@@ -606,10 +630,21 @@ fn natural_surface_spawn(
     chunks: &LoadedChunkMap,
     configured: Vec3,
     positions: &[ChunkPos],
+    below_canopy: bool,
 ) -> anyhow::Result<Vec3> {
     let requested = BlockPos::new(configured.x.floor() as i32, 0, configured.z.floor() as i32);
-    if let Some(y) = safe_surface_y(chunks, requested) {
-        return Ok(Vec3::new(configured.x, f64::from(y), configured.z));
+    if let Some(y) = safe_surface_y(chunks, requested, below_canopy) {
+        // Revision3 centers the0.6-wide body in the checked column rather than
+        // letting fractional coordinates overlap an unchecked adjacent trunk.
+        let (x, z) = if below_canopy {
+            (
+                f64::from(requested.x()) + 0.5,
+                f64::from(requested.z()) + 0.5,
+            )
+        } else {
+            (configured.x, configured.z)
+        };
+        return Ok(Vec3::new(x, f64::from(y), z));
     }
     for &pos in positions {
         let Some(chunk) = chunks.get(pos) else {
@@ -621,7 +656,7 @@ fn natural_surface_spawn(
                 let column = BlockPos::new(pos.x() * 16 + x, 0, pos.z() * 16 + z);
                 if let Some(y) = heightmap
                     .height(x as u8, z as u8)
-                    .and_then(|height| safe_column_y(chunk, column, height))
+                    .and_then(|height| spawn_column_y(chunk, column, height, below_canopy))
                 {
                     return Ok(Vec3::new(
                         f64::from(column.x()) + 0.5,
@@ -635,12 +670,71 @@ fn natural_surface_spawn(
     anyhow::bail!("natural preview has no safe dry spawn in the bounded resident spawn area; choose different spawn x/z or seed")
 }
 
-fn safe_surface_y(chunks: &LoadedChunkMap, column: BlockPos) -> Option<i32> {
+fn safe_surface_y(chunks: &LoadedChunkMap, column: BlockPos, below_canopy: bool) -> Option<i32> {
     let chunk = chunks.get(column.to_chunk_pos())?;
     let x = column.x().rem_euclid(16) as u8;
     let z = column.z().rem_euclid(16) as u8;
     let ground_y = chunk.heightmap(HeightmapKind::WorldSurface).height(x, z)?;
-    safe_column_y(chunk, column, ground_y)
+    spawn_column_y(chunk, column, ground_y, below_canopy)
+}
+
+/// Revision 3 scans at most the 384-cell Overworld column to dry terrain under
+/// its oak/birch canopy. Earlier revisions retain their exact top-surface policy.
+fn spawn_column_y(
+    chunk: &Chunk,
+    column: BlockPos,
+    ground_y: i32,
+    below_canopy: bool,
+) -> Option<i32> {
+    if !below_canopy {
+        return safe_column_y(chunk, column, ground_y);
+    }
+    let max_y = dimension::MIN_Y + i32::try_from(dimension::HEIGHT).ok()? - 1;
+    for y in (dimension::MIN_Y..=ground_y.min(max_y)).rev() {
+        let state = chunk.get_block(BlockPos::new(column.x(), y, column.z()))?;
+        let name = ferrumc_registry::block_state::state_id_to_block_name(state.as_u32())?;
+        // This closed tree subset never turns canopy/trunk blocks into support.
+        // Other obstructions (including all fluids) stop the search; do not
+        // silently descend through lakes, roofs or unknown blocks into caves.
+        if state.is_air() || name == "short_grass" {
+            continue;
+        }
+        if matches!(
+            name,
+            "birch_leaves" | "birch_log" | "oak_leaves" | "oak_log"
+        ) && is_dry_canopy(state, name)
+        {
+            continue;
+        }
+        return safe_column_y(chunk, column, y);
+    }
+    None
+}
+
+/// Wet leaves are a fluid barrier, even though their bare block name is a tree.
+fn is_dry_canopy(state: ferrumc_world::BlockStateId, name: &str) -> bool {
+    let Some(meta) = ferrumc_registry::block_state::block_metadata(name) else {
+        return false;
+    };
+    let Some(mut offset) = state.as_u32().checked_sub(meta.min_state) else {
+        return false;
+    };
+    for property in meta.properties.iter().rev() {
+        let Ok(radix) = u32::try_from(property.cardinality) else {
+            return false;
+        };
+        let Some(index) = offset.checked_rem(radix) else {
+            return false;
+        };
+        if property.name == "waterlogged" {
+            return property.values.get(index as usize) == Some(&"false");
+        }
+        let Some(remaining) = offset.checked_div(radix) else {
+            return false;
+        };
+        offset = remaining;
+    }
+    true
 }
 
 fn safe_column_y(chunk: &Chunk, column: BlockPos, mut ground_y: i32) -> Option<i32> {
@@ -1204,6 +1298,184 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn tree_preview_omission_preserves_identity_and_every_mismatch_refuses() {
+        let store = InMemoryStore::with_generation_metadata();
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let configured =
+            AppConfig::from_toml_str("[world]\nseed=-42\npreset='ferrumc_natural_tree_preview'")
+                .expect("tree declaration");
+        let identity = reconcile_generation(&store, key, &configured)
+            .await
+            .expect("fresh tree identity");
+        assert_eq!(
+            identity,
+            GenerationIdentity::natural_overworld_with_trees(WorldSeed::new(-42))
+        );
+        for declaration in [
+            "",
+            "[world]\nseed=-42",
+            "[world]\npreset='ferrumc_natural_tree_preview'",
+        ] {
+            let omitted = AppConfig::from_toml_str(declaration).expect("partial omission");
+            assert_eq!(
+                reconcile_generation(&store, key, &omitted)
+                    .await
+                    .expect("preserve"),
+                identity
+            );
+        }
+        let chunk_key = ChunkKey::new(key.world(), key.dimension(), ChunkPos::ORIGIN);
+        let record = ChunkRecord::new(
+            ferrumc_sim::CHUNK_SCHEMA_VERSION,
+            FlatWorldGenerator::new().generate(chunk_key.pos()),
+        );
+        store
+            .save_chunk(chunk_key, record.clone())
+            .await
+            .expect("preexisting record");
+        for declaration in [
+            "preset='ferrumc_natural_preview'",
+            "preset='ferrumc_natural_grass_preview'",
+            "preset='ferrumc_flat'",
+            "seed=43",
+            "anvil_import_dir='/unused'",
+        ] {
+            let config = AppConfig::from_toml_str(&format!("[world]\n{declaration}"))
+                .expect("parse mismatch");
+            assert!(
+                reconcile_generation(&store, key, &config).await.is_err(),
+                "{declaration}"
+            );
+            assert_eq!(
+                store.load_generation_identity(key).await.expect("metadata"),
+                Some(identity)
+            );
+            assert_eq!(
+                store.load_chunk(chunk_key).await.expect("retained record"),
+                Some(record.clone())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn tree_preview_cannot_relabel_existing_terrain_revisions() {
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let config = AppConfig::from_toml_str("[world]\npreset='ferrumc_natural_tree_preview'")
+            .expect("tree config");
+        for identity in [
+            GenerationIdentity::flat_overworld(WorldSeed::new(3)),
+            GenerationIdentity::natural_overworld(WorldSeed::new(3)),
+            GenerationIdentity::natural_overworld_with_grass(WorldSeed::new(3)),
+        ] {
+            let store = InMemoryStore::with_generation_metadata();
+            store
+                .ensure_generation_identity(key, identity)
+                .await
+                .expect("previous revision");
+            assert!(reconcile_generation(&store, key, &config).await.is_err());
+            assert_eq!(
+                store.load_generation_identity(key).await.expect("retained"),
+                Some(identity)
+            );
+        }
+    }
+
+    fn named_spawn_state(name: &str) -> BlockStateId {
+        BlockStateId::new(
+            ferrumc_registry::block_state::block_default_state(name).expect("known block"),
+        )
+    }
+
+    #[test]
+    fn tree_spawn_scans_under_canopy_but_never_uses_leaves_or_trunks_as_ground() {
+        let column = BlockPos::new(8, 0, 8);
+        for (leaves, log) in [("birch_leaves", "birch_log"), ("oak_leaves", "oak_log")] {
+            let mut chunk = FlatWorldGenerator::new().generate(ChunkPos::ORIGIN);
+            chunk
+                .set_block(BlockPos::new(8, 70, 8), named_spawn_state(leaves))
+                .expect("canopy");
+            assert_eq!(
+                spawn_column_y(&chunk, column, 70, false),
+                None,
+                "old top-surface behavior"
+            );
+            assert_eq!(
+                spawn_column_y(&chunk, column, 70, true),
+                Some(64),
+                "ground under canopy"
+            );
+            chunk
+                .set_block(BlockPos::new(8, 64, 8), named_spawn_state("short_grass"))
+                .expect("grass");
+            assert_eq!(spawn_column_y(&chunk, column, 70, true), Some(64));
+            for blocker_y in [64, 65] {
+                chunk
+                    .set_block(BlockPos::new(8, blocker_y, 8), named_spawn_state(log))
+                    .expect("trunk");
+                assert_eq!(
+                    spawn_column_y(&chunk, column, 70, true),
+                    None,
+                    "body obstruction"
+                );
+                chunk
+                    .set_block(BlockPos::new(8, blocker_y, 8), BlockStateId::AIR)
+                    .expect("remove trunk");
+            }
+            chunk
+                .set_block(BlockPos::new(8, 63, 8), named_spawn_state(leaves))
+                .expect("fake support");
+            assert_eq!(
+                spawn_column_y(&chunk, column, 70, true),
+                None,
+                "leaves cannot support feet"
+            );
+        }
+    }
+
+    #[test]
+    fn tree_spawn_refuses_fluid_unknown_roof_void_and_ceiling_support() {
+        let column = BlockPos::new(8, 0, 8);
+        for blocker in ["water", "lava", "glass", "snow"] {
+            let mut chunk = FlatWorldGenerator::new().generate(ChunkPos::ORIGIN);
+            chunk
+                .set_block(BlockPos::new(8, 70, 8), named_spawn_state("oak_leaves"))
+                .expect("canopy");
+            chunk
+                .set_block(BlockPos::new(8, 67, 8), named_spawn_state(blocker))
+                .expect("obstacle");
+            assert_eq!(spawn_column_y(&chunk, column, 70, true), None, "{blocker}");
+        }
+        for leaves in ["oak_leaves", "birch_leaves"] {
+            let mut chunk = FlatWorldGenerator::new().generate(ChunkPos::ORIGIN);
+            let props = std::collections::BTreeMap::from([("waterlogged", "true")]);
+            let wet = BlockStateId::new(
+                ferrumc_registry::block_state::compute_state_id(leaves, &props)
+                    .expect("wet leaves"),
+            );
+            chunk
+                .set_block(BlockPos::new(8, 70, 8), wet)
+                .expect("wet canopy");
+            assert_eq!(
+                spawn_column_y(&chunk, column, 70, true),
+                None,
+                "waterlogged canopy is fluid barrier"
+            );
+        }
+        let mut chunk = FlatWorldGenerator::new().generate(ChunkPos::ORIGIN);
+        chunk
+            .set_block(BlockPos::new(8, 319, 8), named_spawn_state("birch_leaves"))
+            .expect("high canopy");
+        assert_eq!(spawn_column_y(&chunk, column, 319, true), Some(64));
+        chunk
+            .set_block(BlockPos::new(8, 318, 8), named_spawn_state("stone"))
+            .expect("ceiling terrain");
+        assert_eq!(spawn_column_y(&chunk, column, 319, true), None);
+        let empty = Chunk::new(ChunkPos::ORIGIN);
+        assert_eq!(spawn_column_y(&empty, column, 319, true), None);
+        assert_eq!(spawn_column_y(&empty, column, -65, true), None);
+    }
+
     #[test]
     fn short_grass_is_passable_spawn_space_on_a_real_support() {
         let mut chunk = FlatWorldGenerator::new().generate(ChunkPos::ORIGIN);
@@ -1222,6 +1494,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tree_spawn_centers_checked_column_away_from_neighbor_trunk() {
+        let store = InMemoryStore::new();
+        let pos = ChunkPos::ORIGIN;
+        let mut chunks = LoadedChunkMap::new(WorldId::new(0), DimensionId::new(0));
+        chunks
+            .acquire(
+                &store,
+                &FlatWorldGenerator::new(),
+                pos,
+                SpawnChunkTickets::new(pos, 0).ticket(),
+            )
+            .await
+            .expect("resident");
+        let chunk = chunks.get_mut(pos).expect("resident chunk");
+        for y in [64, 65] {
+            chunk
+                .set_block(BlockPos::new(7, y, 8), named_spawn_state("oak_log"))
+                .expect("neighbor trunk");
+        }
+        chunk
+            .set_block(BlockPos::new(8, 70, 8), named_spawn_state("oak_leaves"))
+            .expect("canopy");
+        let configured = Vec3::new(8.01, 200.0, 8.99);
+        assert_eq!(
+            natural_surface_spawn(&chunks, configured, &[pos], true).expect("safe tree spawn"),
+            Vec3::new(8.5, 64.0, 8.5)
+        );
+        chunk_cleanup_canopy(&mut chunks, pos);
+        assert_eq!(
+            natural_surface_spawn(&chunks, configured, &[pos], false).expect("legacy spawn"),
+            Vec3::new(8.01, 64.0, 8.99)
+        );
+    }
+
+    fn chunk_cleanup_canopy(chunks: &mut LoadedChunkMap, pos: ChunkPos) {
+        chunks
+            .get_mut(pos)
+            .expect("resident")
+            .set_block(BlockPos::new(8, 70, 8), BlockStateId::AIR)
+            .expect("remove canopy");
+    }
+
+    #[tokio::test]
     async fn natural_spawn_uses_dry_surface_and_refuses_all_water_ring() {
         let store = InMemoryStore::new();
         let pos = ChunkPos::new(0, 0);
@@ -1237,7 +1552,7 @@ mod tests {
             .expect("resident terrain");
         let configured = Vec3::new(8.5, 200.0, 8.5);
         assert_eq!(
-            natural_surface_spawn(&chunks, configured, &[pos]).expect("dry surface"),
+            natural_surface_spawn(&chunks, configured, &[pos], false).expect("dry surface"),
             Vec3::new(8.5, 64.0, 8.5)
         );
         let water = BlockStateId::new(
@@ -1251,7 +1566,7 @@ mod tests {
                     .expect("water above ground");
             }
         }
-        assert!(natural_surface_spawn(&chunks, configured, &[pos]).is_err());
+        assert!(natural_surface_spawn(&chunks, configured, &[pos], false).is_err());
     }
     #[tokio::test]
     async fn stored_natural_identity_refuses_omitted_preset_anvil_before_world_changes() {

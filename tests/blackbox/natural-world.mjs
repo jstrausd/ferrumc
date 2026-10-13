@@ -30,6 +30,7 @@ function inspectColumn(chunk, x, z, excluded) {
   const digest = crypto.createHash('sha256'), terrain = crypto.createHash('sha256'), biomeHash = crypto.createHash('sha256');
   const excludedCells = Array.isArray(excluded) ? excluded : excluded ? [excluded] : [];
   const heights = [], biomes = new Set(); let solid = 0, undergroundAir = 0, shortGrass = 0;
+  const trees = { oak_log: 0, oak_leaves: 0, birch_log: 0, birch_leaves: 0 };
   const data = Buffer.alloc(4);
   for (let lz = 0; lz < 16; lz++) for (let lx = 0; lx < 16; lx++) {
     let top;
@@ -37,6 +38,8 @@ function inspectColumn(chunk, x, z, excluded) {
       const state = chunk.getBlockStateId(new Vec3(lx, y, lz)); data.writeUInt32BE(state); digest.update(data);
       if (!excludedCells.some(p => p.x === x * 16 + lx && p.y === y && p.z === z * 16 + lz)) terrain.update(data);
       if (state === registry.blocksByName.short_grass.defaultState) shortGrass++;
+      const name = registry.blocksByStateId[state]?.name;
+      if (Object.hasOwn(trees, name)) trees[name]++;
       if (state !== 0) { solid++; if (top === undefined) top = y; } else if (y < 40 && y > -50) undergroundAir++;
     }
     assert(top !== undefined, 'natural column has material'); heights.push(top);
@@ -47,7 +50,7 @@ function inspectColumn(chunk, x, z, excluded) {
     data.writeUInt32BE(biome); biomeHash.update(data); biomes.add(biome);
   }
   assert(solid > 256, 'real terrain blocks'); assert(heights.some(y => y !== 63), 'not flat-v1');
-  return { chunk: [x, z], hash: digest.digest('hex'), terrainHash: terrain.digest('hex'), biomeHash: biomeHash.digest('hex'), heights: [Math.min(...heights), Math.max(...heights)], biomes: [...biomes].sort((a, b) => a - b), solid, undergroundAir, shortGrass };
+  return { chunk: [x, z], hash: digest.digest('hex'), terrainHash: terrain.digest('hex'), biomeHash: biomeHash.digest('hex'), heights: [Math.min(...heights), Math.max(...heights)], biomes: [...biomes].sort((a, b) => a - b), solid, undergroundAir, shortGrass, trees };
 }
 if (process.argv.includes('--self-test')) {
   const chunk = new Chunk({ x: 0, z: 0 });
@@ -58,6 +61,10 @@ if (process.argv.includes('--self-test')) {
   const after = inspectColumn(chunk, 0, 0, marker);
   assert.notEqual(before.hash, after.hash); assert.equal(before.terrainHash, after.terrainHash); assert.equal(before.biomeHash, after.biomeHash);
   assert.equal(chunk.getBlock(local(marker)).name, 'gold_block');
+  chunk.setBlockStateId(new Vec3(15, -62, 8), registry.blocksByName.oak_log.defaultState);
+  chunk.setBlockStateId(new Vec3(15, -61, 8), registry.blocksByName.birch_leaves.defaultState);
+  const populated = inspectColumn(chunk, 0, 0, marker);
+  assert.deepEqual(populated.trees, { oak_log: 1, oak_leaves: 0, birch_log: 0, birch_leaves: 1 });
   console.log('PASS independent marker and untouched-terrain hash self-test');
 } else {
   const bin = process.env.MC_SERVER_BIN && path.resolve(process.env.MC_SERVER_BIN);
@@ -69,6 +76,7 @@ if (process.argv.includes('--self-test')) {
   const viewDistance = Number(process.env.MC_NATURAL_VIEW || 1);
   assert(Number.isInteger(viewDistance) && viewDistance >= 1 && viewDistance <= 8, 'test view distance 1..8');
   const exploreEnabled = process.env.MC_NATURAL_EXPLORE !== '0';
+  const treesEnabled = process.env.MC_NATURAL_PRESET === 'ferrumc_natural_tree_preview';
   fs.mkdirSync(dir, { recursive: true });
   assert(!fs.existsSync(path.join(dir, 'world')), 'use a fresh MC_RUN_DIR; artifacts are preserved for diagnosis');
   const config = path.join(dir, 'config.toml');
@@ -249,17 +257,95 @@ if (process.argv.includes('--self-test')) {
     await teleport(connection, spawnPosition);
     return { position: clicked, adjacent, sequence, stateId: markerBlock.defaultState };
   }
+  function treeView(connection, position) {
+    const result = [], cx = Math.floor(position.x / 16), cz = Math.floor(position.z / 16);
+    for (let x = cx - viewDistance; x <= cx + viewDistance; x++) for (let z = cz - viewDistance; z <= cz + viewDistance; z++) {
+      const column = connection.state.columns.get(`${x},${z}`);
+      assert(column, 'complete tree preview column');
+      result.push(inspectColumn(column, x, z));
+    }
+    return result;
+  }
+  function chooseTreeLog(connection) {
+    const sorted = [...connection.state.columns.entries()].sort(([a], [b]) => a.localeCompare(b));
+    for (const [key, column] of sorted) {
+      const [cx, cz] = key.split(',').map(Number);
+      for (let x = 0; x < 16; x++) for (let z = 0; z < 16; z++) for (let y = 40; y < 319; y++) {
+        const name = column.getBlock(new Vec3(x, y, z)).name;
+        if (name === 'oak_log' || name === 'birch_log') return { position: { x: cx * 16 + x, y, z: cz * 16 + z }, name };
+      }
+    }
+    throw new Error('no generated oak/birch log in the complete seed-0 view');
+  }
+  function treeSeamWitness(connection) {
+    // Seed-0 runtime witness; states are checked using the independent client registry.
+    // The full-column restart checks below preserve both fragments, including signed coordinates.
+    const x = -14, z = -1, trunk = [], leaves = [];
+    for (let y = 40; y < 100; y++) {
+      const position = { x, y, z }, column = connection.state.columns.get(columnKey(position));
+      assert(column, 'negative tree witness chunk received');
+      if (column.getBlock(local(position)).name === 'oak_log') trunk.push(position);
+    }
+    assert(trunk.length >= 4, 'negative seam tree has a real oak trunk');
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      for (let y = trunk[0].y + 2; y <= trunk.at(-1).y + 1; y++) {
+        const position = { x: x + dx, y, z: z + dz }, column = connection.state.columns.get(columnKey(position));
+        assert(column, 'both signed crown fragments received');
+        const state = column.getBlockStateId(local(position));
+        if (column.getBlock(local(position)).name === 'oak_leaves') leaves.push({ position, state });
+      }
+    }
+    assert(leaves.some(cell => cell.position.z < 0), 'oak crown on negative-z side');
+    assert(leaves.some(cell => cell.position.z >= 0), 'oak crown crosses into positive-z chunk');
+    return { trunk, leaves };
+  }
+  async function harvestTreeLog(connection, tree, spawnPosition) {
+    const position = tree.position, column = connection.state.columns.get(columnKey(position));
+    assert.equal(column.getBlock(local(position)).name, tree.name, 'actual generated log before harvest');
+    const destination = { x: position.x + 3.5, y: position.y + 1, z: position.z + 0.5 };
+    await teleport(connection, destination);
+    // The position packet confirms queue admission; simulation coalesces moves
+    // at the tick boundary. Observe the destination view and live ticks before
+    // making a reach-checked edit against the actor's authoritative position.
+    const arrivalView = await convergeView(connection, destination, 'arrival at generated tree');
+    const arrivedColumn = connection.state.columns.get(columnKey(position));
+    assert(arrivedColumn, 'generated log column ready at destination');
+    const before = inspectColumn(arrivedColumn, Math.floor(position.x / 16), Math.floor(position.z / 16), position);
+    const sequence = 5;
+    connection.state.changes.delete(blockKey(position));
+    connection.client.write('block_dig', { status: 0, location: position, face: 1, sequence });
+    await until(() => connection.state.changes.has(blockKey(position)) && connection.state.acks.has(sequence), 'creative generated-log harvest and ACK', connection, 30000);
+    const currentColumn = connection.state.columns.get(columnKey(position));
+    assert(currentColumn, 'harvested tree column remains visible');
+    assert.equal(connection.state.changes.get(blockKey(position)), registry.blocksByName.air.defaultState, 'authoritative generated-log change is AIR');
+    assert.equal(currentColumn.getBlock(local(position)).name, 'air', 'generated log actually removed');
+    const after = inspectColumn(currentColumn, Math.floor(position.x / 16), Math.floor(position.z / 16), position);
+    assert.equal(before.terrainHash, after.terrainHash, 'harvest changes only the requested log');
+    assert.equal(before.biomeHash, after.biomeHash, 'harvest preserves every stored biome');
+    await teleport(connection, spawnPosition);
+    await convergeView(connection, spawnPosition, 'return from generated-log harvest');
+    return { ...tree, sequence, arrivalView, before, after };
+  }
   try {
     await start(1);
     const firstClient = await connect(), spawnPosition = { ...firstClient.state.position }, marker = chooseMarker(firstClient);
     const firstView = await convergeView(firstClient, spawnPosition, 'initial standing player');
+    const initialTrees = treesEnabled ? treeView(firstClient, spawnPosition) : null;
+    const initialTreeSeam = treesEnabled ? treeSeamWitness(firstClient) : null;
+    if (initialTrees) {
+      assert(initialTrees.some(column => column.trees.oak_log + column.trees.birch_log > 0), 'generated trees have actual trunks');
+      assert(initialTrees.some(column => column.trees.oak_leaves + column.trees.birch_leaves > 0), 'generated trees have actual crowns');
+    }
+    const tree = treesEnabled ? chooseTreeLog(firstClient) : null;
     const grass = process.env.MC_NATURAL_PRESET === 'ferrumc_natural_grass_preview' ? grassCell(firstClient) : null;
-    const excluded = [marker, grass].filter(Boolean);
+    const excluded = [marker, grass, tree?.position].filter(Boolean);
     const before = inspectColumn(firstClient.state.columns.get('0,0'), 0, 0, excluded);
     if (process.env.MC_NATURAL_PRESET === 'ferrumc_natural_grass_preview') assert(before.shortGrass > 0, 'original grass subset is visible in the seed-0 origin column');
     const edit = await placeMarker(firstClient, marker);
     if (grass) edit.grassReplacement = await replaceGrass(firstClient, grass, spawnPosition);
+    if (tree) edit.treeHarvest = await harvestTreeLog(firstClient, tree, spawnPosition);
     const edited = inspectColumn(firstClient.state.columns.get('0,0'), 0, 0, excluded);
+    const editedTreeView = treesEnabled ? treeView(firstClient, spawnPosition) : null;
     assert.notEqual(before.hash, edited.hash, 'creative edit changes actual terrain');
     assert.equal(before.terrainHash, edited.terrainHash, 'edits change exactly the tested marker cells');
     const firstExploration = await explore(firstClient, spawnPosition);
@@ -270,6 +356,11 @@ if (process.argv.includes('--self-test')) {
     const restarted = inspectColumn(secondClient.state.columns.get('0,0'), 0, 0, excluded);
     assert.equal(secondClient.state.columns.get('0,0').getBlock(local(marker)).name, 'gold_block', 'saved creative edit streams after restart');
     if (grass) assert.equal(secondClient.state.columns.get('0,0').getBlock(local(grass)).name, 'gold_block', 'grass replacement survives restart');
+    const restartedTreeView = treesEnabled ? treeView(secondClient, spawnPosition) : null;
+    if (tree) {
+      assert.equal(secondClient.state.columns.get(columnKey(tree.position)).getBlock(local(tree.position)).name, 'air', 'harvested generated log stays removed after restart');
+      assert.deepEqual(restartedTreeView, editedTreeView, 'all requested tree states and quart biomes survive restart');
+    }
     assert.equal(edited.hash, restarted.hash, 'all edited natural blocks survive restart');
     assert.equal(before.terrainHash, restarted.terrainHash, 'untouched natural terrain survives restart');
     assert.equal(before.biomeHash, restarted.biomeHash, 'every stored biome survives restart');
@@ -277,7 +368,7 @@ if (process.argv.includes('--self-test')) {
     const secondExploration = await explore(secondClient, spawnPosition);
     assert.deepEqual(firstExploration, secondExploration, 'positive and negative natural exploration regenerates identically');
     await close(secondClient); await stop();
-    const evidence = { status: 'PASS_NATURAL_PROTOCOL_EDIT_RESTART', scope: 'natural preview terrain and stored biomes, creative edit, graceful restart; no full Survival/Paper acceptance', binaryHash, viewDistance, firstView, secondView, spawn: spawnPosition, edit, before, edited, restarted, firstExploration, secondExploration };
+    const evidence = { status: 'PASS_NATURAL_PROTOCOL_EDIT_RESTART', scope: 'natural preview terrain and stored biomes, creative edit, graceful restart; no full Survival/Paper acceptance', binaryHash, viewDistance, firstView, secondView, spawn: spawnPosition, edit, before, edited, restarted, firstExploration, secondExploration, ...(treesEnabled ? { initialTrees, initialTreeSeam, editedTreeView, restartedTreeView } : {}) };
     fs.writeFileSync(path.join(dir, 'acceptance.json'), JSON.stringify(evidence, null, 2));
     console.log(JSON.stringify(evidence));
   } finally {

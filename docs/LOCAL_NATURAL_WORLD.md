@@ -87,6 +87,21 @@ saves cannot be silently upgraded: their generation identity is deliberately
 checked before startup. Short grass is passable for spawn and replaceable by
 other blocks during placement.
 
+To test oak and birch trees together with grass, create a fresh revision-3 world:
+
+```sh
+FERRUMC_NATURAL_DIR="$PWD/local-natural/tree-preview" \
+FERRUMC_NATURAL_PRESET=ferrumc_natural_tree_preview \
+./scripts/run-natural-preview.sh
+```
+
+This selects a separately versioned tree subset; existing revision-1/2 saves
+keep their identities. The launcher preset applies only when creating a new
+configuration. Spawn chooses dry ground below the canopy with two passable
+body cells, rather than placing the player on leaves or inside a trunk.
+Trees can naturally be absent in biomes that do not admit the implemented
+routes. This preset is not complete Minecraft tree or Survival generation.
+
 Player placement checks final collision shapes against live nonspectator
 players before any mutation, including refined slabs and both door/bed cells.
 A refusal resynchronizes the prediction and acknowledges the action. Original
@@ -94,10 +109,14 @@ offset bamboo/dripstone/moving-piston shapes remain unsupported and fail closed.
 
 ## Preview limits
 
-- No placed-feature ore population, trees or structures. Material-stage ore
+- No complete placed-feature ore population or structures. Material-stage ore
   veins remain present. An explicit optional `ferrumc_natural_grass_preview`
   preset adds original isolated plains/forest short-grass features (revision 2).
   This is a subset, not complete vegetation or full feature chronology.
+- The optional `ferrumc_natural_tree_preview` adds undecorated configured oak
+  and birch shapes. It omits fancy oak, fallen trees, bee nests, leaf litter and
+  other tree species. Its isolated-source placement policy is versioned and
+  does not reproduce the complete original FEATURES stage.
 - Overworld only. Complete Survival, mobs, Nether, End and the dragon remain
   separate work.
 - Lighting is direct vertical skylight; lateral propagation and emitted block
@@ -124,3 +143,8 @@ The test owns its process on port 25567 and records its acceptance JSON and
 server logs under `MC_RUN_DIR`. It uses independently maintained protocol and
 chunk decoders; its result is scoped to the tested terrain, exploration and
 restart behavior, not complete gameplay parity.
+
+For the tree subset, add `MC_NATURAL_PRESET=ferrumc_natural_tree_preview` and
+use a fresh test directory. The tree check also verifies a crown spanning the
+negative-Z chunk boundary, removes an actual generated log in creative mode,
+and compares all requested block states and quart biomes after a saved restart.

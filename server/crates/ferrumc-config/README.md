@@ -5,8 +5,11 @@ Server configuration parsing and validation. TOML-based.
 `WorldConfig` preserves optional generation declarations for App bootstrap:
 `seed()` returns `Option<i64>` and `preset()` returns
 `Option<WorldGenerationPreset>`. Omitted values stay `None`; explicit `seed = 0`
-is distinct. Only numeric TOML integers and the implemented profile
-`preset = "ferrumc_flat"` are accepted. Text/random/float seeds, overflow,
+is distinct. Only numeric TOML integers and the supported profiles
+`ferrumc_flat`, `ferrumc_natural_preview`, `ferrumc_natural_grass_preview` and
+`ferrumc_natural_tree_preview` are accepted. The tree profile selects a separate
+experimental revision with a bounded oak/birch subset; it does not promise
+complete features or Survival. Text/random/float seeds, overflow,
 unknown profiles and misspelled fields refuse configuration.
 
 ```toml

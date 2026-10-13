@@ -6,7 +6,8 @@ Application entry point. Wires config, services, plugin registry, shutdown.
 
 New worlds use storage format4. `[world].seed` accepts an optional signed64
 integer and `[world].preset` accepts `"ferrumc_flat"` or
-`"ferrumc_natural_preview"`. A fresh omission explicitly
+`"ferrumc_natural_preview"`, `"ferrumc_natural_grass_preview"` or
+`"ferrumc_natural_tree_preview"`. A fresh omission explicitly
 selects seed0 and FerrumC-flat-v1; this fixed layered terrain does not provide
 natural Overworld, Nether or End generation. Once stored, the seed is reused
 on restart when the setting is omitted. An explicitly different seed refuses
@@ -22,11 +23,22 @@ imports fail startup. This importer is not a completed Vanilla world migration.
 ## Natural terrain preview streaming
 
 The natural preset includes terrain density, biome selection and surface material
-rules. It remains a preview: placed features, placed ores, trees and structures
-are absent; density ore veins are included. Lighting currently supplies vertical
+rules. Revision1 omits placed features; revision2 adds an isolated short-grass
+subset. The explicit tree preview is algorithm2 revision3, adding a bounded
+oak/birch subset. It requires a new world: existing revisions cannot be relabelled.
+Stored revision3 and seed survive omitted declarations on restart. Other placed
+features, placed ores and structures remain incomplete; density ore veins are
+included. These preview profiles do not provide complete Survival. Lighting currently supplies vertical
 skylight and the motion-blocking heightmap uses highest non-air material. Natural
 spawn chooses a dry support column with two clear blocks in the resident spawn
-square. Natural worlds reject Anvil import, including when the preset is restored
+square. Revision3 scans at most384 cells per column through air, short grass,
+oak/birch logs and leaves to real terrain, with two passable body cells. Leaves
+and trunks cannot become spawn platforms, and other obstructions stop descent.
+Earlier revisions retain their top-surface policy. This closed terrain rule is
+narrower than original `PlayerRespawnLogic` collision/heightmap semantics. The
+revision3 spawn is centered in its checked column so the player body cannot
+overlap an unchecked neighboring trunk.
+Natural worlds reject Anvil import, including when the preset is restored
 from metadata.
 
 Streaming prepares raw terrain outside the simulation task with at most two

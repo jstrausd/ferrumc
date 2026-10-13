@@ -110,6 +110,13 @@ fn only_supported_profiles_are_accepted() {
         Some(WorldGenerationPreset::FerrumcNaturalGrassPreview)
     );
     assert_eq!(grass.seed(), Some(-42));
+    let trees: WorldConfig =
+        toml::from_str("preset = 'ferrumc_natural_tree_preview'\nseed = -42").unwrap();
+    assert_eq!(
+        trees.preset(),
+        Some(WorldGenerationPreset::FerrumcNaturalTreePreview)
+    );
+    assert_eq!(trees.seed(), Some(-42));
     for literal in [
         "'flat'",
         "'normal'",
@@ -122,6 +129,8 @@ fn only_supported_profiles_are_accepted() {
         "'ferrumc-flat'",
         "' ferrumc_flat'",
         "'ferrumc_flat '",
+        "'ferrumc_natural_trees_preview'",
+        "'ferrumc_natural_tree_preview '",
         "''",
         "0",
         "true",
@@ -139,7 +148,25 @@ fn only_supported_profiles_are_accepted() {
 fn import_seed_and_preset_are_independent_optional_declarations() {
     for imported in [false, true] {
         for seed in [None, Some(0), Some(i64::MIN), Some(i64::MAX)] {
-            for preset in [None, Some(WorldGenerationPreset::FerrumcFlat)] {
+            for (preset, literal) in [
+                (None, None),
+                (
+                    Some(WorldGenerationPreset::FerrumcFlat),
+                    Some("ferrumc_flat"),
+                ),
+                (
+                    Some(WorldGenerationPreset::FerrumcNaturalPreview),
+                    Some("ferrumc_natural_preview"),
+                ),
+                (
+                    Some(WorldGenerationPreset::FerrumcNaturalGrassPreview),
+                    Some("ferrumc_natural_grass_preview"),
+                ),
+                (
+                    Some(WorldGenerationPreset::FerrumcNaturalTreePreview),
+                    Some("ferrumc_natural_tree_preview"),
+                ),
+            ] {
                 let mut input = String::from("[world]\n");
                 if imported {
                     input.push_str("anvil_import_dir = '/maps/region'\n");
@@ -147,8 +174,8 @@ fn import_seed_and_preset_are_independent_optional_declarations() {
                 if let Some(seed) = seed {
                     writeln!(input, "seed = {seed}").unwrap();
                 }
-                if preset.is_some() {
-                    input.push_str("preset = 'ferrumc_flat'\n");
+                if let Some(literal) = literal {
+                    writeln!(input, "preset = '{literal}'").unwrap();
                 }
                 let config: Configuration = toml::from_str(&input).unwrap();
                 assert_eq!(config.world.seed(), seed);

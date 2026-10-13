@@ -46,8 +46,8 @@
   phase deadlines. This is a bounded FerrumC policy, not full Paper loader parity.
   Flat spawn remains configured; natural spawn selects a dry support column
   with two clear blocks within the bounded resident spawn square, and `/spawn`
-  uses that same position. Preview startup reports missing placed features,
-  ores, trees and structures; density-generated ore veins are included.
+  uses that same position. Startup reports the chosen revision and remaining
+  placed-feature/ore/tree/structure gaps; density-generated ore veins are included.
   Natural preview refuses Anvil imports before declaring metadata or importing
   chunks, including when the natural preset comes from stored metadata; imported
   full snapshots do not preserve the preview biome palette payload.
@@ -230,3 +230,12 @@
   declarations preserve its stored identity. Its isolated original plains/forest
   short-grass features are not full FEATURES. Spawn skips grass to a real dry
   support and both preview revisions reject Anvil imports before metadata writes.
+
+- The explicit natural-tree preview binds algorithm2 revision3; omissions keep
+  its stored seed/revision, and explicit older-preset changes refuse before world
+  writes. Natural imports remain forbidden. Spawn scans at most384 cells per
+  candidate through air/short-grass/oak/birch canopy/trunks to first real terrain,
+  requiring two passable body cells and centering the body inside that column.
+  Tree blocks never support spawn, fluids and
+  unknown obstructions stop descent. Revisions1/2 retain their previous policy.
+  The oak/birch subset is incomplete FEATURES and does not imply Survival.

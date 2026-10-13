@@ -548,7 +548,7 @@ impl AppConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             !matches!(self.world.preset(),
-                Some(WorldGenerationPreset::FerrumcNaturalPreview | WorldGenerationPreset::FerrumcNaturalGrassPreview))
+                Some(WorldGenerationPreset::FerrumcNaturalPreview | WorldGenerationPreset::FerrumcNaturalGrassPreview | WorldGenerationPreset::FerrumcNaturalTreePreview))
                 || self.world.anvil_import_dir().is_none(),
             "ferrumc_natural_preview cannot use anvil_import_dir: imported full chunks do not preserve preview biome palettes"
         );
@@ -1228,6 +1228,15 @@ mod tests {
         let parsed = AppConfig::from_toml_str("").expect("empty config is valid");
         assert_eq!(parsed.world, WorldConfig::default());
         assert_eq!(parsed.world.anvil_import_dir(), None);
+    }
+
+    #[test]
+    fn tree_preview_with_anvil_import_is_rejected_during_config_validation() {
+        let error = AppConfig::from_toml_str(
+            "[world]\npreset='ferrumc_natural_tree_preview'\nanvil_import_dir='/unused'\n",
+        )
+        .expect_err("tree preview cannot import missing biome snapshots");
+        assert!(error.to_string().contains("cannot use anvil_import_dir"));
     }
 
     #[test]
