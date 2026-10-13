@@ -8,8 +8,10 @@ configuration. Ordinary new-server defaults remain `ferrumc_flat`.
 
 ## Run locally
 
-The local delivery contains a release executable under `local-natural/`.
-From the repository root:
+The launcher selects the newer executable from `local-natural/ferrumc` and
+`server/target/release/ferrumc`, or the only available one. An explicit
+`FERRUMC_SERVER_BIN` overrides this selection. It prints the selected path
+before starting. From the repository root:
 
 ```sh
 ./scripts/run-natural-preview.sh
@@ -36,11 +38,20 @@ FERRUMC_NATURAL_DIR=/absolute/path/to/fresh-preview \
 FERRUMC_NATURAL_PORT=25568 ./scripts/run-natural-preview.sh
 ```
 
-On another clean accepted checkout, first build with
-`cargo build --manifest-path server/Cargo.toml --release --locked -p ferrumc-app`,
-then set `FERRUMC_SERVER_BIN` to that checkout's `server/target/release/ferrumc`.
-The launcher deliberately uses the supplied binary rather than compiling
-unreviewed working-tree changes.
+On another clean accepted checkout:
+
+```sh
+git pull --ff-only
+cargo build --manifest-path server/Cargo.toml --release --locked -p ferrumc-app
+FERRUMC_SERVER_BIN="$PWD/server/target/release/ferrumc" ./scripts/run-natural-preview.sh
+```
+
+Building updates `server/target/release/ferrumc`; it does not replace a previously
+installed `local-natural/ferrumc`. The explicit path above also works with older
+launchers. For a custom Cargo target directory, set `FERRUMC_SERVER_BIN` to its
+actual executable. The launcher uses existing binaries and never builds source.
+Do not append `--bind`: both listeners already bind to `0.0.0.0`. Select a
+different Minecraft port with `FERRUMC_NATURAL_PORT`.
 
 ## Configuration and persistence
 

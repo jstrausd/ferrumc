@@ -4,13 +4,27 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="${FERRUMC_NATURAL_DIR:-$ROOT/local-natural}"
-SERVER_BIN="${FERRUMC_SERVER_BIN:-$ROOT/local-natural/ferrumc}"
+if [[ -n "${FERRUMC_SERVER_BIN:-}" ]]; then
+  SERVER_BIN="$FERRUMC_SERVER_BIN"
+elif [[ -x "$ROOT/server/target/release/ferrumc" ]] &&
+     [[ ! -x "$ROOT/local-natural/ferrumc" || "$ROOT/server/target/release/ferrumc" -nt "$ROOT/local-natural/ferrumc" ]]; then
+  # A host-local rebuild must take precedence over an older delivered copy.
+  SERVER_BIN="$ROOT/server/target/release/ferrumc"
+else
+  SERVER_BIN="$ROOT/local-natural/ferrumc"
+fi
 PORT="${FERRUMC_NATURAL_PORT:-25566}"
 PRESET="${FERRUMC_NATURAL_PRESET:-ferrumc_natural_preview}"
 case "$PRESET" in
   ferrumc_natural_preview|ferrumc_natural_grass_preview|ferrumc_natural_tree_preview) ;;
   *) echo "Unsupported preview preset: $PRESET" >&2; exit 1 ;;
 esac
+
+if (( $# > 0 )); then
+  echo "This launcher accepts environment settings, not command-line arguments." >&2
+  echo "It always binds to 0.0.0.0; set FERRUMC_NATURAL_PORT to select the Minecraft port." >&2
+  exit 1
+fi
 
 if [[ ! -x "$SERVER_BIN" ]]; then
   echo "Missing executable: $SERVER_BIN" >&2
@@ -43,6 +57,7 @@ preset = "$PRESET"
 TOML
 fi
 echo "Minecraft Java 1.21.8: listening on 0.0.0.0:$PORT (connect using localhost or this host’s IP)"
+echo "Executable: $SERVER_BIN"
 echo "Config: $RUN_DIR/config.toml; stop with Ctrl-C to save."
 cd "$RUN_DIR"
 exec "$SERVER_BIN" --config "$RUN_DIR/config.toml" --bind "0.0.0.0:$PORT" --bind-all-interfaces
