@@ -22,12 +22,29 @@ const MAX_WARM_BYTES: usize = 8 * 1024 * 1024;
 const MAX_BASELINE_BYTES: usize = 512 * 1024;
 const MAX_FAILED_POSITIONS: usize = 128;
 
+#[derive(Default)]
+struct ViewerTargets {
+    // Unlike the consumed queues, this bounded set preserves the viewer's
+    // complete current intent so other viewers' useful warm work is protected.
+    wanted: BTreeSet<ChunkPos>,
+    visible: VecDeque<ChunkPos>,
+    speculative: VecDeque<ChunkPos>,
+}
+
+impl ViewerTargets {
+    fn retain(&mut self, keep: impl Fn(&ChunkPos) -> bool) {
+        self.wanted.retain(&keep);
+        self.visible.retain(&keep);
+        self.speculative.retain(keep);
+    }
+}
+
 type Completion = Result<(ChunkPos, Result<Chunk, WorldError>), JoinError>;
 
 /// Driver-owned bounded work and raw baseline cache. None of these own tickets.
 pub(crate) struct ChunkPreparation {
     generator: Arc<dyn FallibleChunkGenerator>,
-    targets: BTreeMap<PlayerId, VecDeque<ChunkPos>>,
+    targets: BTreeMap<PlayerId, ViewerTargets>,
     viewers: VecDeque<PlayerId>,
     running: BTreeSet<ChunkPos>,
     ready: BTreeMap<ChunkPos, (Arc<Chunk>, usize)>,
@@ -52,59 +69,107 @@ impl ChunkPreparation {
         }
     }
 
-    /// Replace only this viewer's bounded priorities; other viewers keep their work.
+    /// Replace this viewer's priorities, keeping all visible work ahead of
+    /// speculative work across viewers without changing the producer bound.
     pub(crate) fn request(
         &mut self,
         viewer: PlayerId,
-        positions: impl IntoIterator<Item = ChunkPos>,
+        visible: impl IntoIterator<Item = ChunkPos>,
+        speculative: impl IntoIterator<Item = ChunkPos>,
     ) {
         if !self.targets.contains_key(&viewer) && self.targets.len() >= MAX_PREPARATION_VIEWERS {
             return;
         }
         let mut unique = BTreeSet::new();
-        let mut queue = VecDeque::new();
-        for pos in positions {
+        let mut targets = ViewerTargets::default();
+        for (pos, visible) in visible
+            .into_iter()
+            .map(|pos| (pos, true))
+            .chain(speculative.into_iter().map(|pos| (pos, false)))
+        {
             if unique.len() >= MAX_PREPARATION_TARGETS {
                 break;
             }
             if unique.insert(pos) && !self.failed.contains(&pos) {
-                queue.push_back(pos);
+                if visible {
+                    targets.visible.push_back(pos);
+                } else {
+                    targets.speculative.push_back(pos);
+                }
             }
         }
-        if self.targets.insert(viewer, queue).is_none() {
+        targets.wanted = unique;
+        if self.targets.insert(viewer, targets).is_none() {
             self.viewers.push_back(viewer);
         }
+        self.discard_unwanted_ready();
         self.start_jobs();
+    }
+
+    fn discard_unwanted_ready(&mut self) {
+        self.ready.retain(|pos, (_, bytes)| {
+            let wanted = self
+                .targets
+                .values()
+                .any(|targets| targets.wanted.contains(pos));
+            if !wanted {
+                self.ready_bytes -= *bytes;
+            }
+            wanted
+        });
+        self.recent.retain(|pos| self.ready.contains_key(pos));
     }
 
     /// Forget departed or failed-join priorities; admitted producers remain bounded.
     pub(crate) fn cancel(&mut self, viewer: PlayerId) {
         self.targets.remove(&viewer);
         self.viewers.retain(|queued| *queued != viewer);
+        self.discard_unwanted_ready();
     }
 
     pub(crate) fn retain_viewers(&mut self, active: &BTreeMap<PlayerId, String>) {
         self.targets.retain(|viewer, _| active.contains_key(viewer));
         self.viewers.retain(|viewer| active.contains_key(viewer));
+        self.discard_unwanted_ready();
     }
 
     fn next_target(&mut self) -> Option<ChunkPos> {
-        for _ in 0..self.viewers.len() {
-            let viewer = self.viewers.pop_front()?;
-            self.viewers.push_back(viewer);
-            let Some(queue) = self.targets.get_mut(&viewer) else {
-                continue;
-            };
-            while let Some(pos) = queue.pop_front() {
-                if !self.running.contains(&pos)
-                    && !self.ready.contains_key(&pos)
-                    && !self.failed.contains(&pos)
-                {
-                    return Some(pos);
+        // Round-robin fairness applies within each class. A viewer's speculative
+        // queue cannot repeatedly occupy slots ahead of another viewer's view.
+        for visible in [true, false] {
+            if !visible && !self.has_speculative_capacity() {
+                // A stable view may repeatedly publish more outer targets than
+                // fit in the byte-bound cache. Stop before unused warm terrain
+                // is evicted and generated again; real visible demand may evict.
+                return None;
+            }
+            for _ in 0..self.viewers.len() {
+                let viewer = self.viewers.pop_front()?;
+                self.viewers.push_back(viewer);
+                let Some(targets) = self.targets.get_mut(&viewer) else {
+                    continue;
+                };
+                let queue = if visible {
+                    &mut targets.visible
+                } else {
+                    &mut targets.speculative
+                };
+                while let Some(pos) = queue.pop_front() {
+                    if !self.running.contains(&pos)
+                        && !self.ready.contains_key(&pos)
+                        && !self.failed.contains(&pos)
+                    {
+                        return Some(pos);
+                    }
                 }
             }
         }
         None
+    }
+
+    fn has_speculative_capacity(&self) -> bool {
+        self.ready.len() + self.jobs.len() < MAX_WARM_BASELINES
+            && self.ready_bytes + (self.jobs.len() + 1) * MAX_BASELINE_BYTES <= MAX_WARM_BYTES
     }
 
     fn start_jobs(&mut self) {
@@ -125,7 +190,11 @@ impl ChunkPreparation {
         self.jobs.join_next().await
     }
 
-    pub(crate) fn completed(&mut self, completion: Completion) -> anyhow::Result<()> {
+    pub(crate) fn completed(
+        &mut self,
+        completion: Completion,
+        resident: impl Fn(ChunkPos) -> bool,
+    ) -> anyhow::Result<()> {
         let (pos, result) = completion
             .map_err(|error| anyhow::anyhow!("raw chunk preparation worker failed: {error}"))?;
         self.running.remove(&pos);
@@ -136,6 +205,19 @@ impl ChunkPreparation {
                 }
                 if chunk.pos() != pos {
                     anyhow::bail!("prepared terrain column differs from requested column");
+                }
+                if resident(pos)
+                    || !self
+                        .targets
+                        .values()
+                        .any(|targets| targets.wanted.contains(&pos))
+                {
+                    // Another owner path admitted the column, or every viewer
+                    // replaced/canceled its intent while this producer ran.
+                    // Validate producer shape first, then drop obsolete output
+                    // so it cannot saturate new directional preparation.
+                    self.start_jobs();
+                    return Ok(());
                 }
                 let bytes = match baseline_storage_charge(&chunk) {
                     Ok(bytes) => bytes,
@@ -192,6 +274,20 @@ impl ChunkPreparation {
         self.recent.retain(|old| *old != pos);
         self.recent.push_back(pos);
         Some(chunk)
+    }
+
+    /// Successful owner admission makes the raw cache copy redundant. Remove
+    /// only those exact resident positions; unrelated viewer demand is preserved.
+    pub(crate) fn admitted(&mut self, positions: &BTreeSet<ChunkPos>) {
+        for pos in positions {
+            if let Some((_, bytes)) = self.ready.remove(pos) {
+                self.ready_bytes -= bytes;
+            }
+        }
+        self.recent.retain(|pos| !positions.contains(pos));
+        for targets in self.targets.values_mut() {
+            targets.retain(|pos| !positions.contains(pos));
+        }
     }
 
     /// Await admitted blocking producers during stop; no replacement is started.
@@ -272,8 +368,8 @@ mod tests {
             })));
         let first = PlayerId::offline("first");
         let second = PlayerId::offline("second");
-        preparation.request(first, (0..10).map(|x| ChunkPos::new(x, 0)));
-        preparation.request(second, (100..110).map(|x| ChunkPos::new(x, 0)));
+        preparation.request(first, (0..10).map(|x| ChunkPos::new(x, 0)), []);
+        preparation.request(second, (100..110).map(|x| ChunkPos::new(x, 0)), []);
         assert_eq!(preparation.jobs.len(), MAX_PREPARATION_JOBS);
         entries.recv().await.expect("first running");
         entries.recv().await.expect("second running");
@@ -291,7 +387,9 @@ mod tests {
         gate.1.notify_all();
         for _ in 0..6 {
             let completion = preparation.next_completion().await.expect("completion");
-            preparation.completed(completion).expect("valid baseline");
+            preparation
+                .completed(completion, |_| false)
+                .expect("valid baseline");
         }
         assert!(
             preparation.ready.keys().any(|pos| pos.x() >= 100),
@@ -351,9 +449,9 @@ mod tests {
     async fn priorities_deduplicate_and_are_bounded_and_cancel_reclaims_viewer_capacity() {
         let mut preparation = fixture();
         let viewer = PlayerId::offline("bounded");
-        preparation.request(viewer, (0..200).flat_map(|x| [ChunkPos::new(x, 0); 2]));
+        preparation.request(viewer, (0..200).flat_map(|x| [ChunkPos::new(x, 0); 2]), []);
         assert!(
-            preparation.targets[&viewer].len() + preparation.running.len()
+            preparation.targets[&viewer].visible.len() + preparation.running.len()
                 <= MAX_PREPARATION_TARGETS
         );
         assert_eq!(preparation.running.len(), 2);
@@ -363,30 +461,41 @@ mod tests {
         preparation.drain().await.expect("drain");
         for index in 0..MAX_PREPARATION_VIEWERS {
             let viewer = PlayerId::offline(&format!("viewer{index}"));
-            preparation.request(viewer, []);
+            preparation.request(viewer, [], []);
         }
         let extra = PlayerId::offline("extra");
-        preparation.request(extra, []);
+        preparation.request(extra, [], []);
         assert!(!preparation.targets.contains_key(&extra));
         preparation.cancel(viewer);
         preparation.retain_viewers(&BTreeMap::new());
-        preparation.request(extra, []);
+        preparation.request(extra, [], []);
         assert!(preparation.targets.contains_key(&extra));
     }
 
     #[tokio::test]
-    async fn late_results_have_no_owner_and_cache_count_bytes_and_lru_are_bounded() {
+    async fn requested_results_have_no_owner_and_cache_count_bytes_and_lru_are_bounded() {
         let mut preparation = fixture();
+        for viewer in 0..4 {
+            preparation.targets.insert(
+                PlayerId::offline(&format!("lru{viewer}")),
+                ViewerTargets {
+                    wanted: (viewer * 64..(viewer + 1) * 64)
+                        .map(|x| ChunkPos::new(x, 0))
+                        .collect(),
+                    ..ViewerTargets::default()
+                },
+            );
+        }
         for x in 0..i32::try_from(MAX_WARM_BASELINES).expect("bounded constant") {
             let pos = ChunkPos::new(x, 0);
             preparation
-                .completed(Ok((pos, Ok(Chunk::new(pos)))))
+                .completed(Ok((pos, Ok(Chunk::new(pos)))), |_| false)
                 .expect("raw completion");
         }
         preparation.ready(ChunkPos::ORIGIN).expect("refresh oldest");
         let pos = ChunkPos::new(64, 0);
         preparation
-            .completed(Ok((pos, Ok(Chunk::new(pos)))))
+            .completed(Ok((pos, Ok(Chunk::new(pos)))), |_| false)
             .expect("late completion");
         assert_eq!(preparation.ready.len(), MAX_WARM_BASELINES);
         assert!(preparation.ready.contains_key(&ChunkPos::ORIGIN));
@@ -394,14 +503,20 @@ mod tests {
         for x in 100..200 {
             let pos = ChunkPos::new(x, 0);
             preparation
-                .completed(Ok((pos, Ok(FlatWorldGenerator::new().generate(pos)))))
+                .completed(
+                    Ok((pos, Ok(FlatWorldGenerator::new().generate(pos)))),
+                    |_| false,
+                )
                 .expect("populated completion");
             assert!(preparation.ready_bytes <= MAX_WARM_BYTES);
             assert!(preparation.ready.len() <= MAX_WARM_BASELINES);
         }
         assert!(
-            preparation.targets.is_empty(),
-            "late raw outputs confer no viewer ownership"
+            preparation
+                .targets
+                .values()
+                .all(|targets| targets.visible.is_empty() && targets.speculative.is_empty()),
+            "cached outputs confer no queued work or ticket ownership"
         );
         assert!(preparation.jobs.is_empty());
     }
@@ -411,16 +526,235 @@ mod tests {
         let mut preparation = fixture();
         let refused = ChunkPos::ORIGIN;
         preparation
-            .completed(Ok((
-                refused,
-                Err(WorldError::InvalidBitsPerEntry { bits: 0 }),
-            )))
+            .completed(
+                Ok((refused, Err(WorldError::InvalidBitsPerEntry { bits: 0 }))),
+                |_| false,
+            )
             .expect("producer refusal is retained");
-        preparation.request(PlayerId::offline("failure"), [refused]);
+        preparation.request(PlayerId::offline("failure"), [refused], []);
         assert!(!preparation.has_jobs());
         for x in 0..200 {
             preparation.remember_failure(ChunkPos::new(x, 0));
         }
         assert_eq!(preparation.failed.len(), MAX_FAILED_POSITIONS);
+    }
+
+    #[test]
+    fn visible_demand_precedes_other_viewers_speculation_and_rotates_fairly() {
+        let mut preparation = fixture();
+        let outer_viewer = PlayerId::offline("outer");
+        let first = PlayerId::offline("first_visible");
+        let second = PlayerId::offline("second_visible");
+        preparation.viewers = VecDeque::from([outer_viewer, first, second]);
+        preparation.targets.insert(
+            outer_viewer,
+            ViewerTargets {
+                wanted: BTreeSet::new(),
+                visible: VecDeque::new(),
+                speculative: VecDeque::from([ChunkPos::new(100, 0)]),
+            },
+        );
+        preparation.targets.insert(
+            first,
+            ViewerTargets {
+                wanted: BTreeSet::new(),
+                visible: VecDeque::from([ChunkPos::new(1, 0), ChunkPos::new(2, 0)]),
+                speculative: VecDeque::new(),
+            },
+        );
+        preparation.targets.insert(
+            second,
+            ViewerTargets {
+                wanted: BTreeSet::new(),
+                visible: VecDeque::from([ChunkPos::new(3, 0)]),
+                speculative: VecDeque::new(),
+            },
+        );
+        assert_eq!(preparation.next_target(), Some(ChunkPos::new(1, 0)));
+        assert_eq!(preparation.next_target(), Some(ChunkPos::new(3, 0)));
+        assert_eq!(preparation.next_target(), Some(ChunkPos::new(2, 0)));
+        assert_eq!(preparation.next_target(), Some(ChunkPos::new(100, 0)));
+        assert_eq!(preparation.next_target(), None);
+    }
+
+    #[test]
+    fn full_warm_cache_stops_speculative_churn_but_not_visible_demand() {
+        let mut preparation = fixture();
+        let viewer = PlayerId::offline("capacity");
+        preparation.viewers.push_back(viewer);
+        preparation.targets.insert(
+            viewer,
+            ViewerTargets {
+                wanted: BTreeSet::new(),
+                visible: VecDeque::new(),
+                speculative: VecDeque::from([ChunkPos::new(100, 0)]),
+            },
+        );
+        // Exercise the byte-reservation boundary independently of terrain size.
+        preparation.ready_bytes = MAX_WARM_BYTES - MAX_BASELINE_BYTES + 1;
+        assert_eq!(preparation.next_target(), None);
+        assert_eq!(
+            preparation.targets[&viewer].speculative.len(),
+            1,
+            "a full cache neither evicts nor consumes the deferred outer target"
+        );
+        preparation
+            .targets
+            .get_mut(&viewer)
+            .expect("viewer")
+            .visible
+            .push_back(ChunkPos::ORIGIN);
+        assert_eq!(preparation.next_target(), Some(ChunkPos::ORIGIN));
+        preparation.ready_bytes -= 1;
+        assert_eq!(preparation.next_target(), Some(ChunkPos::new(100, 0)));
+    }
+
+    #[tokio::test]
+    async fn direction_replacement_reclaims_stale_full_cache_and_protects_other_viewers() {
+        let mut preparation = fixture();
+        let moving = PlayerId::offline("moving");
+        let other = PlayerId::offline("other");
+        let old: Vec<_> = (0..16).map(|x| ChunkPos::new(x, 0)).collect();
+        for &pos in &old {
+            preparation
+                .ready
+                .insert(pos, (Arc::new(Chunk::new(pos)), MAX_BASELINE_BYTES));
+            preparation.recent.push_back(pos);
+            preparation.ready_bytes += MAX_BASELINE_BYTES;
+        }
+        preparation.request(moving, [], old.iter().copied());
+        preparation.request(other, [], [old[0]]);
+        assert!(
+            !preparation.has_jobs(),
+            "a stable saturated speculative cache pauses"
+        );
+        let new = [ChunkPos::new(-1, 0), ChunkPos::new(-2, 0)];
+        preparation.request(moving, [], new);
+        assert_eq!(preparation.ready.len(), 1);
+        assert!(
+            preparation.ready.contains_key(&old[0]),
+            "another viewer's current intent is protected"
+        );
+        assert_eq!(preparation.ready_bytes, MAX_BASELINE_BYTES);
+        assert_eq!(preparation.recent, VecDeque::from([old[0]]));
+        assert_eq!(
+            preparation.running,
+            BTreeSet::from(new),
+            "latest direction starts within the existing two producer slots"
+        );
+        preparation.cancel(moving);
+        preparation.cancel(other);
+        preparation
+            .drain()
+            .await
+            .expect("bounded admitted jobs drain");
+    }
+
+    #[tokio::test]
+    async fn canceled_and_replaced_plan_drops_late_outputs_after_shape_validation() {
+        let mut preparation = fixture();
+        let viewer = PlayerId::offline("late");
+        let old = ChunkPos::ORIGIN;
+        preparation.targets.insert(
+            viewer,
+            ViewerTargets {
+                wanted: BTreeSet::from([old]),
+                ..ViewerTargets::default()
+            },
+        );
+        preparation.cancel(viewer);
+        preparation
+            .completed(Ok((old, Ok(Chunk::new(old)))), |_| false)
+            .expect("obsolete valid producer is discarded");
+        assert!(preparation.ready.is_empty());
+        assert_eq!(preparation.ready_bytes, 0);
+        preparation.targets.insert(
+            viewer,
+            ViewerTargets {
+                wanted: BTreeSet::from([ChunkPos::new(1, 0)]),
+                ..ViewerTargets::default()
+            },
+        );
+        preparation
+            .completed(Ok((old, Ok(Chunk::new(old)))), |_| false)
+            .expect("replaced valid producer is discarded");
+        assert!(preparation.ready.is_empty());
+        assert!(
+            preparation
+                .completed(Ok((old, Ok(Chunk::new(ChunkPos::new(99, 0))))), |_| false)
+                .is_err(),
+            "obsolete output still validates exact producer position"
+        );
+        let mut invalid = Chunk::new(old);
+        invalid
+            .set_block_entity(
+                ferrumc_math::BlockPos::new(1, 64, 1),
+                ferrumc_world::BlockEntity::Chest(ferrumc_world::ChestInventory::new()),
+            )
+            .expect("test block entity");
+        assert!(
+            preparation
+                .completed(Ok((old, Ok(invalid))), |_| false)
+                .is_err(),
+            "obsolete output still rejects gameplay block entities"
+        );
+        assert!(preparation.ready.is_empty());
+    }
+
+    #[tokio::test]
+    async fn admission_releases_only_exact_raw_copies_and_shared_resident_targets() {
+        let mut preparation = fixture();
+        let resident = ChunkPos::ORIGIN;
+        let untouched = ChunkPos::new(1, 0);
+        preparation.targets.insert(
+            PlayerId::offline("first"),
+            ViewerTargets {
+                wanted: BTreeSet::from([resident, untouched]),
+                ..ViewerTargets::default()
+            },
+        );
+        for pos in [resident, untouched] {
+            preparation
+                .completed(Ok((pos, Ok(Chunk::new(pos)))), |_| false)
+                .expect("baseline");
+        }
+        let retained_bytes = preparation.ready[&untouched].1;
+        for name in ["first", "second"] {
+            let viewer = PlayerId::offline(name);
+            preparation.viewers.push_back(viewer);
+            preparation.targets.insert(
+                viewer,
+                ViewerTargets {
+                    wanted: BTreeSet::from([resident, untouched, ChunkPos::new(2, 0)]),
+                    visible: VecDeque::from([resident, untouched]),
+                    speculative: VecDeque::from([ChunkPos::new(2, 0)]),
+                },
+            );
+        }
+        preparation.admitted(&BTreeSet::from([resident]));
+        assert!(!preparation.ready.contains_key(&resident));
+        assert_eq!(preparation.ready_bytes, retained_bytes);
+        assert_eq!(preparation.recent, VecDeque::from([untouched]));
+        for targets in preparation.targets.values() {
+            assert_eq!(targets.visible, VecDeque::from([untouched]));
+            assert_eq!(targets.speculative, VecDeque::from([ChunkPos::new(2, 0)]));
+        }
+        assert_eq!(
+            preparation.next_target(),
+            Some(ChunkPos::new(2, 0)),
+            "a consumed resident baseline cannot be scheduled again from stale viewer priorities"
+        );
+        preparation.running.insert(resident);
+        preparation
+            .completed(Ok((resident, Ok(Chunk::new(resident)))), |pos| {
+                pos == resident
+            })
+            .expect("late completion");
+        assert!(!preparation.ready.contains_key(&resident));
+        assert!(!preparation.running.contains(&resident));
+        assert_eq!(preparation.ready_bytes, retained_bytes);
+        preparation.cancel(PlayerId::offline("first"));
+        preparation.cancel(PlayerId::offline("second"));
+        preparation.drain().await.expect("no owner work remains");
     }
 }

@@ -25,21 +25,48 @@
   before empty durability acknowledgments; foreign overlay scope is refused.
 - Natural preview startup uses a bounded one-worker executor outside Tokio workers.
   Streaming prepares immutable raw baselines with at most two blocking jobs,
-  64 queued targets per viewer and 1024 viewers, scheduled round-robin. Shared
+  64 queued targets per viewer and 1024 viewers. Visible demand takes precedence
+  over outer speculation across viewers, with round-robin within each class;
+  up to two already admitted blocking jobs finish without preemption. Shared
   teardown cancels priorities even after failed join; completed late baselines
-  may enter the bounded LRU but own no tickets. At most 64 baselines and 8 MiB
+  are shape-validated and discarded when no active viewer still requests them,
+  and own no tickets. At most 64 baselines and 8 MiB
   conservatively charged storage remain cached; each result is at most 512 KiB.
   Charge includes triple the palette-preserving section encoding, fixed
   Chunk/allocator allowance and biomes. Worker scratch and resident gameplay chunks are additional; these
   are allocation charges, not an RSS guarantee. At most 128 refused columns are
-  memoized. Shutdown waits admitted blocking producers without starting more.
+  memoized. Successful owner admission releases its exact raw cache copy and
+  removes only those resident columns from viewer preparation queues. Late
+  completions for resident columns do not repopulate the warm cache. Shutdown
+  waits admitted blocking producers without starting more.
+  Speculative jobs reserve one maximum512-KiB result per admitted/new job against
+  the existing cache bounds; a full warm cache pauses speculation instead of
+  repeatedly evicting and regenerating unused outer columns. Visible demand may
+  still replace old baselines within the unchanged LRU bounds.
+  Each viewer retains at most64 current intent positions separately from its
+  consumed work queues. Plan replacement or departure releases cached baselines
+  that no active viewer still requests, so stale saturated speculation cannot
+  prevent a changed direction from preparing new columns. Already admitted
+  blocking jobs remain bounded and finish without preemption.
   Cold targets acquire no tickets. Real admission uses the ordinary Sim gate,
   rereading exact metadata, full snapshots and overlays after preparation.
   Ticket ownership and outbound delivery are separate sets: a tail-dropped
   chunk or block entity retries a fresh resident snapshot without taking another
   ticket. Unload retains one extra ring to avoid boundary churn; desired chunks
-  are ordered nearest-first and speculative targets extend two rings, biased
-  toward movement. Both load/retry and unload batches are bounded to 16.
+  keep the current column first, then the next two forward columns and their
+  one-column lateral margins within the actual visible view. Remaining columns
+  are nearest-first, with movement breaking equal-distance ties. With no known
+  heading, only Chebyshev ring two uses Manhattan distance before coordinates
+  so its four cardinal columns are prepared before its corners. Every other
+  stationary ring keeps the original contiguous coordinate order for terrain
+  halo locality. Moving corridor ordering remains unchanged, and
+  speculative targets extend two rings, biased toward the last actual horizontal
+  movement until reversal or teleport. Each pump scans at most64 missing visible
+  candidates so cold near columns do not hide ready visible columns behind them;
+  the driver independently caps real acquisitions at16 in both natural and flat
+  paths. Snapshot retries subtract from the same16-column connection budget; block-entity
+  packets for those columns are additional.
+  Unload batches remain bounded to16.
   Client render distance can lower the server cap; negative or absent sentinels
   retain it. Configuration and Play settings use the same bounded schema; the
   Play id0x0d body must be exhausted and repeated settings do not renew pre-Play

@@ -260,6 +260,9 @@ pub(crate) enum SimCommand {
         viewer: PlayerId,
         /// Chunk columns to bring into view (load-or-generate, ticket acquired).
         load: Vec<ChunkPos>,
+        /// Remaining packet budget after resident retries; the driver also caps
+        /// acquisitions at `MAX_STREAM_ADMISSIONS`, independently of the sender.
+        load_limit: usize,
         /// Chunk columns that left view (player ticket released).
         unload: Vec<ChunkPos>,
         /// Bounded nearest-first raw terrain preparation targets; no player tickets.
@@ -684,6 +687,10 @@ impl SimCommand {
     }
 }
 
+/// Owner-side acquisition ceiling, shared by cold and resident streaming paths.
+/// Candidate scans may be larger, but only this many tickets transfer per pump.
+pub(crate) const MAX_STREAM_ADMISSIONS: usize = 16;
+
 /// One chunk built for a [`SimCommand::StreamChunks`] request: the column
 /// data+light packet plus any block-entity render packets for that chunk.
 ///
@@ -800,27 +807,27 @@ pub(crate) async fn run(
                 }
                 completion = preparation.next_completion(), if preparation.has_jobs() => {
                     if let Some(completion) = completion {
-                        if let Err(error) = preparation.completed(completion) {
+                        if let Err(error) = preparation.completed(completion, |pos| shard.loaded_chunks().get(pos).is_some()) {
                             let _ = fatal_shutdown.send(true);
                             return Err(ServerError::invalid_state(error.to_string()));
                         }
                     }
                 }
                 maybe_command = commands.recv() => match maybe_command {
-                    Some(SimCommand::StreamChunks { viewer, load, unload, prefetch, reply }) if natural_preview => {
+                    Some(SimCommand::StreamChunks { viewer, load, load_limit, unload, prefetch, reply }) if natural_preview => {
                         if let Err(error) = release_chunks(&mut shard, &target, &storage_tx, tick, &mut next_mutation_id, &unload).await {
                             let _ = fatal_shutdown.send(true);
                             return Err(error);
                         }
-                        preparation.request(viewer, load.iter().chain(&prefetch).copied().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
-                        let packets = load_prepared_chunks(&mut shard, target.store(), &generator, &mut preparation, &load).await;
+                        preparation.request(viewer, load.iter().copied().filter(|pos| shard.loaded_chunks().get(*pos).is_none()), prefetch.into_iter().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
+                        let packets = load_prepared_chunks(&mut shard, target.store(), &generator, &mut preparation, &load, load_limit).await;
                         if let Err(error) = deliver_streamed_chunks(reply, packets, &mut shard, &target, &storage_tx, tick, &mut next_mutation_id).await {
                             let _ = fatal_shutdown.send(true);
                             return Err(error);
                         }
                     }
                     Some(SimCommand::PrepareChunks { viewer, positions }) if natural_preview => {
-                        preparation.request(viewer, positions.into_iter().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
+                        preparation.request(viewer, [], positions.into_iter().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
                     }
                     Some(SimCommand::CancelChunkPreparation { viewer }) => {
                         preparation.cancel(viewer);
@@ -1185,6 +1192,7 @@ async fn handle_command(
         SimCommand::StreamChunks {
             viewer: _,
             load,
+            load_limit,
             unload,
             prefetch: _,
             reply,
@@ -1192,7 +1200,7 @@ async fn handle_command(
             // Release first (frees tickets the new view no longer needs) before
             // acquiring, so a chunk that both left and re-entered nets out cleanly.
             release_chunks(shard, target, storage_tx, tick, next_mutation_id, &unload).await?;
-            let packets = load_chunks(shard, target.store(), generator, &load).await;
+            let packets = load_chunks(shard, target.store(), generator, &load, load_limit).await;
             deliver_streamed_chunks(
                 reply,
                 packets,
@@ -1568,10 +1576,21 @@ async fn load_prepared_chunks(
     generator: &RuntimeGeneration,
     preparation: &mut ChunkPreparation,
     positions: &[ChunkPos],
+    load_limit: usize,
 ) -> Vec<StreamedChunk> {
     let ticket = ChunkTicket::of(TicketReason::Player);
-    let mut acquired = Vec::new();
-    for &pos in positions {
+    let mut acquired = BTreeSet::new();
+    let mut ordered = Vec::new();
+    for &pos in positions
+        .iter()
+        .take(crate::chunk_preparation::MAX_PREPARATION_TARGETS)
+    {
+        if acquired.len() >= load_limit.min(MAX_STREAM_ADMISSIONS) {
+            break;
+        }
+        if acquired.contains(&pos) {
+            continue;
+        }
         let result = if shard.loaded_chunks().get(pos).is_some() {
             generator
                 .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
@@ -1584,13 +1603,17 @@ async fn load_prepared_chunks(
             continue;
         };
         match result {
-            Ok(()) => acquired.push(pos),
+            Ok(()) => {
+                acquired.insert(pos);
+                ordered.push(pos);
+            }
             Err(error) => {
                 tracing::warn!(%error, x = pos.x(), z = pos.z(), "prepared chunk admission refused");
             }
         }
     }
-    let packets = resident_chunk_packets(shard, &acquired);
+    preparation.admitted(&acquired);
+    let packets = resident_chunk_packets(shard, &ordered);
     let encoded: BTreeSet<_> = packets
         .iter()
         .map(|packet| ChunkPos::new(packet.chunk.x(), packet.chunk.z()))
@@ -1614,10 +1637,21 @@ async fn load_chunks(
     store: &dyn WorldStore,
     generator: &RuntimeGeneration,
     positions: &[ChunkPos],
+    load_limit: usize,
 ) -> Vec<StreamedChunk> {
     let ticket = ChunkTicket::of(TicketReason::Player);
-    let mut packets = Vec::with_capacity(positions.len());
-    for &pos in positions {
+    let mut packets = Vec::with_capacity(load_limit.min(MAX_STREAM_ADMISSIONS));
+    let mut acquired = BTreeSet::new();
+    for &pos in positions
+        .iter()
+        .take(crate::chunk_preparation::MAX_PREPARATION_TARGETS)
+    {
+        if acquired.len() >= load_limit.min(MAX_STREAM_ADMISSIONS) {
+            break;
+        }
+        if acquired.contains(&pos) {
+            continue;
+        }
         if let Err(err) = generator
             .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
             .await
@@ -1625,6 +1659,7 @@ async fn load_chunks(
             tracing::warn!(%err, x = pos.x(), z = pos.z(), "failed to acquire streamed chunk");
             continue;
         }
+        acquired.insert(pos);
         // `acquire` just made the chunk resident, so the lookup cannot miss; the
         // built packets are owned, so the immutable borrow ends before the arms.
         match shard.loaded_chunks().get(pos).map(|chunk| {
@@ -2072,9 +2107,10 @@ mod tests {
     use crate::placement_completion::PlacementCompletions;
 
     use super::{
-        deliver_streamed_chunks, drain_shard_inputs, handle_command, load_chunks, release_chunks,
-        release_chunks_acked, route_input_command, route_placement_command,
-        try_flush_persist_dirty, SimCommand,
+        deliver_streamed_chunks, drain_shard_inputs, handle_command, load_chunks,
+        load_prepared_chunks, release_chunks, release_chunks_acked, route_input_command,
+        route_placement_command, try_flush_persist_dirty, ChunkPreparation, SimCommand,
+        MAX_STREAM_ADMISSIONS,
     };
 
     #[test]
@@ -2539,8 +2575,14 @@ mod tests {
     async fn abandoned_stream_reply_releases_its_ticket_only_after_durable_ack() {
         for commit_succeeds in [true, false] {
             let (mut shard, pos) = dirty_player_chunk().await;
-            let packets =
-                load_chunks(&mut shard, &test_store().await, &test_generator(), &[pos]).await;
+            let packets = load_chunks(
+                &mut shard,
+                &test_store().await,
+                &test_generator(),
+                &[pos],
+                MAX_STREAM_ADMISSIONS,
+            )
+            .await;
             assert_eq!(packets.len(), 1);
             assert_eq!(shard.loaded_chunks().ticket_count(pos), 2);
             let (reply, receiver) = oneshot::channel();
@@ -3544,10 +3586,12 @@ mod tests {
             &store,
             &generator,
             &mut preparation,
-            &positions
+            &positions,
+            MAX_STREAM_ADMISSIONS
         )
         .await
         .is_empty());
+        preparation.request(PlayerId::offline("snapshot_warm"), positions, []);
         for pos in positions {
             assert_eq!(
                 shard.loaded_chunks().ticket_count(pos),
@@ -3555,7 +3599,10 @@ mod tests {
                 "cold work owns no ticket"
             );
             preparation
-                .completed(Ok((pos, Ok(FlatWorldGenerator::new().generate(pos)))))
+                .completed(
+                    Ok((pos, Ok(FlatWorldGenerator::new().generate(pos)))),
+                    |_| false,
+                )
                 .expect("raw completion");
         }
         let binding = crate::persistence::fixtures::binding();
@@ -3598,6 +3645,7 @@ mod tests {
             &generator,
             &mut preparation,
             &positions,
+            MAX_STREAM_ADMISSIONS,
         )
         .await;
         assert_eq!(packets.len(), 3);
@@ -3623,5 +3671,108 @@ mod tests {
         for pos in positions {
             assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
         }
+    }
+
+    #[tokio::test]
+    async fn prepared_scan_serves_ready_visible_columns_past_cold_first_batch_with_retry_budget() {
+        let store = test_store().await;
+        let mut shard = test_shard();
+        let generator = test_generator();
+        let mut preparation = ChunkPreparation::new(&generator);
+        let positions: Vec<_> = (0..64).map(|x| ChunkPos::new(x, 0)).collect();
+        preparation.request(
+            PlayerId::offline("ready_scan"),
+            positions.iter().copied(),
+            [],
+        );
+        for &pos in &positions[16..40] {
+            preparation
+                .completed(
+                    Ok((pos, Ok(FlatWorldGenerator::new().generate(pos)))),
+                    |_| false,
+                )
+                .expect("out-of-order visible completion");
+        }
+        // Eleven snapshot retries consumed the rest of this pump's packet quota.
+        let packets = load_prepared_chunks(
+            &mut shard,
+            &store,
+            &generator,
+            &mut preparation,
+            &positions,
+            MAX_STREAM_ADMISSIONS - 11,
+        )
+        .await;
+        assert_eq!(packets.len(), 5);
+        assert_eq!(
+            packets
+                .iter()
+                .map(|packet| packet.chunk.x())
+                .collect::<Vec<_>>(),
+            (16..21).collect::<Vec<_>>()
+        );
+        for (index, &pos) in positions.iter().enumerate() {
+            assert_eq!(
+                shard.loaded_chunks().ticket_count(pos),
+                usize::from((16..21).contains(&index)),
+                "only the five returned ready columns acquire tickets"
+            );
+        }
+        for &pos in &positions[16..21] {
+            assert!(
+                preparation.ready(pos).is_none(),
+                "admitted cache copies are released"
+            );
+        }
+        let packets = load_prepared_chunks(
+            &mut shard,
+            &store,
+            &generator,
+            &mut preparation,
+            &positions[21..],
+            usize::MAX,
+        )
+        .await;
+        assert_eq!(
+            packets.len(),
+            MAX_STREAM_ADMISSIONS,
+            "the owner independently caps actual acquisitions"
+        );
+        assert!(load_prepared_chunks(
+            &mut shard,
+            &store,
+            &generator,
+            &mut preparation,
+            &positions,
+            0
+        )
+        .await
+        .is_empty());
+    }
+
+    #[tokio::test]
+    async fn flat_stream_candidate_scan_is_capped_and_duplicate_candidates_own_one_ticket() {
+        let store = test_store().await;
+        let mut shard = test_shard();
+        let generator = test_generator();
+        let positions: Vec<_> = (0..40).flat_map(|x| [ChunkPos::new(x, 0); 2]).collect();
+        let packets = load_chunks(&mut shard, &store, &generator, &positions, usize::MAX).await;
+        assert_eq!(packets.len(), MAX_STREAM_ADMISSIONS);
+        for x in 0..40 {
+            assert_eq!(
+                shard.loaded_chunks().ticket_count(ChunkPos::new(x, 0)),
+                usize::from(x < 16)
+            );
+        }
+        let later: Vec<_> = (40..60).map(|x| ChunkPos::new(x, 0)).collect();
+        assert_eq!(
+            load_chunks(&mut shard, &store, &generator, &later, 3)
+                .await
+                .len(),
+            3
+        );
+        assert!(load_chunks(&mut shard, &store, &generator, &later, 0)
+            .await
+            .is_empty());
     }
 }

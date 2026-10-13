@@ -15,6 +15,7 @@ mod build;
 mod end;
 mod search;
 
+pub(crate) use arrays::NaturalClimateSamples;
 pub use arrays::{BiomeQuartGeometry, BiomeSourceIdentity, BiomeSourceSession, ChunkBiomeSamples};
 
 /// Largest work allowance for building one complete tree candidate.

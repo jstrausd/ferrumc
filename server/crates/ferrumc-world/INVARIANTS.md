@@ -963,3 +963,51 @@ Ordinary refusal drops guards without caching partial results and can retry;
 poisoning fails closed with a typed Features refusal on a new production miss,
 while already completed immutable cache hits remain usable. No numeric producer,
 public budget, generation revision, dependency or baseline output changes.
+
+
+## Bounded immutable natural climate-target reuse
+
+Natural composition retains at most 64 complete fresh-noise climate columns in
+one seed/settings/geometry-bound FIFO cache shared by its clones. Each column
+contains exactly 1536 original quantized six-axis targets (73,728 payload bytes),
+produced by a genuinely fresh Paper NoiseChunk in section-Y/local-X/Y/Z order.
+Climate evaluation cannot observe biome selector history; selection does not
+mutate NoiseChunk. No foreign final biome array, mutable noise wrapper, cached
+last leaf, work meter, edited terrain or feature state enters this cache.
+
+Every centered nine-column traversal still owns a fresh BiomeSourceSession and
+replays every original RTree selection in X-outer/Z-inner source order. It retains
+identical prior-leaf ties, staged history, source-work charges and complete
+biome-array publication. The sealed private natural replay path uses the same
+array fill and source refusal handling as the public fresh-noise producer. Public
+NoiseChunk/source APIs, noise budgets, poisoning/reset behavior, generator
+revision identities and the Carver's fresh sessions are unchanged. Natural cache
+hits skip reconstructing and evaluating a successful immutable climate producer;
+this is private composition memoization, analogous to its existing RAW cache,
+not a claim that cached noise work was executed again. Only complete successful
+climate columns are published; later source/surface/Carver failure publishes no
+chunk and may retain the successful immutable upstream column.
+
+Cache work runs outside the short cache mutex; 32 fixed producer stripes coalesce
+same-key concurrent misses with a post-lock lookup. Lock order is the existing
+SOURCE/RAW/BIOME producer gate, then CLIMATE stripe, then short CLIMATE cache
+mutex. Climate never calls any upstream cache or source selection, so there is no
+reverse dependency. Content capacity stays exactly 64; evictions and concurrency
+change cost, not output. The cold revision-3 target uses a 5x5 RAW union and 7x7
+climate union (49 columns); 64 accommodates this working set while remaining
+bounded. Native cache payload is at most 4,718,592 bytes, plus measured column,
+Arc and mutex/deque metadata (measured total 4,724,008 native bytes on this
+64-bit host); allocator overhead is separate. Active workers can
+hold one additional leased immutable column each, and up to 32 serialized stripe
+producers can own their original constructor scratch. These leases/scratch are
+not counted as resident cache capacity. RAW32/BIOME64/SOURCE32 remain unchanged.
+
+The seven pure wrapping-distance axes admit a public seven-unit work group when
+all seven units remain. Otherwise they execute the original per-axis charge
+sequence, including exact first-refusal work. Private 192-bit Carver meters always
+use the original unit sequence and segment behavior. No arithmetic result or
+mutable external state is published between distance axes, so the fast path
+preserves every sum, tie, selection, source history and public allowance boundary.
+Focused tests compare the original unit loop for public/wide 0..9 allowances and
+extreme signed coordinates, and cached-vs-original full nine-column source
+traversals including N-1/N/N+1 refusal/poison/history boundaries.

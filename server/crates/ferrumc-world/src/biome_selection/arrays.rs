@@ -249,7 +249,7 @@ impl BiomeSourceSession {
         noise.begin_biome_array()?;
         let initial = self.last_selection();
         let mut last = self.last;
-        let result = self.fill(noise, geometry, &mut last);
+        let result = self.fill(Some(noise), None, geometry, &mut last);
         noise.finish_biome_array(result.is_ok());
         match result {
             Ok(values) => {
@@ -271,9 +271,45 @@ impl BiomeSourceSession {
             }
         }
     }
+    /// Replays a sealed natural producer's targets with exclusively owned history.
+    pub(crate) fn sample_natural_climate(
+        &mut self,
+        cached: &NaturalClimateSamples,
+    ) -> Result<ChunkBiomeSamples, BiomeError> {
+        if self.poisoned {
+            return Err(fail(BiomeErrorKind::Poisoned));
+        }
+        if !matches!(self.source, Source::MultiNoise(_)) {
+            return Err(fail(BiomeErrorKind::InvalidTree));
+        }
+        let initial = self.last_selection();
+        let mut last = self.last;
+        match self.fill(None, Some(cached), cached.geometry, &mut last) {
+            Ok(values) => {
+                self.last = last;
+                Ok(ChunkBiomeSamples {
+                    seed: cached.seed,
+                    resource: cached.resource,
+                    chunk: cached.chunk,
+                    geometry: cached.geometry,
+                    source: self.identity(),
+                    values,
+                    initial,
+                    final_selection: self.last_selection(),
+                })
+            }
+            Err(error) => {
+                self.poisoned = true;
+                Err(error)
+            }
+        }
+    }
+    // Keep the original charge/selection/staging transaction in one visible traversal.
+    #[allow(clippy::too_many_lines)]
     fn fill(
         &mut self,
-        noise: &mut NoiseChunkSession,
+        mut noise: Option<&mut NoiseChunkSession>,
+        cached: Option<&NaturalClimateSamples>,
         geometry: BiomeQuartGeometry,
         last: &mut Option<u16>,
     ) -> Result<Box<[BiomeResourceId]>, BiomeError> {
@@ -290,7 +326,11 @@ impl BiomeSourceSession {
         let capacities = staged.capacity() * size_of::<Option<BiomeResourceId>>()
             + values.capacity() * size_of::<BiomeResourceId>();
         limit(BiomeLimit::OutputBytes, capacities, MAX_BIOME_OUTPUT_BYTES)?;
-        let origin = noise.chunk_pos();
+        let origin = if let Some(cached) = cached {
+            cached.chunk
+        } else {
+            require_noise(&mut noise)?.chunk_pos()
+        };
         let quart_x = i64::from(origin.x()) * 4;
         let quart_z = i64::from(origin.z()) * 4;
         let min_quart_y = i64::from(geometry.min_y) / 4;
@@ -326,17 +366,27 @@ impl BiomeSourceSession {
                         charge(&mut self.work)?;
                         let biome = match &self.source {
                             Source::MultiNoise(tree) => {
-                                let target =
-                                    BiomeClimateTarget::from_climate(noise.sample_climate(pos)?);
+                                let target = if let Some(cached) = cached {
+                                    let quart_y = usize::try_from(absolute_y - min_quart_y)
+                                        .map_err(|_| fail(BiomeErrorKind::InvalidGeometry))?;
+                                    cached.values[(quart_y * 4 + x) * 4 + z]
+                                } else {
+                                    BiomeClimateTarget::from_climate(
+                                        require_noise(&mut noise)?.sample_climate(pos)?,
+                                    )
+                                };
                                 let (node, selection) =
                                     search::select(tree, target, *last, &mut self.work)?;
                                 *last = Some(node);
                                 selection.biome()
                             }
                             Source::Fixed(biome) => *biome,
-                            Source::End(biomes) => {
-                                end::select(*biomes, pos, noise, &mut self.work)?
-                            }
+                            Source::End(biomes) => end::select(
+                                *biomes,
+                                pos,
+                                require_noise(&mut noise)?,
+                                &mut self.work,
+                            )?,
                         };
                         charge(&mut self.work)?;
                         let quart_y = usize::try_from(absolute_y - min_quart_y)
@@ -373,6 +423,14 @@ impl BiomeSourceSession {
     }
 }
 
+fn require_noise<'a>(
+    noise: &'a mut Option<&mut NoiseChunkSession>,
+) -> Result<&'a mut NoiseChunkSession, BiomeError> {
+    noise
+        .as_deref_mut()
+        .ok_or_else(|| fail(BiomeErrorKind::InvalidGeometry))
+}
+
 fn reserve<T>(count: usize) -> Result<Vec<T>, BiomeError> {
     let mut values = Vec::new();
     values.try_reserve_exact(count).map_err(|_| {
@@ -381,4 +439,162 @@ fn reserve<T>(count: usize) -> Result<Vec<T>, BiomeError> {
         })
     })?;
     Ok(values)
+}
+
+/// Complete immutable targets from one genuinely fresh noise chunk. This type is
+/// private to natural composition: no foreign biome selection or mutable cache
+/// history is captured, and the noise producer must complete before publication.
+pub(crate) struct NaturalClimateSamples {
+    seed: WorldSeed,
+    resource: NoiseSettingsResourceId,
+    chunk: ChunkPos,
+    geometry: BiomeQuartGeometry,
+    values: Box<[BiomeClimateTarget]>,
+}
+impl NaturalClimateSamples {
+    pub(crate) fn sample(
+        noise: &mut NoiseChunkSession,
+        geometry: BiomeQuartGeometry,
+    ) -> Result<Self, BiomeError> {
+        geometry.admit_noise(noise)?;
+        noise.begin_biome_array()?;
+        let result = Self::fill(noise, geometry);
+        noise.finish_biome_array(result.is_ok());
+        result
+    }
+    fn fill(
+        noise: &mut NoiseChunkSession,
+        geometry: BiomeQuartGeometry,
+    ) -> Result<Self, BiomeError> {
+        let count = geometry.sample_count();
+        let mut values = Vec::new();
+        values.try_reserve_exact(count).map_err(|_| {
+            fail(BiomeErrorKind::Allocation {
+                limit: BiomeLimit::OutputBytes,
+            })
+        })?;
+        values.resize(count, BiomeClimateTarget::from_quantized([0; 6]));
+        let origin = noise.chunk_pos();
+        let min_y = geometry.min_y / 4;
+        for section in 0..geometry.height / 16 {
+            for x in 0..4_usize {
+                for y in 0..4_usize {
+                    for z in 0..4_usize {
+                        let quart_y = section as usize * 4 + y;
+                        let pos = ClimateQuartPos::new(
+                            origin
+                                .x()
+                                .checked_mul(4)
+                                .and_then(|v| v.checked_add(i32::try_from(x).ok()?))
+                                .ok_or_else(|| fail(BiomeErrorKind::InvalidGeometry))?,
+                            min_y
+                                + i32::try_from(quart_y)
+                                    .map_err(|_| fail(BiomeErrorKind::InvalidGeometry))?,
+                            origin
+                                .z()
+                                .checked_mul(4)
+                                .and_then(|v| v.checked_add(i32::try_from(z).ok()?))
+                                .ok_or_else(|| fail(BiomeErrorKind::InvalidGeometry))?,
+                        )
+                        .map_err(|error| BiomeError::from(NoiseChunkError::from(error)))?;
+                        values[(quart_y * 4 + x) * 4 + z] =
+                            BiomeClimateTarget::from_climate(noise.sample_climate(pos)?);
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            seed: noise.seed(),
+            resource: noise.resource(),
+            chunk: origin,
+            geometry,
+            values: values.into_boxed_slice(),
+        })
+    }
+}
+
+#[cfg(test)]
+impl NaturalClimateSamples {
+    pub(crate) fn native_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + std::mem::size_of_val(self.values.as_ref())
+    }
+    pub(crate) fn targets(&self) -> &[BiomeClimateTarget] {
+        &self.values
+    }
+}
+
+#[cfg(test)]
+mod natural_replay_tests {
+    use super::*;
+    use crate::biome_selection::{
+        BiomeBuildBudget, MAX_BIOME_BUILD_WORK, MAX_BIOME_SELECTION_WORK,
+    };
+    use crate::density::{NoiseChunkWorkBudget, RouterTemplate, MAX_NOISE_CHUNK_WORK};
+
+    #[test]
+    fn sealed_climate_replays_full_centered_history_and_work() {
+        let resource = NoiseSettingsResourceId::from_name("minecraft:overworld").unwrap();
+        let router = RouterTemplate::compile_builtin(resource)
+            .unwrap()
+            .bind_seed(WorldSeed::new(17))
+            .unwrap();
+        let tree = Arc::new(
+            BiomeTree::from_builtin(
+                BiomeParametersResourceId::from_name("minecraft:overworld").unwrap(),
+                BiomeBuildBudget::new(MAX_BIOME_BUILD_WORK).unwrap(),
+            )
+            .unwrap(),
+        );
+        let make = |allowance| {
+            BiomeSourceSession::from_multinoise(BiomeSelectionSession::new(
+                Arc::clone(&tree),
+                BiomeWorkBudget::new(allowance).unwrap(),
+            ))
+        };
+        let mut original = make(MAX_BIOME_SELECTION_WORK);
+        let mut replay = make(MAX_BIOME_SELECTION_WORK);
+        let geometry = BiomeQuartGeometry::new(-64, 384).unwrap();
+        let noise = |pos| {
+            router
+                .fresh_paper_noise_chunk(
+                    pos,
+                    NoiseChunkWorkBudget::new(MAX_NOISE_CHUNK_WORK).unwrap(),
+                )
+                .unwrap()
+        };
+        for x in -2..=0 {
+            for z in -2..=0 {
+                let pos = ChunkPos::new(x, z);
+                let mut producer = noise(pos);
+                let cached = NaturalClimateSamples::sample(&mut producer, geometry).unwrap();
+                assert_eq!(cached.values.len(), 1536);
+                assert_eq!(std::mem::size_of_val(cached.values.as_ref()), 73728);
+                let actual = replay.sample_natural_climate(&cached).unwrap();
+                let expected = original
+                    .sample_chunk_biomes(&mut noise(pos), geometry)
+                    .unwrap();
+                assert_eq!(actual.values(), expected.values());
+                assert_eq!(actual.initial_selection(), expected.initial_selection());
+                assert_eq!(actual.final_selection(), expected.final_selection());
+                assert_eq!(replay.work_used(), original.work_used());
+            }
+        }
+        let cached = NaturalClimateSamples::sample(&mut noise(ChunkPos::ORIGIN), geometry).unwrap();
+        let mut complete = make(MAX_BIOME_SELECTION_WORK);
+        complete.sample_natural_climate(&cached).unwrap();
+        let required = u32::try_from(complete.work_used()).unwrap();
+        for allowance in [1, 2, 3, 64, required - 1, required, required + 1] {
+            let mut actual = make(allowance);
+            let mut expected = make(allowance);
+            let a = actual.sample_natural_climate(&cached);
+            let e = expected.sample_chunk_biomes(&mut noise(ChunkPos::ORIGIN), geometry);
+            assert_eq!(
+                a.as_ref().map(ChunkBiomeSamples::values),
+                e.as_ref().map(ChunkBiomeSamples::values)
+            );
+            assert_eq!(actual.work_used(), expected.work_used());
+            assert_eq!(actual.last_selection(), expected.last_selection());
+            assert_eq!(actual.is_poisoned(), expected.is_poisoned());
+        }
+    }
 }

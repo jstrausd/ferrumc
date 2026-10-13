@@ -32,7 +32,7 @@ use super::outbound::{enqueue_traced, send_mandatory};
 /// so the player always gets the chunks closest to them first. `16` keeps a
 /// normal single-chunk step fully served in one update while bounding a teleport
 /// flood.
-const MAX_CHUNK_LOADS_PER_UPDATE: usize = 16;
+const MAX_CHUNK_LOADS_PER_UPDATE: usize = crate::driver::MAX_STREAM_ADMISSIONS;
 
 /// Maximum number of departed chunk columns released by one stream pump.
 ///
@@ -70,7 +70,7 @@ pub(super) struct ChunkStream {
     pub(super) loaded: BTreeSet<ChunkPos>,
     /// Columns whose chunk and block-entity packets actually entered the writer.
     pub(super) sent: BTreeSet<ChunkPos>,
-    /// Recent movement direction used only to prioritize speculative baselines.
+    /// Recent movement direction prioritizes a small visible corridor and outer baselines.
     movement_hint: ChunkPos,
     /// A join request was admitted but its exact acquired batch is unconfirmed.
     /// Failed handoff quarantines the UUID; guessed ticket releases are unsafe.
@@ -144,10 +144,15 @@ impl ChunkStream {
                     0
                 }
             };
-            self.movement_hint = ChunkPos::new(
+            let hint = ChunkPos::new(
                 direction(position.x - previous.x),
                 direction(position.z - previous.z),
             );
+            // Vertical movement and idle X/Z packets must not erase the last
+            // useful horizontal direction before a boundary crossing.
+            if hint != ChunkPos::ORIGIN {
+                self.movement_hint = hint;
+            }
         }
         self.pending_position = Some(position);
         self.last_position = Some(position);
@@ -321,8 +326,9 @@ pub(super) async fn pump_chunk_stream(
         center,
         &desired,
         &chunk_stream.loaded,
-        MAX_CHUNK_LOADS_PER_UPDATE - to_retry.len(),
+        crate::chunk_preparation::MAX_PREPARATION_TARGETS,
         MAX_CHUNK_UNLOADS_PER_UPDATE,
+        chunk_stream.movement_hint,
     );
     let to_load = transition.load;
     // One extra retained ring prevents immediate unload/regenerate churn when
@@ -340,6 +346,11 @@ pub(super) async fn pump_chunk_stream(
         chunk_stream.movement_hint,
         &chunk_stream.loaded,
     );
+    let prefetch: Vec<_> = prefetch
+        .into_iter()
+        .filter(|pos| chebyshev_distance(center, *pos) > i64::from(chunk_stream.view_distance))
+        .take(crate::chunk_preparation::MAX_PREPARATION_TARGETS.saturating_sub(to_load.len()))
+        .collect();
     if to_load.is_empty() && to_unload.is_empty() && to_retry.is_empty() {
         // Even a complete visible view prepares an outer ring before movement.
         ctx.commands
@@ -350,6 +361,7 @@ pub(super) async fn pump_chunk_stream(
             .ok(); // A full bounded command queue defers speculative work.
         return Ok(());
     }
+    let retry_count = to_retry.len();
     let mut packets = Vec::new();
     if !to_retry.is_empty() {
         packets = resend_chunk_snapshots(ctx, to_retry, deadline).await?;
@@ -380,6 +392,7 @@ pub(super) async fn pump_chunk_stream(
             .send(SimCommand::StreamChunks {
                 viewer: chunk_stream.viewer,
                 load: to_load,
+                load_limit: MAX_CHUNK_LOADS_PER_UPDATE - retry_count,
                 unload: to_unload.clone(),
                 prefetch,
                 reply: reply_tx,
@@ -575,10 +588,55 @@ fn chebyshev_distance(a: ChunkPos, b: ChunkPos) -> i64 {
     dx.max(dz)
 }
 
+fn manhattan_distance(a: ChunkPos, b: ChunkPos) -> i64 {
+    (i64::from(a.x()) - i64::from(b.x())).abs() + (i64::from(a.z()) - i64::from(b.z())).abs()
+}
+
+/// The current column stays first. A moving client gets its next two central
+/// columns, then their one-column lateral margins before whole side/rear rings.
+/// This is a bounded `FerrumC` latency policy, not Paper's loader comparator.
+fn movement_corridor_rank(center: ChunkPos, direction: ChunkPos, pos: ChunkPos) -> u8 {
+    if pos == center {
+        return 0;
+    }
+    if direction == ChunkPos::ORIGIN {
+        return 3;
+    }
+    let dx = direction.x().signum();
+    let dz = direction.z().signum();
+    for step in 1..=2 {
+        let ahead = ChunkPos::new(
+            center.x().saturating_add(dx * step),
+            center.z().saturating_add(dz * step),
+        );
+        if pos == ahead {
+            return 1;
+        }
+    }
+    for step in 1..=2 {
+        for side in [-1, 1] {
+            let margin = ChunkPos::new(
+                center
+                    .x()
+                    .saturating_add(dx * step)
+                    .saturating_add(-dz * side),
+                center
+                    .z()
+                    .saturating_add(dz * step)
+                    .saturating_add(dx * side),
+            );
+            if pos == margin {
+                return 2;
+            }
+        }
+    }
+    3
+}
+
 /// One bounded transition toward the latest desired chunk square.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ChunkTransition {
-    /// Missing desired columns to acquire, nearest-first.
+    /// Missing desired columns to acquire, center/corridor first then nearest.
     load: Vec<ChunkPos>,
     /// Stale held columns to release, in deterministic coordinate order.
     unload: Vec<ChunkPos>,
@@ -597,9 +655,30 @@ fn next_chunk_transition(
     loaded: &BTreeSet<ChunkPos>,
     load_bound: usize,
     unload_bound: usize,
+    direction: ChunkPos,
 ) -> ChunkTransition {
     let mut to_load: Vec<ChunkPos> = desired.difference(loaded).copied().collect();
-    to_load.sort_by_key(|pos| (chebyshev_distance(center, *pos), pos.x(), pos.z()));
+    let lead = ChunkPos::new(
+        center.x().saturating_add(direction.x()),
+        center.z().saturating_add(direction.z()),
+    );
+    to_load.sort_by_key(|pos| {
+        (
+            movement_corridor_rank(center, direction, *pos),
+            chebyshev_distance(center, *pos),
+            // Only the first unheld spawn ring needs unknown-heading cardinal
+            // support. Keep later rings contiguous in the original x/z order
+            // to preserve overlapping terrain halos and bounded-cache reuse.
+            if direction == ChunkPos::ORIGIN && chebyshev_distance(center, *pos) == 2 {
+                manhattan_distance(center, *pos)
+            } else {
+                0
+            },
+            chebyshev_distance(lead, *pos),
+            pos.x(),
+            pos.z(),
+        )
+    });
     to_load.truncate(load_bound);
     let to_unload = loaded
         .difference(desired)
@@ -716,6 +795,7 @@ mod tests {
             &loaded,
             MAX_CHUNK_LOADS_PER_UPDATE,
             MAX_CHUNK_UNLOADS_PER_UPDATE,
+            ChunkPos::ORIGIN,
         );
         assert_eq!(first.load.len(), MAX_CHUNK_LOADS_PER_UPDATE);
         assert_eq!(first.unload, []);
@@ -735,6 +815,7 @@ mod tests {
                 &loaded,
                 MAX_CHUNK_LOADS_PER_UPDATE,
                 MAX_CHUNK_UNLOADS_PER_UPDATE,
+                ChunkPos::ORIGIN,
             );
             if transition.load.is_empty() {
                 break;
@@ -778,6 +859,7 @@ mod tests {
             &loaded,
             MAX_CHUNK_LOADS_PER_UPDATE,
             MAX_CHUNK_UNLOADS_PER_UPDATE,
+            ChunkPos::ORIGIN,
         );
         assert_eq!(first.load.len(), MAX_CHUNK_LOADS_PER_UPDATE);
         assert_eq!(first.unload.len(), MAX_CHUNK_UNLOADS_PER_UPDATE);
@@ -789,6 +871,7 @@ mod tests {
                 &loaded,
                 MAX_CHUNK_LOADS_PER_UPDATE,
                 MAX_CHUNK_UNLOADS_PER_UPDATE,
+                ChunkPos::ORIGIN,
             ),
             "the same state always plans the same bounded transition"
         );
@@ -801,6 +884,7 @@ mod tests {
                 &loaded,
                 MAX_CHUNK_LOADS_PER_UPDATE,
                 MAX_CHUNK_UNLOADS_PER_UPDATE,
+                ChunkPos::ORIGIN,
             );
             assert!(transition.load.len() <= MAX_CHUNK_LOADS_PER_UPDATE);
             assert!(transition.unload.len() <= MAX_CHUNK_UNLOADS_PER_UPDATE);
@@ -847,6 +931,7 @@ mod tests {
             &loaded,
             MAX_CHUNK_LOADS_PER_UPDATE,
             MAX_CHUNK_UNLOADS_PER_UPDATE,
+            ChunkPos::ORIGIN,
         );
         assert!(!stale.load.is_empty() && !stale.unload.is_empty());
 
@@ -859,6 +944,7 @@ mod tests {
             &loaded,
             MAX_CHUNK_LOADS_PER_UPDATE,
             MAX_CHUNK_UNLOADS_PER_UPDATE,
+            ChunkPos::ORIGIN,
         );
         assert_eq!(latest.load, []);
         assert_eq!(latest.unload, []);
@@ -970,6 +1056,167 @@ mod tests {
 
         assert_eq!(stream.pending_position, Some(latest));
         assert_eq!(stream.last_position(), Some(latest));
+    }
+
+    #[test]
+    fn horizontal_prefetch_direction_survives_idle_and_vertical_packets() {
+        use ferrumc_math::{ChunkPos, Vec3};
+        let mut stream = bare_stream();
+        stream.observe(Vec3::new(0.5, 64.0, 0.5));
+        stream.observe(Vec3::new(1.0, 64.0, 0.5));
+        stream.observe(Vec3::new(1.0, 65.0, 0.5));
+        stream.observe(Vec3::new(1.0, 65.0, 0.5));
+        assert_eq!(stream.movement_hint, ChunkPos::new(1, 0));
+        stream.observe(Vec3::new(0.5, 65.0, 0.5));
+        assert_eq!(stream.movement_hint, ChunkPos::new(-1, 0));
+        stream.mirror_teleport(Vec3::new(128.0, 64.0, 0.0));
+        assert_eq!(stream.movement_hint, ChunkPos::ORIGIN);
+    }
+
+    #[test]
+    fn visible_candidate_scan_keeps_center_and_two_forward_columns_before_side_rings() {
+        use ferrumc_math::ChunkPos;
+        let desired = super::desired_chunks(ChunkPos::ORIGIN, 6);
+        let transition = super::next_chunk_transition(
+            ChunkPos::ORIGIN,
+            &desired,
+            &std::collections::BTreeSet::new(),
+            64,
+            16,
+            ChunkPos::new(1, 0),
+        );
+        assert_eq!(transition.load.len(), 64);
+        assert_eq!(transition.load[0], ChunkPos::ORIGIN);
+        assert_eq!(transition.load[1], ChunkPos::new(1, 0));
+        assert!(transition.load.iter().all(|pos| desired.contains(pos)));
+        assert_eq!(transition.load[2], ChunkPos::new(2, 0));
+        let rest: Vec<_> = transition
+            .load
+            .iter()
+            .filter(|pos| {
+                super::movement_corridor_rank(ChunkPos::ORIGIN, ChunkPos::new(1, 0), **pos) == 3
+            })
+            .copied()
+            .collect();
+        assert!(rest
+            .windows(2)
+            .all(|pair| super::chebyshev_distance(ChunkPos::ORIGIN, pair[0])
+                <= super::chebyshev_distance(ChunkPos::ORIGIN, pair[1])));
+    }
+
+    #[test]
+    fn stationary_unknown_heading_prepares_all_next_two_axis_columns_before_corners() {
+        use ferrumc_math::ChunkPos;
+        for center in [ChunkPos::ORIGIN, ChunkPos::new(-5, -7)] {
+            let desired = super::desired_chunks(center, 6);
+            let held = super::desired_chunks(center, 1);
+            let transition =
+                super::next_chunk_transition(center, &desired, &held, 64, 16, ChunkPos::ORIGIN);
+            assert_eq!(
+                &transition.load[..4],
+                &[
+                    ChunkPos::new(center.x() - 2, center.z()),
+                    ChunkPos::new(center.x(), center.z() - 2),
+                    ChunkPos::new(center.x(), center.z() + 2),
+                    ChunkPos::new(center.x() + 2, center.z()),
+                ]
+            );
+            assert!(transition.load.iter().all(|pos| desired.contains(pos)));
+            assert_eq!(transition.load.len(), 64);
+            assert!(transition.load[..4]
+                .iter()
+                .all(|pos| super::manhattan_distance(center, *pos) == 2));
+            assert_eq!(
+                super::manhattan_distance(
+                    ChunkPos::new(i32::MIN, i32::MIN),
+                    ChunkPos::new(i32::MAX, i32::MAX)
+                ),
+                8_589_934_590
+            );
+        }
+    }
+
+    #[test]
+    fn stationary_inner_and_outer_rings_keep_original_contiguous_order() {
+        use ferrumc_math::ChunkPos;
+        use std::collections::BTreeSet;
+        for center in [ChunkPos::ORIGIN, ChunkPos::new(-5, -7)] {
+            let desired = super::desired_chunks(center, 6);
+            let transition = super::next_chunk_transition(
+                center,
+                &desired,
+                &BTreeSet::new(),
+                desired.len(),
+                16,
+                ChunkPos::ORIGIN,
+            );
+            let actual: Vec<_> = transition
+                .load
+                .into_iter()
+                .filter(|pos| super::chebyshev_distance(center, *pos) != 2)
+                .collect();
+            let mut original: Vec<_> = desired
+                .into_iter()
+                .filter(|pos| super::chebyshev_distance(center, *pos) != 2)
+                .collect();
+            original.sort_by_key(|pos| (super::chebyshev_distance(center, *pos), pos.x(), pos.z()));
+            assert_eq!(
+                actual, original,
+                "all stationary rings except ring2 keep the exact prior locality order"
+            );
+        }
+    }
+
+    #[test]
+    fn corridor_reversal_diagonal_and_small_view_remain_visible_and_bounded() {
+        use ferrumc_math::ChunkPos;
+        use std::collections::BTreeSet;
+        let center = ChunkPos::new(-5, -7);
+        for direction in [
+            ChunkPos::new(1, 0),
+            ChunkPos::new(-1, 0),
+            ChunkPos::new(1, -1),
+        ] {
+            let desired = super::desired_chunks(center, 6);
+            let transition =
+                super::next_chunk_transition(center, &desired, &BTreeSet::new(), 64, 16, direction);
+            assert_eq!(
+                &transition.load[..3],
+                &[
+                    center,
+                    ChunkPos::new(center.x() + direction.x(), center.z() + direction.z()),
+                    ChunkPos::new(
+                        center.x() + 2 * direction.x(),
+                        center.z() + 2 * direction.z()
+                    )
+                ]
+            );
+            assert_eq!(transition.load.len(), 64);
+            assert!(transition.load.iter().all(|pos| desired.contains(pos)));
+            assert_eq!(
+                transition
+                    .load
+                    .iter()
+                    .copied()
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                64
+            );
+        }
+        let desired = super::desired_chunks(center, 1);
+        let transition = super::next_chunk_transition(
+            center,
+            &desired,
+            &BTreeSet::new(),
+            64,
+            16,
+            ChunkPos::new(1, 0),
+        );
+        assert_eq!(transition.load.len(), 9);
+        assert!(
+            transition.load.iter().all(|pos| desired.contains(pos)),
+            "corridor prediction never expands client-visible admission"
+        );
     }
 
     #[test]

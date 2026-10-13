@@ -424,6 +424,7 @@ async fn acquire_join_chunks_until(
             .send(SimCommand::StreamChunks {
                 viewer,
                 load: positions,
+                load_limit: crate::driver::MAX_STREAM_ADMISSIONS,
                 unload: Vec::new(),
                 prefetch: Vec::new(),
                 reply,

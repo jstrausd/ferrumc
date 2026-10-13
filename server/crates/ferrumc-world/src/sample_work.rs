@@ -93,6 +93,20 @@ impl SampleWork {
         }
     }
 
+    /// Charges a pure operation group only when a public allowance admits all
+    /// units. Otherwise leaves work unchanged so its original unit sequence can
+    /// execute and retain the exact first refusal. Private wide meters keep
+    /// their original unit-by-unit segment/fault behavior.
+    pub(crate) fn try_charge_public_group(&mut self, units: usize) -> bool {
+        match &mut self.meter {
+            Meter::Public { remaining, .. } if *remaining >= units => {
+                *remaining -= units;
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub(crate) fn charge_core(&mut self) -> Result<(), ChargeFault> {
         match &mut self.meter {
             Meter::Public { remaining, limit } => {

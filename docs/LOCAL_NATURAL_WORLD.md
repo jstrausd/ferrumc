@@ -188,19 +188,23 @@ and compares all requested block states and quart biomes after a saved restart.
 
 ## Current tree loading measurement
 
-The 13 October loading optimization keeps the same revision-3 tree world and
+The 13 October throughput optimization keeps the same revision-3 tree world and
 32/64/32 raw/biome/source cache limits. Existing `tree-preview` saves can be
 restarted with the updated executable and the same launch command above.
 
 In the standard seed-0 protocol test, all 169 view-6 columns loaded in
-**129.838 seconds** initially and **125.120 seconds** after restart, versus
-173.439/172.998 seconds in the previous standard run (25.14%/27.68% less time).
+**82.914 seconds** initially and **81.716 seconds** after restart, versus
+122.942/122.880 seconds in the previous accepted run (32.56%/33.50% less time).
 Complete generated block/biome snapshots and saved edits stayed identical.
-These are individual same-host full-view observations, not general TPS/RSS or
-Paper-server benchmarks. Initial loading remains slow and other species,
-decorators, leaf decay and full Survival remain open.
+At 5.6 blocks/s, all 12 entered chunks and their next forward chunks were ready
+before each tested crossing. Standalone cold/sequential generation used 36–38%
+less time, with a bounded additional climate cache of about 4.5 MiB native capacity.
 
-See [the exact validation and evidence](TREE_GENERATION_VALIDATION.md#loading-optimization-13-october-2026).
+These are individual same-host observations, not general TPS/RSS or Paper-server
+benchmarks. Initial loading still takes time; other species, decorators, leaf
+decay and full Survival remain open.
+
+See [the exact validation and evidence](CHUNK_THROUGHPUT_VALIDATION.md).
 
 ## Joining above loaded ground
 

@@ -97,13 +97,76 @@ fn distance(
         .nodes
         .get(usize::from(node))
         .ok_or_else(|| fail(BiomeErrorKind::InvalidTree))?;
+    let precharged = work.try_charge_public_group(7);
     let mut sum = 0_i64;
     for ([minimum, maximum], &value) in node.axes.iter().zip(coordinates) {
-        charge(work)?;
+        if !precharged {
+            charge(work)?;
+        }
         let high = value.wrapping_sub(*maximum);
         let low = minimum.wrapping_sub(value);
         let distance = if high > 0 { high } else { low.max(0) };
         sum = sum.wrapping_add(distance.wrapping_mul(distance));
     }
     Ok(sum)
+}
+
+#[cfg(test)]
+mod throughput_tests {
+    use super::*;
+    use crate::biome_selection::{BiomeBuildBudget, MAX_BIOME_BUILD_WORK};
+    use crate::sample_work::{CarverCumulativeMeter, Unsigned192};
+    use ferrumc_registry::biome::BiomeParametersResourceId;
+
+    fn original_distance(
+        tree: &BiomeTree,
+        node: u16,
+        target: &[i64; 7],
+        work: &mut SampleWork,
+    ) -> Result<i64, BiomeCoreError> {
+        charge(work)?;
+        let node = tree
+            .nodes
+            .get(usize::from(node))
+            .ok_or_else(|| fail(BiomeErrorKind::InvalidTree))?;
+        let mut sum = 0_i64;
+        for ([minimum, maximum], &value) in node.axes.iter().zip(target) {
+            charge(work)?;
+            let high = value.wrapping_sub(*maximum);
+            let low = minimum.wrapping_sub(value);
+            let distance = if high > 0 { high } else { low.max(0) };
+            sum = sum.wrapping_add(distance.wrapping_mul(distance));
+        }
+        Ok(sum)
+    }
+    #[test]
+    fn pure_distance_group_preserves_public_and_wide_refusal_boundaries() {
+        let tree = BiomeTree::from_builtin(
+            BiomeParametersResourceId::from_name("minecraft:overworld").unwrap(),
+            BiomeBuildBudget::new(MAX_BIOME_BUILD_WORK).unwrap(),
+        )
+        .unwrap();
+        let coordinates = [i64::MIN, i64::MAX, -99999, 99999, 0, 123, 0];
+        for allowance in 0..=9 {
+            let mut actual = SampleWork::new(allowance);
+            let mut original = SampleWork::new(allowance);
+            assert_eq!(
+                distance(&tree, tree.root, &coordinates, &mut actual),
+                original_distance(&tree, tree.root, &coordinates, &mut original)
+            );
+            assert_eq!(actual.used(), original.used());
+            let make = || {
+                SampleWork::with_carver_meter(CarverCumulativeMeter::new(Unsigned192::from_u64(
+                    allowance as u64,
+                )))
+            };
+            let mut actual = make();
+            let mut original = make();
+            assert_eq!(
+                distance(&tree, tree.root, &coordinates, &mut actual),
+                original_distance(&tree, tree.root, &coordinates, &mut original)
+            );
+            assert_eq!(actual.carver_meter().used(), original.carver_meter().used());
+        }
+    }
 }
