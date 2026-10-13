@@ -2,7 +2,7 @@
 
 use ferrumc_math::ChunkPos;
 
-use crate::Chunk;
+use crate::{Chunk, WorldError};
 
 /// Exact encoded length of a schema-1 [`GenerationIdentity`], in bytes.
 ///
@@ -14,6 +14,7 @@ pub const GENERATION_IDENTITY_LEN: usize = 27;
 const IDENTITY_MAGIC: [u8; 4] = *b"FCGI";
 const IDENTITY_SCHEMA: u16 = 1;
 const FLAT_REVISION: u32 = 1;
+const NATURAL_PREVIEW_REVISION: u32 = 1;
 
 /// A numeric world seed with the signed 64-bit range used by Minecraft.
 ///
@@ -62,12 +63,15 @@ impl GenerationMinecraftVersion {
 pub enum GeneratorKind {
     /// `FerrumC`'s existing fixed-layer flat profile, not Vanilla flat settings.
     FerrumcFlat,
+    /// Real cold Overworld terrain through carvers, without decoration or structures.
+    FerrumcNaturalPreview,
 }
 
 impl GeneratorKind {
     const fn code(self) -> u16 {
         match self {
             Self::FerrumcFlat => 1,
+            Self::FerrumcNaturalPreview => 2,
         }
     }
 }
@@ -92,14 +96,12 @@ impl GenerationDimension {
 
 /// Complete supported identity of a reproducible generated chunk baseline.
 ///
-/// Only Minecraft 1.21.8 / `FerrumC` flat revision 1 / Overworld is currently
-/// representable. Decode rejects other metadata explicitly. Seeds are retained
-/// even though the flat algorithm's blocks are seed-independent, so a seed
-/// change is still an identity change.
+/// Supports Minecraft 1.21.8 / Overworld, with distinct flat revision 1 and
+/// natural terrain preview revision 1 identities. Decode rejects other metadata
+/// explicitly. Seeds are retained even when an algorithm is seed-independent.
 ///
 /// This is a value contract. It does not persist the identity or guard the
-/// existing storage/load path; those consumers must adopt it separately before
-/// a configurable or different terrain generator can safely be enabled.
+/// storage/load path; consumers must explicitly adopt its compatibility gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GenerationIdentity {
     minecraft_version: GenerationMinecraftVersion,
@@ -117,6 +119,21 @@ impl GenerationIdentity {
             minecraft_version: GenerationMinecraftVersion::V1_21_8,
             generator_kind: GeneratorKind::FerrumcFlat,
             generator_revision: FLAT_REVISION,
+            seed,
+            dimension: GenerationDimension::Overworld,
+        }
+    }
+
+    /// Selects real cold Overworld terrain through the accepted carver stage.
+    ///
+    /// Revision 1 omits placed features, trees, structures and fluid simulation.
+    /// It is a terrain preview, not a complete Survival world generator.
+    #[must_use]
+    pub const fn natural_overworld(seed: WorldSeed) -> Self {
+        Self {
+            minecraft_version: GenerationMinecraftVersion::V1_21_8,
+            generator_kind: GeneratorKind::FerrumcNaturalPreview,
+            generator_revision: NATURAL_PREVIEW_REVISION,
             seed,
             dimension: GenerationDimension::Overworld,
         }
@@ -157,7 +174,7 @@ impl GenerationIdentity {
     /// Layout: `FCGI`, big-endian `u16` schema, three big-endian `u16` Minecraft
     /// release components, `u16` algorithm, `u32` generator revision, `i64` seed,
     /// and `u8` dimension. Every multibyte number is big-endian. Algorithm 1 is
-    /// `FerrumC` flat; dimension 0 is Overworld. This is `FerrumC` metadata, not a
+    /// `FerrumC` flat, 2 is the natural terrain preview; dimension 0 is Overworld. This is `FerrumC` metadata, not a
     /// Minecraft packet or Vanilla save record.
     #[must_use]
     pub fn encode(self) -> [u8; GENERATION_IDENTITY_LEN] {
@@ -207,13 +224,18 @@ impl GenerationIdentity {
             });
         }
         let kind = u16::from_be_bytes([bytes[12], bytes[13]]);
-        if kind != GeneratorKind::FerrumcFlat.code() {
-            return Err(GenerationError::UnknownGenerator { kind });
-        }
+        let (generator_kind, supported_revision) = match kind {
+            1 => (GeneratorKind::FerrumcFlat, FLAT_REVISION),
+            2 => (
+                GeneratorKind::FerrumcNaturalPreview,
+                NATURAL_PREVIEW_REVISION,
+            ),
+            _ => return Err(GenerationError::UnknownGenerator { kind }),
+        };
         let revision = u32::from_be_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]);
-        if revision != FLAT_REVISION {
+        if revision != supported_revision {
             return Err(GenerationError::UnsupportedGeneratorRevision {
-                kind: GeneratorKind::FerrumcFlat,
+                kind: generator_kind,
                 revision,
             });
         }
@@ -225,14 +247,16 @@ impl GenerationIdentity {
                 dimension: bytes[26],
             });
         }
-        Ok(Self::flat_overworld(WorldSeed::new(seed)))
+        Ok(match generator_kind {
+            GeneratorKind::FerrumcFlat => Self::flat_overworld(WorldSeed::new(seed)),
+            GeneratorKind::FerrumcNaturalPreview => Self::natural_overworld(WorldSeed::new(seed)),
+        })
     }
 
     /// Requires an exact match with a stored or requested supported identity.
     ///
-    /// The full identity participates in equality. Currently only different
-    /// seeds can produce two representable, incompatible values; other unknown
-    /// components are rejected earlier by [`Self::decode`].
+    /// The full identity participates in equality, including algorithm and seed.
+    /// Unknown components are rejected earlier by [`Self::decode`].
     pub fn ensure_compatible(self, actual: Self) -> Result<(), GenerationError> {
         if self == actual {
             Ok(())
@@ -258,6 +282,29 @@ pub trait ChunkGenerator: Send + Sync {
 
     /// Produces the deterministic baseline for the requested chunk column.
     fn generate_chunk(&self, pos: ChunkPos) -> Chunk;
+}
+
+/// Pure generation whose producer refusals propagate without substituting terrain.
+///
+/// Implementations retain a stable identity and deterministically return the same
+/// complete chunk or classified error for a position, independent of request order.
+/// Callers must place synchronous CPU work on a bounded generation worker lane.
+pub trait FallibleChunkGenerator: Send + Sync {
+    /// Returns the complete versioned baseline identity.
+    fn identity(&self) -> GenerationIdentity;
+
+    /// Produces a complete baseline, or exposes the refusing producer's error.
+    fn try_generate_chunk(&self, pos: ChunkPos) -> Result<Chunk, WorldError>;
+}
+
+impl FallibleChunkGenerator for crate::FlatWorldGenerator {
+    fn identity(&self) -> GenerationIdentity {
+        self.identity()
+    }
+
+    fn try_generate_chunk(&self, pos: ChunkPos) -> Result<Chunk, WorldError> {
+        Ok(self.generate(pos))
+    }
 }
 
 /// Classified failures of identity decoding or baseline compatibility.

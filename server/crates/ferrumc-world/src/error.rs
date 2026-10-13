@@ -9,6 +9,15 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum WorldError {
+    /// A real natural-terrain producer refused the request; no chunk is published.
+    #[error("natural generation failed in {stage:?}: {detail}")]
+    NaturalGeneration {
+        /// Producer stage at which generation was refused.
+        stage: crate::NaturalGenerationStage,
+        /// Original producer diagnostic, bounded to 512 UTF-8 characters.
+        detail: String,
+    },
+
     /// A [`crate::PalettedContainer`] index was outside `0..CAPACITY`.
     #[error("container index {index} out of range for capacity {capacity}")]
     IndexOutOfRange {

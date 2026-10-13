@@ -73,6 +73,7 @@ mod cross_shard;
 mod entity;
 mod error;
 mod generation;
+mod generation_executor;
 mod harness;
 mod item_counters;
 mod item_publication;
@@ -111,6 +112,7 @@ pub use entity::{
 };
 pub use error::{SimError, SimResult};
 pub use generation::{GenerationBinding, VerifiedGenerationBinding};
+pub use generation_executor::{ChunkGenerationExecutor, MAX_CONCURRENT_CHUNK_GENERATIONS};
 pub use harness::{SimHarness, TickOutcome};
 pub use item_counters::{
     OwnedItemCounterHandle, OwnedItemCounterLimits, MAX_CONFIRMED_ITEM_BYTES,
@@ -126,8 +128,9 @@ pub use item_publication::{
     MAX_ITEM_PUBLICATION_RETAINED_BYTES,
 };
 pub use loaded::{
-    load_or_generate, load_or_generate_bound, load_or_generate_legacy, ChunkAcquired,
-    ChunkProvenance, LoadedChunkMap, TicketRelease, CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,
+    load_or_generate, load_or_generate_bound, load_or_generate_bound_offthread,
+    load_or_generate_legacy, ChunkAcquired, ChunkProvenance, LoadedChunkMap, TicketRelease,
+    CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,
 };
 pub use message::{GameInput, GameOutput};
 // Only the cause is public: the structured `MutationResult` stays internal to

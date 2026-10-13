@@ -234,3 +234,23 @@ peek/ack, and Stop requires empty pending/retained publications alongside the
 existing durability checks. Encoded charge is not heap/RSS accounting; bounded
 existing Item/NBT clones keep their standard infallible allocator boundary.
 This opt-in producer adds no Session/App activation or live Survival parity.
+
+
+Natural terrain uses `Arc<dyn FallibleChunkGenerator>` with
+`load_or_generate_bound_offthread`, `LoadedChunkMap::acquire_offthread`, and
+`acquire_spawn_offthread`. Pass clones of one `ChunkGenerationExecutor` to all
+world loaders; construct it with a positive concurrency limit (normally one or
+two, capped at 64). True base misses try to reserve a credit and run synchronous
+producer work with `spawn_blocking`. Saturation returns `ChunkGenerationBusy`
+without a waiter queue; callers defer the request. Cancellation retains worker
+credit until the admitted task actually exits. Stored full chunks and resident
+tickets bypass generation. Producer errors, task panics, metadata refusals and
+invalid columns admit no partial chunk or ticket and never select flat terrain.
+The existing borrowed flat/legacy APIs retain their behavior.
+
+This is a bounded terrain consumer, not complete Minecraft generation or Paper
+parity. The Paper build-60 `ChunkStatusTasks` full source and Moonrise scheduler
+were reviewed: they separate persisted chunk loading and staged generation,
+then full conversion. `FerrumC` retains its own strict metadata/overlay admission
+and its producer's declared preview scope; source review is not differential
+acceptance.

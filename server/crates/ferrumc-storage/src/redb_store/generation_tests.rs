@@ -260,10 +260,10 @@ async fn all_malformed_or_unknown_identity_values_are_classified_and_never_repla
         },
     ));
     let mut value = valid;
-    value[12..14].copy_from_slice(&2u16.to_be_bytes());
+    value[12..14].copy_from_slice(&3u16.to_be_bytes());
     cases.push((
         value.to_vec(),
-        GenerationError::UnknownGenerator { kind: 2 },
+        GenerationError::UnknownGenerator { kind: 3 },
     ));
     let mut value = valid;
     value[14..18].copy_from_slice(&2u32.to_be_bytes());

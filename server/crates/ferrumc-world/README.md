@@ -10,8 +10,9 @@ graph metadata. They validate all 35 definitions, including unused graphs.
 `RouterTemplate::bind_seed` now constructs an immutable `SeededRouter` for
 explicit seeds. It samples the fifteen original router fields, all 35 named
 definitions and six climate axes in the original empty-Blender point context.
-The executable server still uses the flat generator described below; surface
-and actual chunk adoption need their own consumers.
+The executable server defaults to the flat generator and offers an explicit
+natural terrain preview that composes these producers through carvers, as
+described below.
 The separately bounded `SeededRouter::fresh_paper_noise_chunk` now executes
 original Paper interpolation, cache wrappers and one complete material-density
 loop. Its `sample_chunk_materials` alternative follows aquifer, vein and
@@ -126,7 +127,8 @@ generator:
   profile: bedrock floor, stone fill, dirt, grass surface, then air.
 - `WorldSeed`, `GenerationIdentity` and `ChunkGenerator` — explicit numeric seed
   and versioned identity for pure, reproducible chunk generation. The current
-  executable identity is Minecraft 1.21.8 / `FerrumC` flat revision 1 / Overworld.
+  identities are Minecraft 1.21.8 / Overworld, with flat revision 1 and natural
+  terrain preview revision 1.
 
 ## Generator contract
 
@@ -139,7 +141,8 @@ and object-safe `ChunkGenerator::generate_chunk` use the same production path.
 `GenerationIdentity::encode` returns a fixed 27-byte `FCGI` schema-1 envelope.
 Its big-endian fields are magic, `u16` envelope schema, three `u16` Minecraft
 release components, `u16` algorithm, `u32` generator revision, `i64` seed and
-`u8` dimension. Algorithm 1 names `FerrumC` flat; dimension 0 names Overworld.
+`u8` dimension. Algorithm 1 names `FerrumC` flat, algorithm 2 names its natural
+terrain preview; dimension 0 names Overworld.
 Envelope schema and generator revision are independent. `decode` requires the
 exact length, allocates nothing, and classifies unsupported metadata without
 falling back. `ensure_compatible` requires exact supported identity equality.
@@ -149,9 +152,9 @@ The production App/Sim/Storage path now persists and verifies this identity
 before regeneration and overlay application. Existing legacy worlds require
 the explicit offline generation migration; they receive no inferred seed.
 See [WG-004](../../../docs/agent-tasks/WG-004_APP_GENERATION.md) for the consumer
-contract. The server still serves fixed-layer flat terrain. Natural Overworld generation,
-Nether/End, textual/random seed selection and migrations to future generator
-algorithms/revisions remain later tickets. See [WG-001 notes](../../../docs/agent-tasks/WG-001_GENERATION_CONTRACT.md)
+contract. `RuntimeWorldGenerator` now exposes both the existing flat profile
+and the natural Overworld terrain preview described below. Nether/End and
+migrations to future generator algorithms/revisions remain separate work. See [WG-001 notes](../../../docs/agent-tasks/WG-001_GENERATION_CONTRACT.md)
 for pinned reference behavior and consumer dependencies.
 
 ## Original random and noise primitives
@@ -376,3 +379,32 @@ not a timing guarantee. Original unmetered Legacy geometry rejections and
 shuffling during earlier immutable router binding remain explicitly scoped
 policies. This producer does not activate natural-world generation, warm
 thread history, features, persistence, lighting, or App behavior.
+
+
+## Natural Overworld terrain preview
+
+`NaturalWorldGenerator::new(WorldSeed)` binds the accepted normal Overworld
+producers. `try_generate_chunk(ChunkPos)` composes real material terrain,
+preliminary surface corners, a complete cold stored-biome neighborhood, original
+Paper build-60 surface columns and carvers. Every producer must succeed before
+a live `Chunk` is returned. Refusals keep their producer phase and diagnostic in
+`WorldError`; there is no synthetic terrain or flat fallback.
+
+`RuntimeWorldGenerator::flat(seed)` and `natural(seed)` select the configured
+algorithm. Both use the object-safe `FallibleChunkGenerator` contract, while the
+legacy infallible `ChunkGenerator` remains available for existing flat callers.
+Clones share immutable seed bindings. Callers must run CPU work on a bounded
+generation worker lane; World creates no threads and performs no I/O.
+
+Natural chunks retain actual quart biomes. Configuration must send
+`network_biome_resources()` in exactly the order used by the network encoder:
+plains first, then the remaining 64 builtin resources in canonical-name order.
+Mixed sections use the client-compatible direct 7-bit biome representation.
+`ChunkLightData::vertical_sky` supplies conservative sky light for vertically
+open air; it leaves enclosed caves dark, without implementing full propagation.
+
+This versioned preview includes material-stage ore veins but omits placed-feature
+ore generation, trees, other vegetation, structures, fluid simulation and full
+lighting. Its public installation tests compare every FINAL block of the accepted
+original seam and signed-seed fixtures. It is terrain preview, not a complete
+Survival world or a live-Paper server acceptance claim.

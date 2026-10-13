@@ -14,7 +14,7 @@
 - Production startup explicitly uses storage format4. One blocking opening task
   constructs the shared backend; persisted generation identity is reconciled
   and confirmed before Anvil import, spawn, player loading and client admission.
-  An omitted seed keeps the stored seed; a fresh omission explicitly chooses
+  An omitted seed or preset keeps the stored identity; a fresh omission explicitly chooses
   FerrumC-flat-v1/Overworld/1.21.8/seed0. Explicit mismatch and malformed metadata
   refuse startup without any world-bearing record change.
 - An App-opaque PersistenceTarget couples its private exact store Arc with the
@@ -23,6 +23,17 @@
   retain dirty facts, journal and unassigned mutation IDs. Unload and final stop
   use the same target. Worker validates metadata before every write/retry and
   before empty durability acknowledgments; foreign overlay scope is refused.
+- Natural preview generation uses a shared bounded one-worker executor outside
+  Tokio workers for spawn and streamed chunks. Flat spawn remains configured;
+  natural spawn selects a dry support column with two clear blocks within the
+  bounded already-resident spawn square, and `/spawn` uses that same position.
+  Preview startup reports missing feature/ore/tree/structure population explicitly.
+  Exploration admits at most one absent preview column per driver command;
+  deferred columns acquire no ticket and remain absent from the client sent set.
+  The driver still awaits that column, so generation may pause simulation ticks.
+  Natural preview refuses Anvil imports before declaring metadata or importing
+  chunks, including when the natural preset comes from stored metadata; imported
+  full snapshots do not preserve the preview biome palette payload.
 - JoinGame's biome hash uses the stored numeric seed and original Minecraft
   SHA256/hashLong/asLong byte order, covered by actual original-JAR goldens.
 - Legacy format3 requires the explicit offline migrate-generation operation,

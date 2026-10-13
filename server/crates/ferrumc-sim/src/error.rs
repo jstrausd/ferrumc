@@ -5,7 +5,7 @@ use std::io::ErrorKind;
 use ferrumc_core::{ServerError, Tick};
 use ferrumc_math::{ChunkPos, ShardPos};
 use ferrumc_storage::{ChunkKey, GenerationKey, StorageError};
-use ferrumc_world::GenerationIdentity;
+use ferrumc_world::{GenerationIdentity, WorldError};
 
 use crate::ownership::{ShardId, ShardLifecycleState, ShardRegion};
 
@@ -60,6 +60,34 @@ pub enum SimError {
         /// The underlying storage error.
         #[source]
         source: ServerError,
+    },
+
+    /// The selected fallible producer refused the requested chunk.
+    #[error("failed to generate chunk at {pos:?}: {source}")]
+    ChunkGeneration {
+        /// The requested column; no resident chunk or ticket was admitted.
+        pos: ChunkPos,
+        /// The original classified producer error, with no fallback generation.
+        #[source]
+        source: WorldError,
+    },
+
+    /// All generation credits are in use; the caller must defer this miss.
+    #[error("chunk generation at {pos:?} is busy (capacity {capacity})")]
+    ChunkGenerationBusy {
+        /// The requested column.
+        pos: ChunkPos,
+        /// Maximum admitted blocking tasks, including tasks whose caller left.
+        capacity: usize,
+    },
+
+    /// A blocking generation task ended without a producer result.
+    #[error("chunk generation task at {pos:?} failed (panicked: {panicked})")]
+    ChunkGenerationTask {
+        /// The requested column.
+        pos: ChunkPos,
+        /// Whether the producer panicked rather than the runtime cancelling it.
+        panicked: bool,
     },
 
     /// Reading the immutable generation descriptor failed, rather than missing
@@ -319,6 +347,11 @@ impl From<SimError> for ServerError {
             }
             // Preserve the storage classification rather than flatten it.
             SimError::ChunkLoad { source, .. } | SimError::GenerationStore { source, .. } => source,
+            SimError::ChunkGeneration { source, .. } => ServerError::internal(source.to_string()),
+            SimError::ChunkGenerationBusy { capacity, .. } => ServerError::capacity(format!(
+                "chunk generation busy (capacity {capacity})"
+            )),
+            task @ SimError::ChunkGenerationTask { .. } => ServerError::internal(task.to_string()),
             SimError::PersistCapture { source } => source.into(),
             generation @ (SimError::GenerationIdentityMissing { .. }
             | SimError::GenerationIdentityMismatch { .. }

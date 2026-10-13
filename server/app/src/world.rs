@@ -5,7 +5,7 @@
 //! The spawn chunks are loaded once at startup into the single shard's
 //! [`LoadedChunkMap`](ferrumc_sim::LoadedChunkMap) via
 //! [`acquire_spawn`](ferrumc_sim::LoadedChunkMap::acquire_spawn) (try the
-//! [`WorldStore`], else generate flat terrain) and kept resident by a `Spawn`
+//! [`WorldStore`], else generate the selected terrain) and kept resident by a `Spawn`
 //! ticket. From them we build a shared [`JoinKit`]: the `JoinGame` packet, the
 //! spawn position, and the *list of spawn chunk positions*. Connection tasks clone
 //! the `Arc<JoinKit>` and replay the framing the moment a client reaches play.
@@ -16,25 +16,30 @@
 //! block another player placed in a spawn chunk is reflected on every (re)join —
 //! a cached snapshot would replay the stale pre-edit terrain instead.
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ferrumc_anvil::{region_pos_from_path, Region};
 use ferrumc_codec::{BoundedBytes, BoundedString};
 use ferrumc_core::{DimensionId, WorldId};
-use ferrumc_math::{BlockPos, ChunkPos};
+use ferrumc_math::{BlockPos, ChunkPos, Vec3};
 use ferrumc_proto::generated::play::{ChunkDataAndLight, Heightmap, JoinGame, SpawnInfo};
 use ferrumc_proto::types::BlockPosition;
 use ferrumc_registry::dimension;
 
-use ferrumc_sim::{GenerationBinding, RegionLimits, SimShard, SpawnChunkTickets};
+use ferrumc_sim::{
+    ChunkGenerationExecutor, ChunkTicket, GenerationBinding, LoadedChunkMap, RegionLimits,
+    SimShard, SpawnChunkTickets,
+};
 use ferrumc_storage::{
     ChunkKey, ChunkRecord, GenerationKey, InMemoryStore, PlayerStore, RedbStore, SchemaVersion,
     WorldStore,
 };
 use ferrumc_world::{
-    encode_chunk_section_data, pack_motion_blocking_heightmap, Chunk, ChunkLightData,
-    FlatWorldGenerator, GenerationIdentity, WorldSeed,
+    encode_chunk_section_data, pack_motion_blocking_heightmap, pack_world_surface_heightmap, Chunk,
+    ChunkLightData, FallibleChunkGenerator, GenerationIdentity, GeneratorKind, HeightmapKind,
+    RuntimeWorldGenerator, WorldSeed,
 };
 
 use crate::config::AppConfig;
@@ -67,6 +72,9 @@ const NO_PREVIOUS_GAMEMODE: u8 = u8::MAX;
 /// The 1.21.5+ array-form heightmap is keyed by numeric type; `4` selects
 /// `MOTION_BLOCKING` (the highest block that blocks motion or contains a fluid).
 const MOTION_BLOCKING_HEIGHTMAP: i32 = 4;
+
+/// Protocol heightmap type for the highest non-air block.
+const WORLD_SURFACE_HEIGHTMAP: i32 = 1;
 
 /// Maximum number of imported chunks buffered before a flush to the store during
 /// an Anvil import.
@@ -158,7 +166,48 @@ pub(crate) struct WorldSetup {
     /// state on join and save it on leave/shutdown through this handle.
     pub(crate) player_store: Arc<dyn PlayerStore>,
     /// The terrain generator the driver uses on a store miss.
-    pub(crate) generator: FlatWorldGenerator,
+    pub(crate) generator: RuntimeGeneration,
+}
+
+/// Shared generator and its single bounded CPU lane, reused through startup and streaming.
+#[derive(Clone)]
+pub(crate) struct RuntimeGeneration {
+    generator: Arc<dyn FallibleChunkGenerator>,
+    executor: ChunkGenerationExecutor,
+}
+
+impl RuntimeGeneration {
+    pub(crate) fn new(generator: Arc<dyn FallibleChunkGenerator>) -> Self {
+        Self {
+            generator,
+            // One worker bounds concurrent preview CPU and scratch memory. Full
+            // admission fails explicitly; no unbounded generation queue exists.
+            executor: ChunkGenerationExecutor::new(NonZeroUsize::MIN),
+        }
+    }
+
+    pub(crate) fn identity(&self) -> GenerationIdentity {
+        self.generator.identity()
+    }
+
+    pub(crate) async fn acquire(
+        &self,
+        chunks: &mut LoadedChunkMap,
+        store: &dyn WorldStore,
+        pos: ChunkPos,
+        ticket: ChunkTicket,
+    ) -> anyhow::Result<()> {
+        chunks
+            .acquire_offthread(
+                store,
+                Arc::clone(&self.generator),
+                &self.executor,
+                pos,
+                ticket,
+            )
+            .await?;
+        Ok(())
+    }
 }
 
 /// Returns the chunk position the spawn point falls in.
@@ -190,7 +239,17 @@ pub(crate) async fn build_world(
     } = open_store(config).await?;
     let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
     let identity = reconcile_generation(&*store, key, config).await?;
-    let generator = FlatWorldGenerator::with_seed(identity.seed());
+    let runtime_generator = tokio::task::spawn_blocking(move || match identity.generator_kind() {
+        GeneratorKind::FerrumcFlat => Ok(RuntimeWorldGenerator::flat(identity.seed())),
+        GeneratorKind::FerrumcNaturalPreview => {
+            RuntimeWorldGenerator::natural(identity.seed()).map_err(anyhow::Error::from)
+        }
+        _ => anyhow::bail!("unsupported persisted generation identity {identity:?}"),
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("generator binding task failed: {error}"))??;
+    let generator = RuntimeGeneration::new(Arc::new(runtime_generator));
+    identity.ensure_compatible(generator.identity())?;
     let binding = GenerationBinding::new(key, identity);
     let persistence = PersistenceTarget::verify(Arc::clone(&store), binding).await?;
     let spawn = SpawnChunkTickets::new(spawn_center_chunk(config), config.spawn_chunk_radius());
@@ -230,12 +289,35 @@ pub(crate) async fn build_world(
         );
     }
 
-    shard
-        .loaded_chunks_mut()
-        .acquire_spawn(&*store, &generator, &spawn)
-        .await?;
+    let positions: Vec<_> = spawn.positions().collect();
+    tracing::info!(
+        chunks = positions.len(),
+        ?identity,
+        "loading bounded spawn area"
+    );
+    for (index, pos) in positions.iter().copied().enumerate() {
+        generator
+            .acquire(shard.loaded_chunks_mut(), &*store, pos, spawn.ticket())
+            .await?;
+        tracing::info!(
+            completed = index + 1,
+            total = positions.len(),
+            x = pos.x(),
+            z = pos.z(),
+            "spawn chunk ready"
+        );
+    }
+    let spawn_position = if identity.generator_kind() == GeneratorKind::FerrumcNaturalPreview {
+        let selected = natural_surface_spawn(shard.loaded_chunks(), config.spawn(), &positions)?;
+        tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
+            "natural Overworld preview ready: terrain/biomes/surfaces/carvers; features, ores, trees and structures are not populated");
+        tracing::warn!("preview lighting computes direct vertical skylight only; lateral light propagation and emitted block light are not implemented");
+        selected
+    } else {
+        config.spawn()
+    };
 
-    let join_kit = std::sync::Arc::new(build_join_kit(config, &spawn, identity)?);
+    let join_kit = std::sync::Arc::new(build_join_kit(config, &spawn, identity, spawn_position)?);
     Ok(WorldSetup {
         shard,
         join_kit,
@@ -303,20 +385,37 @@ async fn reconcile_generation(
     config: &AppConfig,
 ) -> anyhow::Result<GenerationIdentity> {
     let configured = config.world();
-    if let Some(preset) = configured.preset() {
-        match preset {
-            WorldGenerationPreset::FerrumcFlat => {}
-            _ => anyhow::bail!("unsupported world generation preset {preset:?}"),
-        }
-    }
     let stored = store.load_generation_identity(key).await?;
-    let seed = configured
-        .seed()
-        .unwrap_or_else(|| stored.map_or(0, |identity| identity.seed().value()));
-    let expected = GenerationIdentity::flat_overworld(WorldSeed::new(seed));
+    let seed = WorldSeed::new(
+        configured
+            .seed()
+            .unwrap_or_else(|| stored.map_or(0, |identity| identity.seed().value())),
+    );
+    let expected = match configured.preset() {
+        Some(WorldGenerationPreset::FerrumcFlat) => GenerationIdentity::flat_overworld(seed),
+        Some(WorldGenerationPreset::FerrumcNaturalPreview) => {
+            GenerationIdentity::natural_overworld(seed)
+        }
+        Some(preset) => anyhow::bail!("unsupported world generation preset {preset:?}"),
+        None => match stored {
+            Some(identity) => match identity.generator_kind() {
+                GeneratorKind::FerrumcFlat => GenerationIdentity::flat_overworld(seed),
+                GeneratorKind::FerrumcNaturalPreview => GenerationIdentity::natural_overworld(seed),
+                _ => anyhow::bail!("unsupported persisted generation identity {identity:?}"),
+            },
+            None => GenerationIdentity::flat_overworld(seed),
+        },
+    };
     if let Some(stored) = stored {
         expected.ensure_compatible(stored)?;
     }
+    // A stored natural identity also applies when the preset was omitted. Refuse
+    // before declaration/import because Anvil full snapshots omit our palettes.
+    anyhow::ensure!(
+        expected.generator_kind() != GeneratorKind::FerrumcNaturalPreview
+            || configured.anvil_import_dir().is_none(),
+        "ferrumc_natural_preview cannot use anvil_import_dir: imported full chunks do not preserve preview biome palettes"
+    );
     // This is the first world-bearing startup write. A fresh omission explicitly
     // selects FerrumC-flat-v1 seed zero, never a recovered historical seed.
     store.ensure_generation_identity(key, expected).await?;
@@ -446,6 +545,93 @@ fn collect_region_paths(region_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+/// Selects a dry column with two clear blocks from the already bounded spawn area.
+/// This preview rule is deliberately narrower than Vanilla's spawn search.
+fn natural_surface_spawn(
+    chunks: &LoadedChunkMap,
+    configured: Vec3,
+    positions: &[ChunkPos],
+) -> anyhow::Result<Vec3> {
+    let requested = BlockPos::new(configured.x.floor() as i32, 0, configured.z.floor() as i32);
+    if let Some(y) = safe_surface_y(chunks, requested) {
+        return Ok(Vec3::new(configured.x, f64::from(y), configured.z));
+    }
+    for &pos in positions {
+        let Some(chunk) = chunks.get(pos) else {
+            continue;
+        };
+        let heightmap = chunk.heightmap(HeightmapKind::WorldSurface);
+        for z in 0..16 {
+            for x in 0..16 {
+                let column = BlockPos::new(pos.x() * 16 + x, 0, pos.z() * 16 + z);
+                if let Some(y) = heightmap
+                    .height(x as u8, z as u8)
+                    .and_then(|height| safe_column_y(chunk, column, height))
+                {
+                    return Ok(Vec3::new(
+                        f64::from(column.x()) + 0.5,
+                        f64::from(y),
+                        f64::from(column.z()) + 0.5,
+                    ));
+                }
+            }
+        }
+    }
+    anyhow::bail!("natural preview has no safe dry spawn in the bounded resident spawn area; choose different spawn x/z or seed")
+}
+
+fn safe_surface_y(chunks: &LoadedChunkMap, column: BlockPos) -> Option<i32> {
+    let chunk = chunks.get(column.to_chunk_pos())?;
+    let x = column.x().rem_euclid(16) as u8;
+    let z = column.z().rem_euclid(16) as u8;
+    let ground_y = chunk.heightmap(HeightmapKind::WorldSurface).height(x, z)?;
+    safe_column_y(chunk, column, ground_y)
+}
+
+fn safe_column_y(chunk: &Chunk, column: BlockPos, ground_y: i32) -> Option<i32> {
+    if ground_y >= 318 {
+        return None;
+    }
+    let ground = chunk.get_block(BlockPos::new(column.x(), ground_y, column.z()))?;
+    let name = ferrumc_registry::block_state::state_id_to_block_name(ground.as_u32())?;
+    // Restrict support to preview terrain materials; fluids, snow layers, leaves
+    // and a later imported non-solid block must not become a spawn platform.
+    if !matches!(
+        name,
+        "stone"
+            | "deepslate"
+            | "dirt"
+            | "grass_block"
+            | "podzol"
+            | "coarse_dirt"
+            | "sand"
+            | "red_sand"
+            | "sandstone"
+            | "red_sandstone"
+            | "gravel"
+            | "snow_block"
+            | "ice"
+            | "packed_ice"
+            | "blue_ice"
+            | "terracotta"
+            | "white_terracotta"
+            | "orange_terracotta"
+            | "brown_terracotta"
+            | "red_terracotta"
+    ) {
+        return None;
+    }
+    for y in [ground_y + 1, ground_y + 2] {
+        if !chunk
+            .get_block(BlockPos::new(column.x(), y, column.z()))?
+            .is_air()
+        {
+            return None;
+        }
+    }
+    Some(ground_y + 1)
+}
+
 /// Assembles the shared [`JoinKit`] framing.
 ///
 /// Records only the spawn chunk *positions*; the connection fetches each column's
@@ -455,8 +641,8 @@ fn build_join_kit(
     config: &AppConfig,
     spawn: &SpawnChunkTickets,
     identity: GenerationIdentity,
+    spawn_position: Vec3,
 ) -> anyhow::Result<JoinKit> {
-    let spawn_position = config.spawn();
     let spawn_block = BlockPosition::new(
         spawn_position.x.floor() as i32,
         spawn_position.y.floor() as i32,
@@ -465,7 +651,12 @@ fn build_join_kit(
     Ok(JoinKit {
         join_game: build_join_game(config, identity)?,
         spawn_position,
-        spawn_chunk: spawn_center_chunk(config),
+        spawn_chunk: BlockPos::new(
+            spawn_position.x.floor() as i32,
+            spawn_position.y.floor() as i32,
+            spawn_position.z.floor() as i32,
+        )
+        .to_chunk_pos(),
         spawn_block,
         spawn_positions: spawn.positions().collect(),
     })
@@ -512,8 +703,9 @@ fn obfuscate_seed(seed: WorldSeed) -> i64 {
 ///
 /// The payload is the real 1.21.8 wire form: the paletted section blob from
 /// [`encode_chunk_section_data`], the `MOTION_BLOCKING` heightmap packed by
-/// [`pack_motion_blocking_heightmap`], and the full-bright sky light from
-/// [`ChunkLightData::full_bright`] (no block light). Block entities are empty.
+/// [`pack_motion_blocking_heightmap`], and direct vertical sky light from
+/// [`ChunkLightData::vertical_sky`] (no block light or lateral propagation).
+/// Block entities are sent separately by the driver.
 ///
 /// Shared by the join-kit builder (for the spawn batch) and the driver (for
 /// chunks streamed in around a moving player), so both emit byte-identical chunk
@@ -528,14 +720,20 @@ pub(crate) fn chunk_packet(pos: ChunkPos, chunk: &Chunk) -> anyhow::Result<Chunk
     let blob = BoundedBytes::<2_097_152>::new(encode_chunk_section_data(chunk)?)
         .map_err(|err| anyhow::anyhow!("chunk blob exceeds protocol bound: {err}"))?;
 
-    let heightmaps = vec![Heightmap::new(
-        MOTION_BLOCKING_HEIGHTMAP,
-        pack_motion_blocking_heightmap(chunk)?,
-    )];
+    let heightmaps = vec![
+        Heightmap::new(
+            MOTION_BLOCKING_HEIGHTMAP,
+            pack_motion_blocking_heightmap(chunk)?,
+        ),
+        Heightmap::new(
+            WORLD_SURFACE_HEIGHTMAP,
+            pack_world_surface_heightmap(chunk)?,
+        ),
+    ];
 
-    // Lighting is not computed yet: flood the column with full sky light and no
-    // block light, which is exactly how a flat overworld renders.
-    let light = ChunkLightData::full_bright();
+    // Preview skylight follows open vertical columns; lateral propagation and
+    // emitted block light remain outside this preview's lighting contract.
+    let light = ChunkLightData::vertical_sky(chunk);
     let sky_light = light
         .sky_light()
         .iter()
@@ -561,7 +759,7 @@ pub(crate) fn chunk_packet(pos: ChunkPos, chunk: &Chunk) -> anyhow::Result<Chunk
 #[cfg(test)]
 mod tests {
     use ferrumc_math::ShardPos;
-    use ferrumc_world::BlockStateId;
+    use ferrumc_world::{BlockStateId, FlatWorldGenerator};
 
     use super::*;
     use crate::config::AppConfig;
@@ -728,7 +926,7 @@ mod tests {
         // Every spawn column builds the real wire payload from its live resident
         // chunk (the same `chunk_packet` the join-time fetch uses): a non-empty
         // paletted section blob, the 37-long MOTION_BLOCKING heightmap, and
-        // full-bright sky light over all 26 light sections.
+        // conservative vertical sky light over all 26 light sections.
         for pos in setup.join_kit.chunk_positions() {
             let resident = setup
                 .shard
@@ -739,9 +937,11 @@ mod tests {
             assert_ne!(chunk.chunk_data().as_slice(), [] as [u8; 0]);
 
             let heightmaps = chunk.heightmaps();
-            assert_eq!(heightmaps.len(), 1);
+            assert_eq!(heightmaps.len(), 2);
             assert_eq!(heightmaps[0].kind(), 4);
             assert_eq!(heightmaps[0].data().len(), 37);
+            assert_eq!(heightmaps[1].kind(), 1);
+            assert_eq!(heightmaps[1].data(), heightmaps[0].data());
 
             assert_eq!(chunk.sky_light_mask(), &[0x03FF_FFFF]);
             assert_eq!(chunk.empty_block_light_mask(), &[0x03FF_FFFF]);
@@ -870,6 +1070,110 @@ mod tests {
         assert_eq!(
             setup.join_kit.join_game().world_state().hashed_seed(),
             8_794_265_229_978_523_055
+        );
+    }
+    #[tokio::test]
+    async fn natural_identity_omission_preserves_preset_and_explicit_changes_are_refused() {
+        let store = InMemoryStore::with_generation_metadata();
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let selected =
+            AppConfig::from_toml_str("[world]\nseed = 17\npreset = \"ferrumc_natural_preview\"\n")
+                .expect("natural config");
+        let identity = reconcile_generation(&store, key, &selected)
+            .await
+            .expect("fresh natural identity");
+        assert_eq!(
+            identity,
+            GenerationIdentity::natural_overworld(WorldSeed::new(17))
+        );
+        assert_eq!(
+            reconcile_generation(&store, key, &AppConfig::default())
+                .await
+                .expect("omitted restart"),
+            identity
+        );
+        for config in [
+            "[world]\npreset = \"ferrumc_flat\"\n",
+            "[world]\nseed = 18\n",
+        ] {
+            let changed = AppConfig::from_toml_str(config).expect("mismatch config");
+            assert!(reconcile_generation(&store, key, &changed).await.is_err());
+            assert_eq!(
+                store
+                    .load_generation_identity(key)
+                    .await
+                    .expect("retained identity"),
+                Some(identity)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn natural_spawn_uses_dry_surface_and_refuses_all_water_ring() {
+        let store = InMemoryStore::new();
+        let pos = ChunkPos::new(0, 0);
+        let mut chunks = LoadedChunkMap::new(WorldId::new(0), DimensionId::new(0));
+        chunks
+            .acquire(
+                &store,
+                &FlatWorldGenerator::new(),
+                pos,
+                SpawnChunkTickets::new(pos, 0).ticket(),
+            )
+            .await
+            .expect("resident terrain");
+        let configured = Vec3::new(8.5, 200.0, 8.5);
+        assert_eq!(
+            natural_surface_spawn(&chunks, configured, &[pos]).expect("dry surface"),
+            Vec3::new(8.5, 64.0, 8.5)
+        );
+        let water = BlockStateId::new(
+            ferrumc_registry::block_state::block_default_state("water").expect("water registry"),
+        );
+        let chunk = chunks.get_mut(pos).expect("resident chunk");
+        for z in 0..16 {
+            for x in 0..16 {
+                chunk
+                    .set_block(BlockPos::new(x, 64, z), water)
+                    .expect("water above ground");
+            }
+        }
+        assert!(natural_surface_spawn(&chunks, configured, &[pos]).is_err());
+    }
+    #[tokio::test]
+    async fn stored_natural_identity_refuses_omitted_preset_anvil_before_world_changes() {
+        let store = InMemoryStore::with_generation_metadata();
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let original = GenerationIdentity::natural_overworld(WorldSeed::new(21));
+        store
+            .ensure_generation_identity(key, original)
+            .await
+            .expect("stored natural identity");
+        let chunk_key = ChunkKey::new(key.world(), key.dimension(), ChunkPos::new(0, 0));
+        let record = ChunkRecord::new(
+            ferrumc_sim::CHUNK_SCHEMA_VERSION,
+            FlatWorldGenerator::new().generate(chunk_key.pos()),
+        );
+        store
+            .save_chunk(chunk_key, record.clone())
+            .await
+            .expect("original full snapshot");
+        let config = AppConfig::from_toml_str("[world]\nanvil_import_dir = \"/unused/region\"\n")
+            .expect("omission resolved only after storage read");
+        let error = reconcile_generation(&store, key, &config)
+            .await
+            .expect_err("stored natural import refused");
+        assert!(error.to_string().contains("cannot use anvil_import_dir"));
+        assert_eq!(
+            store
+                .load_generation_identity(key)
+                .await
+                .expect("identity untouched"),
+            Some(original)
+        );
+        assert_eq!(
+            store.load_chunk(chunk_key).await.expect("chunk untouched"),
+            Some(record)
         );
     }
 }

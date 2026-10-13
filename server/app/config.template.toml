@@ -133,13 +133,19 @@
 # is the save/persistence location; `[world]` selects the initial content.
 [world]
 
-# Numeric signed64 seed and the currently implemented fixed flat preset.
+# Numeric signed64 seed and generator preset.
 # Fresh omission explicitly selects seed0/ferrumc_flat; restart omission reuses
-# the stored identity. A different explicit seed refuses startup. This is not
-# natural Vanilla generation. Existing format3 worlds require the separate
+# the stored identity. A different explicit seed or preset refuses startup.
+# The natural preview is incomplete Vanilla generation. Format3 worlds require
 # offline `ferrumc migrate-generation --help` command; startup never migrates.
 # seed = 0
 # preset = "ferrumc_flat"
+# Opt-in natural terrain preview: "ferrumc_natural_preview". Uses terrain, biomes,
+# surfaces and carvers; no populated ores, trees, features or structures.
+# Lighting is direct vertical skylight only; lateral/block light is incomplete.
+# Natural preview chooses a safe dry surface within the configured spawn ring.
+# Use a fresh world_dir; an explicit preset/seed cannot replace a stored identity.
+# Natural preview cannot be combined with anvil_import_dir (biomes are not imported).
 
 # Optional path to a vanilla Anvil `region/` directory (the folder holding the
 # r.<x>.<z>.mca files). When set, every region file in it is imported into the

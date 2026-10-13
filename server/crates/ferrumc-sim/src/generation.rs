@@ -96,7 +96,10 @@ impl GenerationBinding {
     }
 
     pub(crate) fn validate_generator(self, generator: &dyn ChunkGenerator) -> SimResult<()> {
-        let actual = generator.identity();
+        self.validate_generator_identity(generator.identity())
+    }
+
+    pub(crate) fn validate_generator_identity(self, actual: GenerationIdentity) -> SimResult<()> {
         if actual != self.identity {
             return Err(SimError::GeneratorIdentityMismatch {
                 key: self.key,

@@ -20,8 +20,9 @@
 - The numeric seed is private `Option<i64>` and preserves all signed 64-bit
   values. TOML integer typing applies, including valid base-prefixed integers;
   text, random tokens, floats, other types and out-of-range values are rejected.
-- The private preset choice accepts only the implemented `ferrumc_flat` enum
-  variant. Unknown/unimplemented presets and unknown/duplicate keys reject the
+- The private preset choice accepts `ferrumc_flat` and the explicitly experimental
+  `ferrumc_natural_preview` variants. The preview declares natural terrain,
+  not complete features or Survival. Unknown presets and unknown/duplicate keys reject the
   configuration; no stringly typed or catch-all fallback is accepted.
 - `with_generation` accepts bounded typed optional declarations, preserves the
   import directory and never resolves omission. New generation fields are

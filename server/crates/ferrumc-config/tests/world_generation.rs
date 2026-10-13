@@ -92,10 +92,17 @@ fn seeds_refuse_strings_floats_random_tokens_other_types_and_overflow() {
 }
 
 #[test]
-fn only_implemented_ferrumc_flat_profile_is_accepted() {
+fn only_supported_profiles_are_accepted() {
     let config: WorldConfig = toml::from_str("preset = 'ferrumc_flat'").unwrap();
     assert_eq!(config.preset(), Some(WorldGenerationPreset::FerrumcFlat));
     assert_eq!(config.seed(), None);
+    let natural: WorldConfig =
+        toml::from_str("preset = 'ferrumc_natural_preview'\nseed = -42").unwrap();
+    assert_eq!(
+        natural.preset(),
+        Some(WorldGenerationPreset::FerrumcNaturalPreview)
+    );
+    assert_eq!(natural.seed(), Some(-42));
     for literal in [
         "'flat'",
         "'normal'",

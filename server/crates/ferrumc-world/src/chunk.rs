@@ -106,6 +106,8 @@ pub struct Chunk {
     pos: ChunkPos,
     /// Sections stacked bottom-to-top; `sections[0]` starts at `MIN_Y`.
     sections: [ChunkSection; SECTION_COUNT],
+    /// Complete ascending-quart-Y/X/Z natural biome baseline, absent for flat.
+    biomes: Option<Box<[ferrumc_registry::biome::BiomeResourceId]>>,
     /// Sections modified since the last [`Chunk::clear_dirty`].
     dirty: DirtySections,
     /// Sections changed by a *gameplay* mutation (not generation) since the last
@@ -149,12 +151,52 @@ impl Chunk {
         Self {
             pos,
             sections: std::array::from_fn(|_| ChunkSection::new()),
+            biomes: None,
             dirty: DirtySections::new(),
             persist_dirty: DirtySections::new(),
             persist_edited: DirtySections::new(),
             light: None,
             block_entities: BTreeMap::new(),
         }
+    }
+
+    /// Returns stored natural biomes in ascending-quart-Y/X/Z order.
+    ///
+    /// Flat chunks have no stored biome array and encode as plains.
+    #[must_use]
+    pub fn biomes(&self) -> Option<&[ferrumc_registry::biome::BiomeResourceId]> {
+        self.biomes.as_deref()
+    }
+
+    /// Returns the stored biome of a block's enclosing quart inside this chunk.
+    #[must_use]
+    pub fn biome_at(&self, pos: BlockPos) -> Option<ferrumc_registry::biome::BiomeResourceId> {
+        if pos.to_chunk_pos() != self.pos {
+            return None;
+        }
+        let relative_y = i64::from(pos.y()) - i64::from(MIN_Y);
+        if !(0..i64::from(dimension::HEIGHT)).contains(&relative_y) {
+            return None;
+        }
+        let y = usize::try_from(relative_y / 4).ok()?;
+        let x = usize::try_from((pos.x() & 15) >> 2).ok()?;
+        let z = usize::try_from((pos.z() & 15) >> 2).ok()?;
+        self.biomes()?.get((y * 4 + x) * 4 + z).copied()
+    }
+
+    pub(crate) fn install_generated_biomes(
+        &mut self,
+        values: Box<[ferrumc_registry::biome::BiomeResourceId]>,
+    ) -> Result<(), WorldError> {
+        let expected = SECTION_COUNT * 64;
+        if values.len() != expected {
+            return Err(WorldError::NaturalGeneration {
+                stage: crate::NaturalGenerationStage::Installation,
+                detail: format!("biome count {} does not equal {expected}", values.len()),
+            });
+        }
+        self.biomes = Some(values);
+        Ok(())
     }
 
     /// Returns the column this chunk occupies.

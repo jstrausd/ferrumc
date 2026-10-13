@@ -313,22 +313,21 @@
 - `WorldSeed` preserves the entire signed `i64` domain. This crate never
   chooses a random seed, hashes a textual seed, or persists world metadata.
 - `GenerationIdentity` is a closed supported value: Minecraft 1.21.8,
-  `FerrumcFlat` revision 1, Overworld geometry, and an explicit numeric seed.
-  Unknown releases, algorithms, revisions, and dimensions fail decoding and
-  are never treated as the current generator. No additional terrain algorithm
-  is available through this contract.
+  `FerrumcFlat` revision 1 or `FerrumcNaturalPreview` revision 1, Overworld
+  geometry, and an explicit numeric seed. Unknown releases, algorithms,
+  revisions, and dimensions fail decoding; neither algorithm is a fallback.
 - Its schema-1 `FCGI` envelope is exactly 27 bytes: magic (4), big-endian schema
   (u16), Minecraft major/minor/patch (three u16), algorithm (u16), algorithm
-  revision (u32), signed seed (i64), dimension (u8). Algorithm 1 is FerrumC flat;
-  dimension 0 is Overworld. Length is checked before any field access. Encoding
+  revision (u32), signed seed (i64), dimension (u8). Algorithm 1 is FerrumC flat,
+  algorithm 2 is the natural terrain preview; dimension 0 is Overworld. Length is checked before any field access. Encoding
   returns a fixed array and decoding performs no allocations.
 - Envelope schema describes metadata layout. Generator revision describes the
   generated baseline. Changing flat layers, registry baseline, dimension
   geometry, palette generation order or generated dirty-mask semantics needs an
   explicit identity/version decision; changing envelope layout is independent.
 - Compatibility requires full identity equality, including seed. With the
-  current closed set, only seed changes can compare as two known incompatible
-  values; other unsupported metadata is rejected before comparison.
+  current closed set, algorithm and seed changes can compare as known
+  incompatible values; unsupported metadata is rejected before comparison.
 - `ChunkGenerator` implementations are pure, synchronous and request-order
   independent. A given identity and `ChunkPos` must yield the same blocks,
   palette representation and dirty masks. The identity stays constant for the
@@ -341,7 +340,7 @@
 - Storage metadata, overlay compatibility gates and configured numeric seed
   selection belong to the separately implemented App/Sim/Storage consumers.
   This pure contract alone does not protect restart or migrate existing worlds.
-  Multiple dimensions and natural terrain remain separate consumer work.
+  Multiple dimensions remain separate consumer work.
 
 ## Original random and noise primitives
 
@@ -784,3 +783,50 @@
   remain unmetered scoped policies. The finite wide RNG allowance gives no
   practical all-seed execution-time, TPS, RSS or live-server promise. No warm
   history, structures, features, lighting, persistence or activation follows.
+
+
+<!-- NATURAL-LOCAL-PREVIEW-20261013-BEGIN -->
+## Natural Overworld terrain preview (revision 1)
+
+- `NaturalWorldGenerator` publicly composes the accepted normal Overworld
+  material, preliminary corners, cold 3x3 stored-biome producer, original
+  Paper-build-60 surface columns and cold Carver runtime. All original budgets
+  remain unchanged; all producer refusals propagate as `WorldError::NaturalGeneration`
+  with a phase and at most 512 diagnostic characters. No synthetic terrain,
+  flat substitution, partially installed chunk or panic is an error fallback.
+- `FallibleChunkGenerator` is separate from the legacy infallible `ChunkGenerator`.
+  Runtime and Natural implement only the fallible contract; Flat implements both.
+  Clones share immutable bindings, while every generation request owns fresh
+  noise/selection/surface/carver sessions. No mutable global or request cache.
+- `FerrumcNaturalPreview` has algorithm discriminator 2 and revision 1. The
+  full identity including seed must match the stored baseline before generation
+  and overlay application. Algorithm discriminator 1 remains unchanged flat.
+- Complete states are installed in ascending Y/X/Z order only after Carver
+  publication. Generated sections receive network dirty flags; gameplay persist
+  dirty and cumulative edited masks stay empty. Untouched terrain regenerates;
+  block edits remain overlays on that exact versioned baseline.
+- Natural chunks retain 1536 genuine center-chunk quart biomes in ascending
+  quart Y/X/Z order. Network order is section Y then local Y/Z/X. The explicit
+  configuration mapping is plains first, then other builtin biomes in canonical
+  resource order (`network_biome_resources`). Mixed sections use direct 7-bit
+  containers for all 65 configured entries; single sections use one id. No
+  array-length prefixes are inserted in protocol 772. Flat remains plains id 0.
+- `vertical_sky` gives sky 15 to vertically open air and zero from the first
+  non-air block downward. No lateral sky propagation, transparent-block handling
+  or emitted block light is claimed. Both exported heightmap packers currently
+  inherit Chunk's documented highest-non-air model, including water.
+- Revision 1 omits placed-feature ores, vegetation, trees, structures, entities,
+  fluid ticks and full lighting. Material-stage ore veins already present in the
+  accepted producer remain real. This is locally playable terrain preview,
+  not complete world generation, Survival or live-Paper parity acceptance.
+- Source review: pinned `NoiseBasedChunkGenerator` full createBiomes/doCreateBiomes,
+  buildSurface, applyCarvers and fillFromNoise/doFill, plus the existing accepted
+  Surface/Carver original helpers and fixture evidence. FerrumC deliberately
+  uses fresh cold producers and lacks structure blending and status scheduling.
+  No plugin events, simulation threads or I/O are introduced by the World API.
+- The public installation is checked against every original FINAL block of
+  origin, positive X/Z seams and a negative chunk; repeated generation and clones
+  compare complete chunks including biomes and dirty masks. Actual out-of-domain
+  producer refusal remains typed and does not poison later independent calls.
+  Biome wire layout and enclosed-cavity vertical light have deterministic tests.
+<!-- NATURAL-LOCAL-PREVIEW-20261013-END -->

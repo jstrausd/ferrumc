@@ -1,5 +1,12 @@
 # FerrumC — Independent Black-Box Protocol Smoke Test
 
+The separate [natural-world.mjs](natural-world.mjs) gate checks the explicit
+Overworld terrain preview: genuine creative edit plus ACK, complete terrain
+and quart biome hashes, positive/negative chunk exploration, and a graceful
+process restart with the saved edit. It requires a prebuilt `MC_SERVER_BIN`
+and a fresh `MC_RUN_DIR`; see [local preview instructions](../../docs/LOCAL_NATURAL_WORLD.md).
+This gate does not establish complete Survival, lighting or live Paper parity.
+
 A protocol gate for the FerrumC v2 Minecraft server (Java **1.21.8 / protocol
 772**) driven by a client we did **not** write:
 [PrismarineJS `node-minecraft-protocol`](https://github.com/PrismarineJS/node-minecraft-protocol),

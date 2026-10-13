@@ -248,6 +248,34 @@ Der nächste Worldschritt sind die Overworld-Carver
 mit echter Originaloracle.
 Die aktive App bleibt Flat-v1/Plains; Surface-/Carver-/Featureconsumer fehlen.
 
+### Lokale Naturwelt-Vorschau vom 13.10.2026
+
+Die Betreiberpriorität ist jetzt eine vor Mittag lokal testbare Naturwelt.
+Drei Subagents haben World-Komposition, bounded Sim-Laden und App-Anbindung
+umgesetzt; gegenseitige scoped Reviews fanden keine blockierenden Defekte.
+Die neue explizite `ferrumc_natural_preview`-Identität verbindet Material,
+1536 echte Quartbiome pro Chunk, Surface und akzeptierte kalte Carver.
+Seed-/Presetkonflikte verweigern den Start; bestehende Flat-Identitäten bleiben
+kompatibel. CPU-Generation erfolgt mit cancellation-sicherer Admission außerhalb
+Tokios Async-Worker, der Driver wartet derzeit weiterhin auf ein Chunkergebnis.
+
+Der unabhängige Protokolltest mit dem Release-Build besteht Join, echte
+Creative-Goldblockplatzierung plus ACK, Erkundung von Chunks (+1,0)/(-1,0),
+Save/Stop/Restart und vollständige Terrain-/Biomehashvergleiche. Der bestehende
+Flat-Blackbox-Smoke besteht weiterhin einschließlich seiner 28 gespeicherten
+Patternblöcke. World: 424 Tests, Sim: 415 Tests, App: 293 Tests bestanden;
+Workspace-Clippy und Formatcheck grün. Die vollständige isolierte Workspace-
+Testmatrix besteht 3128 Tests ohne Fehler (8 bestehende ignored), dazu 89
+Dokumentationstests mit warnings-as-errors. Registry-/Erz-WIP wurde nicht
+eingebunden. [Lieferung und Nachweise](agent-tasks/NATURAL_LOCAL_PREVIEW_DELIVERY.md).
+
+[Lokaler Start und Grenzen](LOCAL_NATURAL_WORLD.md): Java 1.21.8,
+`localhost:25566`, separate `local-natural/world/`, Seed 0. Diese Vorschau
+enthält Dichte-Erzadern, aber keine platzierten Erzfeatures, Bäume, Vegetation
+oder Strukturen. Licht ist nur vertikales Skylight; Erkundung kann den Tick
+pausieren. Vollständiges Survival, Nether/End, Mobs und sämtliche Java-Plugins
+bleiben offen. Die folgenden Einträge dokumentieren ältere Abnahmephasen.
+
 ### Weltgenerierung: Betreiberpriorität vom 12.10.2026
 
 Der Betreiber hat die Weltgenerierung als nächsten Schwerpunkt festgelegt.

@@ -1,8 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
-//! Pure world model: the chunk column, its block storage, and a flat-world
-//! generator.
+//! Pure world model: chunk storage and deterministic flat/natural terrain generation.
 //!
 //! This crate has no threads, no database, and no packets. It owns the value
 //! types for a chunk's blocks, bottom-up:
@@ -23,8 +22,8 @@
 //! - [`FlatWorldGenerator`] — deterministically fills a [`Chunk`] with a flat
 //!   overworld profile (bedrock floor, stone fill, dirt, grass surface, air).
 //! - [`ChunkGenerator`] and [`GenerationIdentity`] — a pure versioned baseline
-//!   contract with an explicit numeric [`WorldSeed`]. Storage adoption and
-//!   natural terrain are separate implementation steps.
+//!   contract with an explicit numeric [`WorldSeed`]. [`NaturalWorldGenerator`]
+//!   composes the accepted cold producers through carvers as a terrain preview.
 //! - [`density`] — checked builtin graphs, original seeded scalar/climate samples;
 //!   no evaluation or natural terrain is activated by their compilation.
 //! - [`stored_biome`] — borrowed complete 3×3 stored-biome neighborhoods with
@@ -53,6 +52,7 @@ mod error;
 mod generation;
 mod generator;
 mod heightmap;
+mod natural;
 mod network;
 pub mod noise;
 mod packed_array;
@@ -77,14 +77,16 @@ pub use chunk_section::{ChunkSection, SECTION_VOLUME};
 pub use dirty::DirtySections;
 pub use error::WorldError;
 pub use generation::{
-    ChunkGenerator, GenerationDimension, GenerationError, GenerationIdentity,
-    GenerationMinecraftVersion, GeneratorKind, WorldSeed, GENERATION_IDENTITY_LEN,
+    ChunkGenerator, FallibleChunkGenerator, GenerationDimension, GenerationError,
+    GenerationIdentity, GenerationMinecraftVersion, GeneratorKind, WorldSeed,
+    GENERATION_IDENTITY_LEN,
 };
 pub use generator::FlatWorldGenerator;
 pub use heightmap::{Heightmap, HeightmapKind};
+pub use natural::{NaturalGenerationStage, NaturalWorldGenerator, RuntimeWorldGenerator};
 pub use network::{
-    encode_chunk_section_data, pack_motion_blocking_heightmap, ChunkLightData, LIGHT_SECTION_BYTES,
-    LIGHT_SECTION_COUNT,
+    encode_chunk_section_data, network_biome_resources, pack_motion_blocking_heightmap,
+    pack_world_surface_heightmap, ChunkLightData, LIGHT_SECTION_BYTES, LIGHT_SECTION_COUNT,
 };
 pub use packed_array::PackedArray;
 pub use paletted_container::{ContainerKind, PalettedContainer};

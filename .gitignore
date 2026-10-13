@@ -4,6 +4,7 @@
 /server/java-bridge/**/target/
 __pycache__/
 /.codex-tmp/
+/local-natural/
 **/*.rs.bk
 
 # IDE

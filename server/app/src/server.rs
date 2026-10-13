@@ -270,7 +270,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     //
     // Bundle discovery, hashing, dynamic-library loading, and initialization are
     // synchronous filesystem/native work, so keep them off Tokio's async workers.
-    let plugin_config = config.clone();
+    let plugin_config = config.clone().with_spawn(setup.join_kit.spawn_position())?;
     let (mut policy, block_events) =
         tokio::task::spawn_blocking(move || build_play_policy(&plugin_config))
             .await

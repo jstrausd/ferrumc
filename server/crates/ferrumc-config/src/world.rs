@@ -29,6 +29,9 @@ pub enum WorldGenerationPreset {
     /// `FerrumC`'s implemented fixed-layer flat Overworld profile.
     #[serde(rename = "ferrumc_flat")]
     FerrumcFlat,
+    /// Experimental natural Overworld terrain; features and Survival remain incomplete.
+    #[serde(rename = "ferrumc_natural_preview")]
+    FerrumcNaturalPreview,
 }
 
 /// Declarative world-content configuration, deserialized from the `[world]` TOML

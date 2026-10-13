@@ -48,12 +48,12 @@ use ferrumc_sim::{
 use ferrumc_storage::{
     BlockMutationLogRecord, MutationActor, MutationLogCause, SchemaVersion, WorldStore,
 };
-use ferrumc_world::{BlockEntity, Chunk, FlatWorldGenerator};
+use ferrumc_world::{BlockEntity, Chunk, GeneratorKind};
 
 use crate::persistence::PersistenceTarget;
 use crate::plugins::BlockEventDispatcher;
 use crate::storage_worker::StorageFlushRequest;
-use crate::world::chunk_packet;
+use crate::world::{chunk_packet, RuntimeGeneration};
 
 /// Schema version stamped on every [`BlockMutationLogRecord`] the driver appends.
 ///
@@ -691,7 +691,7 @@ pub(crate) async fn run(
     mut router: SessionRouter,
     mut shard: SimShard,
     target: PersistenceTarget,
-    generator: FlatWorldGenerator,
+    generator: RuntimeGeneration,
     mut shard_rx: mpsc::Receiver<GameInput>,
     mut commands: mpsc::Receiver<SimCommand>,
     tick_period: Duration,
@@ -1015,7 +1015,7 @@ async fn handle_command(
     router: &mut SessionRouter,
     shard: &mut SimShard,
     target: &PersistenceTarget,
-    generator: &FlatWorldGenerator,
+    generator: &RuntimeGeneration,
     storage_tx: &mpsc::Sender<StorageFlushRequest>,
     tick: Tick,
     next_mutation_id: &mut u64,
@@ -1411,15 +1411,27 @@ fn chest_snapshots_match(actual: &[ItemStack], expected: &[ItemStack]) -> bool {
 async fn load_chunks(
     shard: &mut SimShard,
     store: &dyn WorldStore,
-    generator: &FlatWorldGenerator,
+    generator: &RuntimeGeneration,
     positions: &[ChunkPos],
 ) -> Vec<StreamedChunk> {
     let ticket = ChunkTicket::of(TicketReason::Player);
     let mut packets = Vec::with_capacity(positions.len());
+    let natural_preview =
+        generator.identity().generator_kind() == GeneratorKind::FerrumcNaturalPreview;
+    let mut new_columns = 0;
     for &pos in positions {
-        if let Err(err) = shard
-            .loaded_chunks_mut()
-            .acquire(store, generator, pos, ticket)
+        // Resident join columns remain immediate. Preview exploration admits
+        // only one absent column per command so a large view request cannot
+        // hold the driver across sixteen CPU generations. Deferred positions
+        // receive no tickets; the client's next diff requests them again.
+        if natural_preview && shard.loaded_chunks().get(pos).is_none() {
+            if new_columns >= 1 {
+                continue;
+            }
+            new_columns += 1;
+        }
+        if let Err(err) = generator
+            .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
             .await
         {
             tracing::warn!(%err, x = pos.x(), z = pos.z(), "failed to acquire streamed chunk");
@@ -1907,6 +1919,10 @@ mod tests {
     }
 
     /// Builds one shard-mutating driver command for the saturation matrix.
+    fn test_generator() -> super::RuntimeGeneration {
+        super::RuntimeGeneration::new(Arc::new(FlatWorldGenerator::new()))
+    }
+
     type CommandBuilder = fn(PlayerId) -> SimCommand;
 
     /// Builds one direct simulation input for the saturation matrix.
@@ -1925,7 +1941,7 @@ mod tests {
         command: SimCommand,
     ) -> Result<(), ServerError> {
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -2230,7 +2246,7 @@ mod tests {
                 )
                 .await
                 .expect("driver target"),
-                FlatWorldGenerator::new(),
+                test_generator(),
                 shard_rx,
                 commands_rx,
                 Duration::from_secs(3600),
@@ -2330,13 +2346,8 @@ mod tests {
     async fn abandoned_stream_reply_releases_its_ticket_only_after_durable_ack() {
         for commit_succeeds in [true, false] {
             let (mut shard, pos) = dirty_player_chunk().await;
-            let packets = load_chunks(
-                &mut shard,
-                &test_store().await,
-                &FlatWorldGenerator::new(),
-                &[pos],
-            )
-            .await;
+            let packets =
+                load_chunks(&mut shard, &test_store().await, &test_generator(), &[pos]).await;
             assert_eq!(packets.len(), 1);
             assert_eq!(shard.loaded_chunks().ticket_count(pos), 2);
             let (reply, receiver) = oneshot::channel();
@@ -2894,7 +2905,7 @@ mod tests {
             Ok(GameInput::PlayerJoin { player: joined, .. }) if joined == player
         ));
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -2952,7 +2963,7 @@ mod tests {
         drain(&mut b);
 
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -2992,7 +3003,7 @@ mod tests {
         drain(&mut b);
 
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -3029,7 +3040,7 @@ mod tests {
         let _inbox = router.register_shard(ShardPos::new(0, 0));
 
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         // A clock already wound to noon: the join send must carry that phase so the
@@ -3078,7 +3089,7 @@ mod tests {
         drain(&mut handle);
 
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -3122,7 +3133,7 @@ mod tests {
         while inbox.try_recv().is_ok() {}
 
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -3234,7 +3245,7 @@ mod tests {
         drain(&mut op);
 
         let mut shard = test_shard();
-        let generator = FlatWorldGenerator::new();
+        let generator = test_generator();
         let (storage_tx, _storage_rx) = mpsc::channel(1);
         let mut next_mutation_id = 0u64;
         let mut world_time = WorldTime::new();
@@ -3299,5 +3310,57 @@ mod tests {
             .expect("same allocation captures");
         assert_eq!(next_id, 92);
         assert_eq!(rx.try_recv().expect("accepted batch").overlays.len(), 1);
+    }
+    #[tokio::test]
+    async fn natural_preview_stream_defers_absent_columns_without_tickets() {
+        struct PreviewFixture;
+        impl ferrumc_world::FallibleChunkGenerator for PreviewFixture {
+            fn identity(&self) -> ferrumc_world::GenerationIdentity {
+                ferrumc_world::GenerationIdentity::natural_overworld(ferrumc_world::WorldSeed::new(
+                    0,
+                ))
+            }
+            fn try_generate_chunk(
+                &self,
+                pos: ChunkPos,
+            ) -> Result<ferrumc_world::Chunk, ferrumc_world::WorldError> {
+                Ok(FlatWorldGenerator::new().generate(pos))
+            }
+        }
+        let store = InMemoryStore::with_generation_metadata();
+        let identity =
+            ferrumc_world::GenerationIdentity::natural_overworld(ferrumc_world::WorldSeed::new(0));
+        let binding = ferrumc_sim::GenerationBinding::new(
+            ferrumc_storage::GenerationKey::new(
+                ferrumc_core::WorldId::new(0),
+                ferrumc_core::DimensionId::new(0),
+            ),
+            identity,
+        );
+        store
+            .ensure_generation_identity(binding.key(), identity)
+            .await
+            .expect("natural metadata");
+        let mut shard = SimShard::with_generation(ShardPos::new(0, 0), binding);
+        let generator = super::RuntimeGeneration::new(Arc::new(PreviewFixture));
+        let positions = [
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+        ];
+        let first = load_chunks(&mut shard, &store, &generator, &positions).await;
+        assert_eq!(first.len(), 1);
+        assert_eq!(shard.loaded_chunks().ticket_count(positions[0]), 1);
+        assert_eq!(shard.loaded_chunks().ticket_count(positions[1]), 0);
+        assert_eq!(shard.loaded_chunks().ticket_count(positions[2]), 0);
+        let second = load_chunks(&mut shard, &store, &generator, &positions).await;
+        assert_eq!(
+            second.len(),
+            2,
+            "resident column plus one newly admitted column"
+        );
+        assert_eq!(shard.loaded_chunks().ticket_count(positions[0]), 2);
+        assert_eq!(shard.loaded_chunks().ticket_count(positions[1]), 1);
+        assert_eq!(shard.loaded_chunks().ticket_count(positions[2]), 0);
     }
 }

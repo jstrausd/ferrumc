@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use ferrumc_config::{AccessConfig, PacketBudgetConfig, WorldConfig};
+use ferrumc_config::{AccessConfig, PacketBudgetConfig, WorldConfig, WorldGenerationPreset};
 use ferrumc_math::Vec3;
 use serde::Deserialize;
 
@@ -333,6 +333,13 @@ impl AppConfig {
         self.spawn
     }
 
+    /// Returns a validated copy using the runtime-selected world spawn.
+    pub(crate) fn with_spawn(mut self, spawn: Vec3) -> anyhow::Result<Self> {
+        self.spawn = spawn;
+        self.validate()?;
+        Ok(self)
+    }
+
     /// Returns the resident spawn-area radius in chunks.
     #[must_use]
     pub const fn spawn_chunk_radius(&self) -> u8 {
@@ -539,6 +546,11 @@ impl AppConfig {
     /// Validates every runtime-facing numeric and cross-field invariant.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.world.preset() != Some(WorldGenerationPreset::FerrumcNaturalPreview)
+                || self.world.anvil_import_dir().is_none(),
+            "ferrumc_natural_preview cannot use anvil_import_dir: imported full chunks do not preserve preview biome palettes"
+        );
         anyhow::ensure!(
             self.java_plugins_dir.is_some() == self.java_bridge_jar.is_some(),
             "java_plugins_dir and java_bridge_jar must be configured together"
@@ -1215,6 +1227,14 @@ mod tests {
         let parsed = AppConfig::from_toml_str("").expect("empty config is valid");
         assert_eq!(parsed.world, WorldConfig::default());
         assert_eq!(parsed.world.anvil_import_dir(), None);
+    }
+
+    #[test]
+    fn natural_preview_with_anvil_import_is_rejected_during_config_validation() {
+        let error = AppConfig::from_toml_str(
+            "[world]\npreset = \"ferrumc_natural_preview\"\nanvil_import_dir = \"/unused/region\"\n",
+        ).expect_err("natural preview cannot import incomplete biome snapshots");
+        assert!(error.to_string().contains("cannot use anvil_import_dir"));
     }
 
     #[test]

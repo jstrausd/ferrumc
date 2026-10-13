@@ -64,6 +64,18 @@
   must match. Refusal preserves the resident set, tickets, chunks and dirty
   facts. Generator identity is rechecked across awaits and generation; produced
   columns, stored full columns and overlay columns must all match the load key.
+- The owned fallible load APIs share the existing full-base/overlay composer.
+  Natural CPU generation runs only in an admitted blocking task; producer errors
+  preserve their World classification and never substitute flat/empty terrain.
+  One shared `ChunkGenerationExecutor` bounds submitted/running generation tasks
+  (hard cap 64, caller-selected normal cap one or two). Full admission returns
+  `ChunkGenerationBusy` immediately with no queued waiter or submitted task.
+  Task ownership retains its credit after caller cancellation until worker exit.
+  Full stored bases and already-resident tickets consume no generation credit.
+  Identity is checked across metadata/storage awaits and inside the worker before
+  and after successful generation. Every failure leaves the failing column's
+  residency, tickets, dirty masks and capture cursor unchanged. Spawn batches
+  preserve earlier successful column acquisitions on a later column failure.
 - Off-tick verification can create an opaque `VerifiedGenerationBinding` for
   one immutable store's exact `Arc` allocation, scope and identity. It holds
   only a weak allocation identity, never a strong store handle; maps/shards

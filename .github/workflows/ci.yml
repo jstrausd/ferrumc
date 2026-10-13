@@ -116,6 +116,17 @@ jobs:
           MC_RUN_DIR: ${{ runner.temp }}/ferrumc-blackbox
         run: node smoke.mjs
 
+      - name: Natural terrain, creative edit, exploration and restart
+        working-directory: tests/blackbox
+        env:
+          MC_SERVER_BIN: ${{ github.workspace }}/server/target/debug/ferrumc
+          MC_RUN_DIR: ${{ runner.temp }}/ferrumc-natural-blackbox
+          MC_PORT: "25567"
+        run: |
+          node --check natural-world.mjs
+          node natural-world.mjs --self-test
+          node natural-world.mjs
+
       - name: Independent Java plugin client
         working-directory: tests/blackbox
         env:

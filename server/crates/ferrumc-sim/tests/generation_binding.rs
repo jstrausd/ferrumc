@@ -9,9 +9,10 @@ use async_trait::async_trait;
 use ferrumc_core::{DimensionId, Result as CoreResult, ServerError, WorldId};
 use ferrumc_math::{BlockPos, ChunkPos, ShardPos};
 use ferrumc_sim::{
-    load_or_generate, load_or_generate_bound, load_or_generate_legacy, ChunkProvenance,
-    ChunkTicket, GenerationBinding, LoadedChunkMap, SimError, SimShard, TicketReason,
-    CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,
+    load_or_generate, load_or_generate_bound, load_or_generate_bound_offthread,
+    load_or_generate_legacy, ChunkGenerationExecutor, ChunkProvenance, ChunkTicket,
+    GenerationBinding, LoadedChunkMap, SimError, SimShard, TicketReason, CHUNK_SCHEMA_VERSION,
+    OVERLAY_SCHEMA_VERSION,
 };
 use ferrumc_storage::{
     BlockMutationLogRecord, ChunkKey, ChunkOverlayRecord, ChunkRecord, EntityKey, EntityRecord,
@@ -19,8 +20,8 @@ use ferrumc_storage::{
     WorldStore,
 };
 use ferrumc_world::{
-    BlockEntity, BlockStateId, Chunk, ChunkGenerator, FlatWorldGenerator, GenerationIdentity, Sign,
-    SignKind, WorldSeed,
+    BlockEntity, BlockStateId, Chunk, ChunkGenerator, FallibleChunkGenerator, FlatWorldGenerator,
+    GenerationIdentity, Sign, SignKind, WorldError, WorldSeed,
 };
 
 const WORLD: WorldId = WorldId::new(7);
@@ -941,4 +942,254 @@ fn generation_and_capture_error_conversion_preserves_backend_classification() {
         ServerError::from(source)
     );
     assert_eq!(CHUNK_SCHEMA_VERSION, SchemaVersion::new(1));
+}
+
+struct FallibleFixture {
+    identity: GenerationIdentity,
+    generated: AtomicUsize,
+    failure: Option<WorldError>,
+    wrong_column: bool,
+    creator: std::thread::ThreadId,
+    used_worker: AtomicBool,
+}
+
+impl FallibleFixture {
+    fn new(failure: Option<WorldError>) -> Self {
+        Self {
+            identity: binding().identity(),
+            generated: AtomicUsize::new(0),
+            failure,
+            wrong_column: false,
+            creator: std::thread::current().id(),
+            used_worker: AtomicBool::new(false),
+        }
+    }
+}
+
+impl FallibleChunkGenerator for FallibleFixture {
+    fn identity(&self) -> GenerationIdentity {
+        self.identity
+    }
+
+    fn try_generate_chunk(&self, pos: ChunkPos) -> Result<Chunk, WorldError> {
+        self.generated.fetch_add(1, Ordering::Relaxed);
+        self.used_worker.store(
+            std::thread::current().id() != self.creator,
+            Ordering::Relaxed,
+        );
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
+        Ok(Chunk::new(if self.wrong_column {
+            ChunkPos::new(19, 23)
+        } else {
+            pos
+        }))
+    }
+}
+
+fn executor() -> ChunkGenerationExecutor {
+    ChunkGenerationExecutor::new(one())
+}
+
+#[tokio::test]
+async fn offthread_producer_failure_preserves_error_and_never_admits_residency() {
+    let store = ReadStore::new(Ok(Some(binding().identity())));
+    let error = WorldError::ValueTooWide { value: 7, bits: 1 };
+    let generator = Arc::new(FallibleFixture::new(Some(error.clone())));
+    let mut map = LoadedChunkMap::with_generation(binding());
+    let pos = ChunkPos::ORIGIN;
+    assert_eq!(
+        map.acquire_offthread(&store, generator.clone(), &executor(), pos, ticket())
+            .await,
+        Err(SimError::ChunkGeneration { pos, source: error })
+    );
+    assert_eq!(map.loaded_count(), 0);
+    assert_eq!(map.ticket_count(pos), 0);
+    assert_eq!(generator.generated.load(Ordering::Relaxed), 1);
+    assert!(generator.used_worker.load(Ordering::Relaxed));
+    assert_eq!(store.world_reads.load(Ordering::Relaxed), 1);
+    assert_eq!(store.writes.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn offthread_stored_full_base_bypasses_a_failing_producer() {
+    let mut store = ReadStore::new(Ok(Some(binding().identity())));
+    let pos = ChunkPos::ORIGIN;
+    let block = pos.origin_block(100);
+    let mut chunk = Chunk::new(pos);
+    chunk.set_block(block, BlockStateId::new(41)).unwrap();
+    store.base = Some(ChunkRecord::new(CHUNK_SCHEMA_VERSION, chunk));
+    let generator = Arc::new(FallibleFixture::new(Some(
+        WorldError::InvalidBitsPerEntry { bits: 0 },
+    )));
+    let (chunk, provenance) = load_or_generate_bound_offthread(
+        &store,
+        generator.clone(),
+        &executor(),
+        binding(),
+        key(pos),
+    )
+    .await
+    .unwrap();
+    assert_eq!(provenance, ChunkProvenance::Loaded);
+    assert_eq!(chunk.get_block(block).unwrap(), BlockStateId::new(41));
+    assert_eq!(generator.generated.load(Ordering::Relaxed), 0);
+    assert!(!chunk.dirty_sections().any());
+}
+
+#[tokio::test]
+async fn offthread_scope_domain_and_identity_refuse_before_world_reads() {
+    let store = ReadStore::new(Ok(Some(binding().identity())));
+    let generator = Arc::new(FallibleFixture::new(None));
+    assert!(matches!(
+        load_or_generate_bound_offthread(
+            &store,
+            generator.clone(),
+            &executor(),
+            binding(),
+            ChunkKey::new(WorldId::new(1), DIMENSION, ChunkPos::ORIGIN)
+        )
+        .await,
+        Err(SimError::GenerationScopeMismatch { .. })
+    ));
+    assert!(matches!(
+        load_or_generate_bound_offthread(
+            &store,
+            generator.clone(),
+            &executor(),
+            binding(),
+            key(ChunkPos::new(i32::MAX, 0))
+        )
+        .await,
+        Err(SimError::ChunkLoad { .. })
+    ));
+    let mut wrong = FallibleFixture::new(None);
+    wrong.identity = identity(333);
+    assert!(matches!(
+        load_or_generate_bound_offthread(
+            &store,
+            Arc::new(wrong),
+            &executor(),
+            binding(),
+            key(ChunkPos::ORIGIN)
+        )
+        .await,
+        Err(SimError::GeneratorIdentityMismatch { .. })
+    ));
+    assert_eq!(store.metadata_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(store.world_reads.load(Ordering::Relaxed), 0);
+    assert_eq!(generator.generated.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn offthread_missing_or_mismatched_metadata_never_generates() {
+    let generator = Arc::new(FallibleFixture::new(None));
+    for metadata in [
+        Ok(None),
+        Ok(Some(identity(99))),
+        Err(ServerError::unsupported("metadata")),
+    ] {
+        let store = ReadStore::new(metadata);
+        let mut map = LoadedChunkMap::with_generation(binding());
+        assert!(map
+            .acquire_offthread(
+                &store,
+                generator.clone(),
+                &executor(),
+                ChunkPos::ORIGIN,
+                ticket()
+            )
+            .await
+            .is_err());
+        assert_eq!(map.loaded_count(), 0);
+        assert_eq!(store.world_reads.load(Ordering::Relaxed), 0);
+    }
+    assert_eq!(generator.generated.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn offthread_wrong_produced_column_refuses_without_ticket() {
+    let store = ReadStore::new(Ok(Some(binding().identity())));
+    let mut generator = FallibleFixture::new(None);
+    generator.wrong_column = true;
+    let mut map = LoadedChunkMap::with_generation(binding());
+    assert!(matches!(
+        map.acquire_offthread(
+            &store,
+            Arc::new(generator),
+            &executor(),
+            ChunkPos::ORIGIN,
+            ticket()
+        )
+        .await,
+        Err(SimError::ChunkLoad { .. })
+    ));
+    assert_eq!(map.loaded_count(), 0);
+    assert_eq!(map.ticket_count(ChunkPos::ORIGIN), 0);
+}
+
+#[tokio::test]
+async fn offthread_flat_path_matches_existing_bytes_and_resident_ticket_semantics() {
+    let store = ReadStore::new(Ok(Some(binding().identity())));
+    let pos = ChunkPos::new(-3, 2);
+    let generator = Arc::new(generator());
+    let expected = generator.generate(pos);
+    let mut map = LoadedChunkMap::with_generation(binding());
+    assert_eq!(
+        map.acquire_offthread(&store, generator.clone(), &executor(), pos, ticket())
+            .await
+            .unwrap(),
+        ferrumc_sim::ChunkAcquired::NewlyResident(ChunkProvenance::Generated)
+    );
+    assert_eq!(map.get(pos), Some(&expected));
+    assert!(map
+        .acquire_offthread(&store, generator, &executor(), pos, ticket())
+        .await
+        .unwrap()
+        .is_already_resident());
+    assert_eq!(map.ticket_count(pos), 2);
+    assert_eq!(store.world_reads.load(Ordering::Relaxed), 2);
+}
+
+impl FallibleChunkGenerator for MetadataChangingGenerator {
+    fn identity(&self) -> GenerationIdentity {
+        ChunkGenerator::identity(self)
+    }
+
+    fn try_generate_chunk(&self, pos: ChunkPos) -> Result<Chunk, WorldError> {
+        Ok(ChunkGenerator::generate_chunk(self, pos))
+    }
+}
+
+#[tokio::test]
+async fn offthread_metadata_await_identity_change_refuses_before_world_read_or_task() {
+    let (store, generator) = metadata_changing_fixture();
+    let generator = Arc::new(generator);
+    let error = load_or_generate_bound_offthread(
+        &store,
+        generator.clone(),
+        &executor(),
+        binding(),
+        key(ChunkPos::ORIGIN),
+    )
+    .await
+    .unwrap_err();
+    assert_metadata_await_refusal(&store, &generator, &error);
+    let (store, generator) = metadata_changing_fixture();
+    let generator = Arc::new(generator);
+    let mut map = LoadedChunkMap::with_generation(binding());
+    let error = map
+        .acquire_offthread(
+            &store,
+            generator.clone(),
+            &executor(),
+            ChunkPos::ORIGIN,
+            ticket(),
+        )
+        .await
+        .unwrap_err();
+    assert_metadata_await_refusal(&store, &generator, &error);
+    assert_eq!(map.loaded_count(), 0);
+    assert_eq!(map.ticket_count(ChunkPos::ORIGIN), 0);
 }

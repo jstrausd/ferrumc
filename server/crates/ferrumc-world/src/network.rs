@@ -15,7 +15,10 @@
 //! protocol layer; this module produces only the chunk-derived payloads as plain
 //! `Vec`s so the app can wrap them in the generated packet types.
 
-use ferrumc_registry::dimension;
+use ferrumc_registry::{
+    biome::{biome_resources, BiomeResourceId},
+    dimension,
+};
 
 use crate::chunk::{Chunk, SECTION_COUNT};
 use crate::error::WorldError;
@@ -33,9 +36,7 @@ const DIRECT_WIRE_BITS_BLOCK: u8 = 15;
 
 /// Biome registry id written for every section's single-valued biome container.
 ///
-/// The crate has no biome storage yet, so every section reports `plains`, which
-/// is registry id `0` (assigned by registry send order in the configuration
-/// phase: `worldgen/biome:[plains]` is the first and only biome).
+/// Flat chunks report plains, which remains the first configured biome (id 0).
 const PLAINS_BIOME_ID: u32 = 0;
 
 /// Lowest buildable world `y` (`dimension::MIN_Y`, `-64`).
@@ -61,6 +62,15 @@ pub const LIGHT_SECTION_BYTES: usize = 2048;
 /// bits set, marking every light section present. Equals `0x03FF_FFFF`.
 const ALL_LIGHT_SECTIONS_MASK: i64 = (1i64 << LIGHT_SECTION_COUNT) - 1;
 
+/// Explicit runtime biome registry order: plains first, then canonical builtin names.
+///
+/// Configuration registry packets must use this same order as chunk biome encoding.
+pub fn network_biome_resources() -> impl Iterator<Item = BiomeResourceId> {
+    biome_resources()
+        .filter(|id| id.resource_location() == "minecraft:plains")
+        .chain(biome_resources().filter(|id| id.resource_location() != "minecraft:plains"))
+}
+
 /// Encodes a chunk's section-data blob: the opaque payload carried verbatim in
 /// `Chunk Data and Update Light`.
 ///
@@ -71,9 +81,8 @@ const ALL_LIGHT_SECTIONS_MASK: i64 = (1i64 << LIGHT_SECTION_COUNT) - 1;
 /// 2. `block_states`: a [`PalettedContainer`](crate::PalettedContainer) of block
 ///    states (see [`PalettedContainer::encode_network`](crate::PalettedContainer::encode_network)).
 /// 3. `biomes`: a [`PalettedContainer`](crate::PalettedContainer) of biomes,
-///    here always a single-valued `plains` container (`bits_per_entry = 0` then
-///    one `VarInt` value, with no long array) because the crate has no biome
-///    storage yet.
+///    natural chunks use actual stored quarts and the explicit runtime registry
+///    order; flat chunks retain the single-valued plains container.
 ///
 /// Since the 1.21.5 chunk-format change neither container prefixes its long array
 /// with a word count; the client recomputes it from `bits_per_entry` and the
@@ -89,7 +98,7 @@ pub fn encode_chunk_section_data(chunk: &Chunk) -> Result<Vec<u8>, WorldError> {
     // A flat chunk is ~16 KiB (8 indirect sections of 256 longs); reserve up
     // front to avoid repeated growth while encoding.
     let mut out = Vec::with_capacity(SECTION_COUNT * 2_100);
-    for section in chunk.sections() {
+    for (section_index, section) in chunk.sections().iter().enumerate() {
         // `non_air_count` is at most the section volume (4096), well within an
         // `i16`; clamp defensively to stay panic-free.
         let count = i16::try_from(section.non_air_count()).unwrap_or(i16::MAX);
@@ -103,7 +112,39 @@ pub fn encode_chunk_section_data(chunk: &Chunk) -> Result<Vec<u8>, WorldError> {
         // bits_per_entry 0 the client reads no longs, so the shared single-value
         // encoder writes just the bpe byte and the value, matching the
         // block-states container's single-value form exactly.
-        write_single_value_container(&mut out, PLAINS_BIOME_ID);
+        if let Some(biomes) = chunk.biomes() {
+            let mut values = [0_u32; 64];
+            for y in 0..4 {
+                for z in 0..4 {
+                    for x in 0..4 {
+                        let resource = biomes[((section_index * 4 + y) * 4 + x) * 4 + z];
+                        values[y * 16 + z * 4 + x] = network_biome_resources()
+                            .position(|id| id == resource)
+                            .ok_or_else(|| WorldError::NaturalGeneration {
+                                stage: crate::NaturalGenerationStage::Installation,
+                                detail: "stored biome missing from configured registry order"
+                                    .to_owned(),
+                            })? as u32;
+                    }
+                }
+            }
+            if values.iter().all(|value| *value == values[0]) {
+                write_single_value_container(&mut out, values[0]);
+            } else {
+                // 65 configured entries require 7 direct bits; no palette or
+                // long-array length follows the bits byte in protocol 772.
+                out.push(7);
+                let mut packed = PackedArray::new(7, 64)?;
+                for (index, value) in values.into_iter().enumerate() {
+                    packed.set(index, u64::from(value))?;
+                }
+                for word in packed.words() {
+                    out.extend_from_slice(&word.to_be_bytes());
+                }
+            }
+        } else {
+            write_single_value_container(&mut out, PLAINS_BIOME_ID);
+        }
     }
     Ok(out)
 }
@@ -125,7 +166,16 @@ pub fn encode_chunk_section_data(chunk: &Chunk) -> Result<Vec<u8>, WorldError> {
 /// happens for a height outside the buildable range and so never for a chunk
 /// produced by this crate.
 pub fn pack_motion_blocking_heightmap(chunk: &Chunk) -> Result<Vec<i64>, WorldError> {
-    let heightmap = chunk.heightmap(HeightmapKind::MotionBlocking);
+    pack_heightmap(chunk, HeightmapKind::MotionBlocking)
+}
+
+/// Packs the world's highest non-air block for each column into protocol longs.
+pub fn pack_world_surface_heightmap(chunk: &Chunk) -> Result<Vec<i64>, WorldError> {
+    pack_heightmap(chunk, HeightmapKind::WorldSurface)
+}
+
+fn pack_heightmap(chunk: &Chunk, kind: HeightmapKind) -> Result<Vec<i64>, WorldError> {
+    let heightmap = chunk.heightmap(kind);
     let mut packed = PackedArray::new(HEIGHTMAP_BITS, HEIGHTMAP_COLUMNS)?;
     for z in 0..16u8 {
         for x in 0..16u8 {
@@ -153,7 +203,7 @@ pub fn pack_motion_blocking_heightmap(chunk: &Chunk) -> Result<Vec<i64>, WorldEr
 /// The light masks and per-section light arrays for one chunk column.
 ///
 /// These populate the `Update Light` portion of `Chunk Data and Update Light`.
-/// Lighting is not computed yet, so [`ChunkLightData::full_bright`] is the only
+/// Full lighting propagation is not computed. [`ChunkLightData::full_bright`] is a
 /// constructor: it floods the column with full sky light and no block light,
 /// which is what a flat overworld looks like to a client.
 ///
@@ -196,6 +246,37 @@ impl ChunkLightData {
             sky_light: vec![vec![0xFF; LIGHT_SECTION_BYTES]; LIGHT_SECTION_COUNT],
             block_light: Vec::new(),
         }
+    }
+
+    /// Builds conservative vertical skylight from actual blocks.
+    ///
+    /// Open air has sky level 15 until the first non-air block, after which the
+    /// column is dark. This omits lateral propagation, transparent-block handling
+    /// and emitted block light; it is a terrain-preview rendering approximation.
+    #[must_use]
+    pub fn vertical_sky(chunk: &Chunk) -> Self {
+        let mut light = Self::full_bright();
+        light.sky_light = vec![vec![0; LIGHT_SECTION_BYTES]; LIGHT_SECTION_COUNT];
+        light.sky_light[LIGHT_SECTION_COUNT - 1].fill(0xFF);
+        for x in 0..16_u8 {
+            for z in 0..16_u8 {
+                let mut open = true;
+                for section in (0..SECTION_COUNT).rev() {
+                    for y in (0..16_u8).rev() {
+                        let Some(pos) = ferrumc_math::LocalBlockPos::new(x, y, z) else {
+                            continue;
+                        };
+                        if chunk.sections()[section].get(pos).is_air() && open {
+                            let index = usize::from(y) * 256 + usize::from(z) * 16 + usize::from(x);
+                            light.sky_light[section + 1][index / 2] |= 15 << ((index % 2) * 4);
+                        } else {
+                            open = false;
+                        }
+                    }
+                }
+            }
+        }
+        light
     }
 
     /// The sky-light `BitSet`: sections that carry sky-light data.
@@ -522,5 +603,62 @@ mod tests {
 
         // The mask word has exactly the low 26 bits set.
         assert_eq!(0x03FF_FFFF_i64, (1i64 << 26) - 1);
+    }
+}
+
+#[cfg(test)]
+mod natural_render_tests {
+    use super::*;
+    use ferrumc_math::{BlockPos, ChunkPos};
+
+    #[test]
+    fn vertical_sky_does_not_light_an_enclosed_cavity() {
+        let mut chunk = Chunk::new(ChunkPos::ORIGIN);
+        chunk
+            .set_block(
+                BlockPos::new(0, 70, 0),
+                crate::BlockStateId::new(ferrumc_registry::block_state::STONE),
+            )
+            .unwrap();
+        let sky = ChunkLightData::vertical_sky(&chunk);
+        let nibble = |y: i32, x: usize, z: usize| {
+            let relative = usize::try_from(y + 64).unwrap();
+            let index = (relative % 16) * 256 + z * 16 + x;
+            (sky.sky_light()[relative / 16 + 1][index / 2] >> ((index % 2) * 4)) & 15
+        };
+        assert_eq!(nibble(71, 0, 0), 15);
+        assert_eq!(nibble(70, 0, 0), 0);
+        assert_eq!(nibble(69, 0, 0), 0);
+        assert_eq!(nibble(-64, 0, 0), 0);
+        assert_eq!(nibble(-64, 1, 0), 15);
+        assert_eq!(sky.sky_light().len(), 26);
+    }
+
+    #[test]
+    fn natural_biomes_encode_with_client_direct_palette_layout() {
+        let mut chunk = Chunk::new(ChunkPos::ORIGIN);
+        let resources: Vec<_> = network_biome_resources().collect();
+        assert_eq!(resources.len(), 65);
+        assert_eq!(resources[0].resource_location(), "minecraft:plains");
+        let mut values = vec![resources[0]; 1536];
+        values[4] = resources[64]; // local quart x=1,y=0,z=0 -> wire slot1
+        chunk
+            .install_generated_biomes(values.into_boxed_slice())
+            .unwrap();
+        let blob = encode_chunk_section_data(&chunk).unwrap();
+        assert_eq!(&blob[..5], &[0, 0, 0, 0, 7]); // count, single-air, direct-biome7
+        let mut packed = PackedArray::new(7, 64).unwrap();
+        packed.set(1, 64).unwrap();
+        let expected: Vec<_> = packed
+            .words()
+            .iter()
+            .flat_map(|word| word.to_be_bytes())
+            .collect();
+        assert_eq!(&blob[5..69], expected);
+        assert_eq!(blob.len(), 69 + 23 * 6); // no extra array count or palette length
+        assert_eq!(
+            chunk.biome_at(BlockPos::new(4, -64, 0)),
+            Some(resources[64])
+        );
     }
 }

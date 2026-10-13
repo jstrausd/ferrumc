@@ -34,10 +34,14 @@ use ferrumc_storage::{
     ChunkKey, ChunkOverlayRecord, ChunkRecord, GenerationKey, SchemaVersion, StorageError,
     WorldStore, MAX_SAVE_BATCH,
 };
-use ferrumc_world::{Chunk, ChunkGenerator, FlatWorldGenerator, GenerationIdentity, WorldSeed};
+use ferrumc_world::{
+    Chunk, ChunkGenerator, FallibleChunkGenerator, FlatWorldGenerator, GenerationIdentity,
+    WorldSeed,
+};
 
 use crate::error::{SimError, SimResult};
 use crate::generation::{GenerationBinding, VerifiedGenerationBinding};
+use crate::generation_executor::ChunkGenerationExecutor;
 use crate::spawn::SpawnChunkTickets;
 #[cfg(test)]
 use crate::ticket::TicketReason;
@@ -219,7 +223,7 @@ pub async fn load_or_generate_legacy(
     let binding = legacy_generation_binding(GenerationKey::new(key.world(), key.dimension()));
     binding.validate_generator(generator)?;
     validate_legacy_store(store, binding.key()).await?;
-    compose_chunk(store, generator, key, binding).await
+    compose_chunk(store, &ChunkSource::Legacy(generator), key, binding).await
 }
 
 /// Loads a full base or regenerates the explicitly bound base, then applies edits.
@@ -243,7 +247,59 @@ pub async fn load_or_generate_bound(
     validate_load_position(key.pos())?;
     binding.validate_generator(generator)?;
     binding.validate_store(store).await?;
-    compose_chunk(store, generator, key, binding).await
+    compose_chunk(store, &ChunkSource::Legacy(generator), key, binding).await
+}
+
+/// Loads an explicitly bound chunk with fallible CPU generation off Tokio.
+///
+/// Full stored chunks bypass generation entirely. Only a true base miss claims
+/// an executor credit; saturation returns [`SimError::ChunkGenerationBusy`].
+/// Descriptor, column and overlay validation match [`load_or_generate_bound`].
+/// Producer errors are preserved and never trigger flat/default terrain.
+pub async fn load_or_generate_bound_offthread(
+    store: &dyn WorldStore,
+    generator: Arc<dyn FallibleChunkGenerator>,
+    executor: &ChunkGenerationExecutor,
+    binding: GenerationBinding,
+    key: ChunkKey,
+) -> SimResult<(Chunk, ChunkProvenance)> {
+    binding.validate_key(key)?;
+    validate_load_position(key.pos())?;
+    binding.validate_generator_identity(generator.identity())?;
+    binding.validate_store(store).await?;
+    let source = ChunkSource::Offthread {
+        generator,
+        executor,
+    };
+    compose_chunk(store, &source, key, binding).await
+}
+
+/// Both paths compose the same authoritative full base and sparse overlay.
+enum ChunkSource<'a> {
+    Legacy(&'a dyn ChunkGenerator),
+    Offthread {
+        generator: Arc<dyn FallibleChunkGenerator>,
+        executor: &'a ChunkGenerationExecutor,
+    },
+}
+
+impl ChunkSource<'_> {
+    fn identity(&self) -> GenerationIdentity {
+        match self {
+            Self::Legacy(generator) => generator.identity(),
+            Self::Offthread { generator, .. } => generator.identity(),
+        }
+    }
+
+    async fn generate(&self, binding: GenerationBinding, pos: ChunkPos) -> SimResult<Chunk> {
+        match self {
+            Self::Legacy(generator) => Ok(generator.generate_chunk(pos)),
+            Self::Offthread {
+                generator,
+                executor,
+            } => executor.generate(generator.clone(), binding, pos).await,
+        }
+    }
 }
 
 /// Explicit historical mode: this is not inferred from existing format-3 data.
@@ -263,7 +319,7 @@ async fn validate_legacy_store(store: &dyn WorldStore, key: GenerationKey) -> Si
 ///
 /// Resolution order, all surfacing a storage failure as [`SimError::ChunkLoad`]:
 /// 1. **Base**: use the complete record from [`WorldStore::load_chunk`] when one
-///    exists; otherwise generate a fresh flat chunk for `key`'s position.
+///    exists; otherwise regenerate the selected baseline for `key`'s position.
 /// 2. **Overlay**: when [`WorldStore::load_chunk_overlay`] returns a record, apply
 ///    only its player-modified sections over that base with
 ///    [`ChunkOverlayRecord::try_apply_to_chunk`]. An imported full record therefore
@@ -285,14 +341,14 @@ async fn validate_legacy_store(store: &dyn WorldStore, key: GenerationKey) -> Si
 /// the per-flush gate stays clear, so the reseed does not itself trigger a flush.
 async fn compose_chunk(
     store: &dyn WorldStore,
-    generator: &dyn ChunkGenerator,
+    generator: &ChunkSource<'_>,
     key: ChunkKey,
     binding: GenerationBinding,
 ) -> SimResult<(Chunk, ChunkProvenance)> {
     let pos = key.pos();
     // Store admission may have awaited; reject a changed generator before the
     // first world read, including callers of the free load functions.
-    binding.validate_generator(generator)?;
+    binding.validate_generator_identity(generator.identity())?;
 
     // The durable full record is the base when present. In particular, this is
     // the shape produced by Anvil import and must not be bypassed merely because
@@ -305,15 +361,15 @@ async fn compose_chunk(
     if let Some(record) = &stored {
         validate_loaded_column(pos, record.chunk().pos())?;
     }
-    binding.validate_generator(generator)?;
+    binding.validate_generator_identity(generator.identity())?;
     let mut chunk = if let Some(record) = stored {
         record.into_chunk()
     } else {
-        let generated = generator.generate_chunk(pos);
+        let generated = generator.generate(binding, pos).await?;
         validate_loaded_column(pos, generated.pos())?;
         generated
     };
-    binding.validate_generator(generator)?;
+    binding.validate_generator_identity(generator.identity())?;
 
     // Apply only the overlay's carried sections and block entities over the
     // selected base. An empty overlay is therefore a no-op, not a reason to
@@ -322,7 +378,7 @@ async fn compose_chunk(
         .load_chunk_overlay(key)
         .await
         .map_err(|source| SimError::ChunkLoad { pos, source })?;
-    binding.validate_generator(generator)?;
+    binding.validate_generator_identity(generator.identity())?;
     if let Some(overlay) = overlay {
         validate_loaded_column(pos, overlay.pos())?;
         if overlay.schema_version() != OVERLAY_SCHEMA_VERSION {
@@ -650,17 +706,49 @@ impl LoadedChunkMap {
         pos: ChunkPos,
         ticket: ChunkTicket,
     ) -> SimResult<ChunkAcquired> {
+        self.acquire_source(store, &ChunkSource::Legacy(generator), pos, ticket)
+            .await
+    }
+
+    /// Acquires a ticket using bounded fallible generation outside async ticks.
+    ///
+    /// All admission checks precede residency/ticket mutation. A full stored
+    /// chunk or resident chunk uses no generation credit. A miss may return
+    /// `ChunkGenerationBusy`; producer failures leave no partial resident state.
+    /// Legacy maps still accept only the explicit historic flat seed-0 identity.
+    pub async fn acquire_offthread(
+        &mut self,
+        store: &dyn WorldStore,
+        generator: Arc<dyn FallibleChunkGenerator>,
+        executor: &ChunkGenerationExecutor,
+        pos: ChunkPos,
+        ticket: ChunkTicket,
+    ) -> SimResult<ChunkAcquired> {
+        let source = ChunkSource::Offthread {
+            generator,
+            executor,
+        };
+        self.acquire_source(store, &source, pos, ticket).await
+    }
+
+    async fn acquire_source(
+        &mut self,
+        store: &dyn WorldStore,
+        generator: &ChunkSource<'_>,
+        pos: ChunkPos,
+        ticket: ChunkTicket,
+    ) -> SimResult<ChunkAcquired> {
         validate_load_position(pos)?;
         let binding = self.generation.unwrap_or_else(|| {
             legacy_generation_binding(GenerationKey::new(self.world, self.dimension))
         });
-        binding.validate_generator(generator)?;
+        binding.validate_generator_identity(generator.identity())?;
         if self.generation.is_some() {
             binding.validate_store(store).await?;
         } else {
             validate_legacy_store(store, GenerationKey::new(self.world, self.dimension)).await?;
         }
-        binding.validate_generator(generator)?;
+        binding.validate_generator_identity(generator.identity())?;
         if let Some(resident) = self.resident.get_mut(&pos) {
             *resident.tickets.entry(ticket).or_insert(0) += 1;
             return Ok(ChunkAcquired::AlreadyResident);
@@ -694,6 +782,31 @@ impl LoadedChunkMap {
         for pos in spawn.positions() {
             if self
                 .acquire(store, generator, pos, ticket)
+                .await?
+                .is_newly_resident()
+            {
+                newly_resident += 1;
+            }
+        }
+        Ok(newly_resident)
+    }
+
+    /// Acquires spawn tickets with the shared bounded generation executor.
+    ///
+    /// Each column is admitted sequentially. An error retains earlier successful
+    /// columns, while the failing column receives neither residency nor ticket.
+    pub async fn acquire_spawn_offthread(
+        &mut self,
+        store: &dyn WorldStore,
+        generator: Arc<dyn FallibleChunkGenerator>,
+        executor: &ChunkGenerationExecutor,
+        spawn: &SpawnChunkTickets,
+    ) -> SimResult<usize> {
+        let ticket = spawn.ticket();
+        let mut newly_resident = 0;
+        for pos in spawn.positions() {
+            if self
+                .acquire_offthread(store, generator.clone(), executor, pos, ticket)
                 .await?
                 .is_newly_resident()
             {

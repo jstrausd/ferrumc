@@ -141,7 +141,7 @@ fn every_minecraft_release_component_is_checked() {
 
 #[test]
 fn unknown_algorithm_does_not_fall_back_to_flat() {
-    for kind in [0_u16, 2, u16::MAX] {
+    for kind in [0_u16, 3, u16::MAX] {
         let mut bytes = golden_bytes();
         bytes[12..14].copy_from_slice(&kind.to_be_bytes());
         assert_eq!(
@@ -291,4 +291,30 @@ fn flat_seed_changes_identity_while_leaving_terrain_unchanged() {
         first.generate(ChunkPos::new(-4, 5)),
         second.generate(ChunkPos::new(-4, 5))
     );
+}
+
+#[test]
+fn natural_identity_is_distinct_roundtrips_and_rejects_unknown_revisions() {
+    for seed in [i64::MIN, 0, i64::MAX] {
+        let natural = GenerationIdentity::natural_overworld(WorldSeed::new(seed));
+        let flat = GenerationIdentity::flat_overworld(WorldSeed::new(seed));
+        let mut expected = flat.encode();
+        expected[12..14].copy_from_slice(&2_u16.to_be_bytes());
+        assert_eq!(natural.encode(), expected);
+        assert_eq!(GenerationIdentity::decode(&expected), Ok(natural));
+        assert!(matches!(
+            flat.ensure_compatible(natural),
+            Err(GenerationError::IncompatibleIdentity { .. })
+        ));
+        for revision in [0_u32, 2, u32::MAX] {
+            expected[14..18].copy_from_slice(&revision.to_be_bytes());
+            assert_eq!(
+                GenerationIdentity::decode(&expected),
+                Err(GenerationError::UnsupportedGeneratorRevision {
+                    kind: GeneratorKind::FerrumcNaturalPreview,
+                    revision
+                })
+            );
+        }
+    }
 }

@@ -13,9 +13,9 @@
 //! startup and shared across connections: the [`KnownPack`] list to advertise and
 //! the ordered [`RegistryData`] packets to send after the client's echo arrives.
 //!
-//! The enumerated set is the minimum a flat overworld needs:
+//! The enumerated set supports the flat world and natural preview:
 //! `dimension_type:[overworld]` (index `0`, referenced by `JoinGame`),
-//! `worldgen/biome:[plains]` (id `0`, referenced by every chunk biome palette),
+//! all builtin biomes (plains retains id `0`, followed by canonical-name order),
 //! all 49 `damage_type`s, and one entry in each of the mob/painting variant
 //! registries the client validates on join.
 
@@ -120,10 +120,14 @@ impl ConfigRegistries {
 
         // Order matters: entry numeric ids are assigned by send order, so
         // `dimension_type:[overworld]` is index 0 (`JoinGame.dimension_type`) and
-        // `worldgen/biome:[plains]` is biome id 0 (the chunk biome palette value).
+        // plains remains biome id 0; the remaining immutable builtin resources
+        // follow canonical order, matching ferrumc-world's explicit palette map.
+        let biomes: Vec<_> = ferrumc_world::network_biome_resources()
+            .map(ferrumc_registry::biome::BiomeResourceId::resource_location)
+            .collect();
         let registries = vec![
             registry("minecraft:dimension_type", &["overworld"])?,
-            registry("minecraft:worldgen/biome", &["plains"])?,
+            registry("minecraft:worldgen/biome", &biomes)?,
             registry("minecraft:damage_type", &DAMAGE_TYPES)?,
             registry("minecraft:painting_variant", &["alban"])?,
             registry("minecraft:wolf_variant", &["pale"])?,
@@ -157,7 +161,16 @@ impl ConfigRegistries {
 fn registry(registry_id: &str, keys: &[&str]) -> anyhow::Result<RegistryData> {
     let entries = keys
         .iter()
-        .map(|key| Ok(RegistryEntry::new(id(&format!("{NAMESPACE}:{key}"))?, None)))
+        .map(|key| {
+            Ok(RegistryEntry::new(
+                id(&if key.contains(':') {
+                    (*key).to_string()
+                } else {
+                    format!("{NAMESPACE}:{key}")
+                })?,
+                None,
+            ))
+        })
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(RegistryData::new(id(registry_id)?, entries))
 }
@@ -231,5 +244,29 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn biome_registry_preserves_plains_zero_and_enumerates_builtin_resources() {
+        let registries = ConfigRegistries::build().expect("registries build");
+        let biomes = &registries.registries()[1];
+        assert_eq!(
+            biomes.entries()[0].entry_id().as_str(),
+            ferrumc_registry::biome::PLAINS
+        );
+        assert_eq!(
+            biomes.entries().len(),
+            ferrumc_registry::biome::biome_resources().len()
+        );
+        let actual: Vec<_> = biomes
+            .entries()
+            .iter()
+            .skip(1)
+            .map(|entry| entry.entry_id().as_str())
+            .collect();
+        let expected: Vec<_> = ferrumc_registry::biome::biome_resources()
+            .map(ferrumc_registry::biome::BiomeResourceId::resource_location)
+            .filter(|name| *name != ferrumc_registry::biome::PLAINS)
+            .collect();
+        assert_eq!(actual, expected);
     }
 }
