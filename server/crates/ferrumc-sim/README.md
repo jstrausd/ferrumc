@@ -254,3 +254,20 @@ were reviewed: they separate persisted chunk loading and staged generation,
 then full conversion. `FerrumC` retains its own strict metadata/overlay admission
 and its producer's declared preview scope; source review is not differential
 acceptance.
+
+## Player placement collision
+
+The tick drain checks the final placed collision shape against present
+nonspectator player bodies before mutation, including multi-cell beds/doors and
+slab merges. It uses the valid movement prefix preceding that input. Spectator
+actors and unknown geometry refuse. See ferrumc-placement/data/collision for the
+pinned original JVM fixture and geometry limits.
+
+Apps that dispatch accepted-placement after-hooks enable
+`SimShard::enable_placement_completions()` before ticks and resolve each input
+from `GameOutput::PlayerPlacementResolved`. The event carries the committed
+primary position/state or None on refusal, and has no client packet representation.
+
+Explicit plugin placement replacement uses `GameInput::SetBlockExactTracked`.
+Ordinary `SetBlockExact` world intents retain exact edit semantics and emit no
+placement completion, even when their client sequence matches another action.

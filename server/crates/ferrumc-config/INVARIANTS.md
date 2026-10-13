@@ -21,8 +21,9 @@
   values. TOML integer typing applies, including valid base-prefixed integers;
   text, random tokens, floats, other types and out-of-range values are rejected.
 - The private preset choice accepts `ferrumc_flat` and the explicitly experimental
-  `ferrumc_natural_preview` variants. The preview declares natural terrain,
-  not complete features or Survival. Unknown presets and unknown/duplicate keys reject the
+  `ferrumc_natural_preview` and `ferrumc_natural_grass_preview` variants. The latter
+  selects a separate revision with an isolated short-grass feature subset.
+  These previews do not declare complete features or Survival. Unknown presets and unknown/duplicate keys reject the
   configuration; no stringly typed or catch-all fallback is accepted.
 - `with_generation` accepts bounded typed optional declarations, preserves the
   import directory and never resolves omission. New generation fields are

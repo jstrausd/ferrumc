@@ -830,3 +830,44 @@
   producer refusal remains typed and does not poison later independent calls.
   Biome wire layout and enclosed-cavity vertical light have deterministic tests.
 <!-- NATURAL-LOCAL-PREVIEW-20261013-END -->
+
+## Original short-grass subset preview (revision 2)
+
+- `NaturalWorldGenerator::with_grass_preview` and Runtime's `natural_with_grass`
+  explicitly select algorithm 2 revision 2. Revision 1 constructors and stored
+  identities retain their exact terrain baseline. Decoding admits both revisions
+  and exact compatibility rejects a revision mismatch.
+- The only new FEATURES are original `patch_grass_plain` and
+  `patch_grass_forest`, using the original global step-9 indices 54 and 59,
+  placement order, count/noise counts, WORLD_SURFACE_WG, biome zoom/membership,
+  RandomPatch's 32 six-draw attempts and SimpleBlock's air/support predicates.
+  Original JSON resources are frozen in `src/grass_resources`; biome membership
+  comes from the accepted complete biome exports. Dirt support uses the original
+  tag's complete block-state ranges and farmland. Plains reuses accepted static
+  BIOME_INFO_NOISE with seed 2345; it is independent of the world seed.
+- Preview policy: each source chunk starts from an isolated cold CARVERS baseline;
+  plains then forest share its live writes/heights. Sources do not observe another
+  source's feature writes. A target takes the deterministic union of the 3x3
+  sources' short grass in X-outer/Z-inner order. This deliberate subset policy is
+  not Paper's full live FEATURES scheduling or full natural-world parity.
+- Projection retains source and target writes. Every omitted external attempt
+  still consumes all six original draws. No survival/provider branch draws RNG,
+  and omitted positions cannot affect any later source-local origin height,
+  retained occupancy or support. Original full-region per-source fixtures verify
+  the projection for every 3x3 target offset. At most nine real CARVERS baselines
+  are required; biome-zoom misses use genuine BIOMES-only center production with
+  the same complete cold 3x3 selection chronology as the terrain generator.
+- Clone-shared, seed-bound caches retain only immutable RAW baselines (32 entries)
+  and genuine biome arrays (64 entries). They never receive edited chunks,
+  feature output, overlays or player state. Cache eviction and request order
+  affect cost, not output. Generation runs outside cache locks. Every source has
+  a 65,536-draw authority and a 384-write cap; refusal publishes no target.
+- Generated feature sections retain empty persist-dirty and persist-edited masks.
+  Highest-non-air heightmaps include grass. Vertical sky passes through the exact
+  short-grass state; other transparent blocks and lateral light remain omitted.
+- Acceptance: 512 genuine Paper build-60 placed-feature controlled-region cases
+  with signed extreme seeds, positive/negative source coordinates, eight support/biome
+  blocks, flat/sloped columns; exact RNG values, ordered full writes and all nine
+  source/target projections. Real terrain has separate preexisting independent
+  CARVERS acceptance. No other plants, trees, placed ores, structures, mobs,
+  gameplay ticks, complete lighting or whole FEATURES acceptance is implied.

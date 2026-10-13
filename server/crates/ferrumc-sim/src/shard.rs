@@ -11,8 +11,9 @@ use ferrumc_core::{DimensionId, GameMode, PlayerId, WorldId};
 use ferrumc_items::{encode_persisted_stack, left_click_exchange, ItemStack};
 use ferrumc_math::{BlockPos, Cuboid, Direction, ShardPos, Vec3};
 use ferrumc_placement::{
-    compute_placement, fence_connects_to, is_water_source, update_fence_connection_state,
-    NeighborQuery, PlacementContext, PlacementResult,
+    compute_placement, fence_connects_to, is_short_grass_replaceable, is_water_source,
+    placement_intersects_body, standing_player_body, update_fence_connection_state, NeighborQuery,
+    PlacementContext, PlacementResult,
 };
 use ferrumc_registry::block_state::{block_metadata, state_id_to_block_name};
 use ferrumc_registry::connection::{fence_family, is_connection_exception};
@@ -320,6 +321,7 @@ pub struct SimShard {
     /// scheduler drains them only after every worker returns, then stamps source
     /// identity and the completed tick before bounded canonical admission.
     cross_shard_outbox: Vec<CrossShardIntent>,
+    placement_completions: bool,
 }
 
 impl SimShard {
@@ -410,6 +412,34 @@ impl SimShard {
             region_limits: RegionLimits::default(),
             pending_region_work: VecDeque::new(),
             cross_shard_outbox: Vec::new(),
+            placement_completions: false,
+        }
+    }
+
+    /// Enables one internal completion per player placement input.
+    ///
+    /// Disabled by default to preserve legacy output contracts. The app enables
+    /// this before ticks to resolve after-hooks from committed results, rather
+    /// than predicted states or unrelated block-change broadcasts.
+    pub fn enable_placement_completions(&mut self) {
+        self.placement_completions = true;
+    }
+
+    fn complete_placement(
+        &self,
+        outputs: &mut Vec<GameOutput>,
+        player: PlayerId,
+        position: BlockPos,
+        sequence: i32,
+        state: Option<BlockStateId>,
+    ) {
+        if self.placement_completions {
+            outputs.push(GameOutput::PlayerPlacementResolved {
+                player,
+                position,
+                sequence,
+                state,
+            });
         }
     }
 
@@ -817,8 +847,24 @@ impl SimShard {
                 break;
             };
             if self.player_ownership.is_some() {
+                if let GameInput::BlockPlace {
+                    player,
+                    position,
+                    sequence,
+                    ..
+                }
+                | GameInput::SetBlockExactTracked {
+                    player,
+                    position,
+                    sequence,
+                    ..
+                } = input
+                {
+                    self.complete_placement(&mut outputs, player, position, sequence, None);
+                }
                 continue;
             }
+            let tracked_exact = matches!(&input, GameInput::SetBlockExactTracked { .. });
             match input {
                 GameInput::PlayerJoin { player, position } => {
                     // A duplicate join for an already-present player is ignored:
@@ -939,7 +985,27 @@ impl SimShard {
                         player_yaw,
                         position,
                     );
-                    self.apply_player_placement(
+                    // Validate final refined cells against the current FIFO movement
+                    // prefix before any chunk, block entity or dirty fact changes.
+                    if self.placement_body_obstructed(
+                        player,
+                        position,
+                        state,
+                        computed.as_ref(),
+                        &pending_moves,
+                    ) {
+                        self.reject_body_placement(
+                            &mut outputs,
+                            player,
+                            position,
+                            sequence,
+                            state,
+                            computed.as_ref(),
+                        );
+                        self.complete_placement(&mut outputs, player, position, sequence, None);
+                        continue;
+                    }
+                    let applied = self.apply_player_placement(
                         &mut outputs,
                         player,
                         position,
@@ -947,13 +1013,45 @@ impl SimShard {
                         state,
                         computed.as_ref(),
                     );
+                    let primary = if applied.is_some() {
+                        computed
+                            .as_ref()
+                            .and_then(|result| result.place_at)
+                            .unwrap_or(position)
+                    } else {
+                        position
+                    };
+                    self.complete_placement(&mut outputs, player, primary, sequence, applied);
                 }
                 GameInput::SetBlockExact {
                     player,
                     position,
                     sequence,
                     state,
+                }
+                | GameInput::SetBlockExactTracked {
+                    player,
+                    position,
+                    sequence,
+                    state,
                 } => {
+                    // Plugin replacement is already a final exact state. Player-
+                    // attributed exact placement must pass the same body gate.
+                    if self.placement_body_obstructed(player, position, state, None, &pending_moves)
+                    {
+                        self.reject_body_placement(
+                            &mut outputs,
+                            player,
+                            position,
+                            sequence,
+                            state,
+                            None,
+                        );
+                        if tracked_exact {
+                            self.complete_placement(&mut outputs, player, position, sequence, None);
+                        }
+                        continue;
+                    }
                     // An authoritative plugin/command exact write: store `state`
                     // verbatim through the same edit funnel, with NO
                     // compute_placement refinement and NO fence-neighbour pass. The
@@ -965,6 +1063,10 @@ impl SimShard {
                         block_change_output(cause, sequence, position, state, result)
                     {
                         outputs.push(output);
+                    }
+                    let applied = matches!(result, MutationResult::Applied { .. }).then_some(state);
+                    if tracked_exact {
+                        self.complete_placement(&mut outputs, player, position, sequence, applied);
                     }
                 }
                 GameInput::RejectBlockEdit {
@@ -1226,8 +1328,8 @@ impl SimShard {
     ///   cell).
     ///
     /// Every cell that must be newly occupied (the primary of a non-merge placement,
-    /// and every extra) is first checked to be *free* — air or a replaceable water
-    /// source (see [`is_placement_clear`](Self::is_placement_clear)). If any is
+    /// and every extra) is first checked to be *free* — air, a water source,
+    /// or short grass replaceable by this held item (see [`is_placement_clear`](Self::is_placement_clear)). If any is
     /// obstructed (a ceiling above a door, a wall where a bed head would go) the
     /// **whole** placement is rejected and the actor healed — never a half-door. A
     /// merge's primary cell is exempt: it completes the matching block already there,
@@ -1240,7 +1342,7 @@ impl SimShard {
         sequence: i32,
         held: BlockStateId,
         computed: Option<&PlacementResult>,
-    ) {
+    ) -> Option<BlockStateId> {
         let cause = MutationCause::PlayerCreative { player };
         // A merge relocates the single write onto the clicked cell.
         let primary_pos = computed.and_then(|r| r.place_at).unwrap_or(position);
@@ -1252,11 +1354,11 @@ impl SimShard {
         // occupied BEFORE writing anything, so an obstructed door/bed never lands a
         // half-block. A merge's primary cell is exempt (it completes the block
         // already there). A non-resident extra chunk counts as obstructed.
-        let primary_blocked = !is_merge && !self.is_placement_clear(primary_pos);
+        let primary_blocked = !is_merge && !self.is_placement_clear(primary_pos, held);
         let extra_blocked = computed.is_some_and(|r| {
             r.extra_blocks
                 .iter()
-                .any(|&(epos, _)| !self.is_placement_clear(epos))
+                .any(|&(epos, _)| !self.is_placement_clear(epos, held))
         });
         if primary_blocked || extra_blocked {
             // Heal the actor's prediction at the clicked cell, but only when the
@@ -1270,7 +1372,7 @@ impl SimShard {
                     authoritative_state: self.authoritative_state(position),
                 });
             }
-            return;
+            return None;
         }
 
         // Apply the primary cell first. If it is refused (absent actor, unloaded
@@ -1284,7 +1386,7 @@ impl SimShard {
             {
                 outputs.push(output);
             }
-            return;
+            return None;
         };
         if let Some(output) =
             block_change_output(cause, sequence, primary_pos, primary_state, result)
@@ -1327,24 +1429,138 @@ impl SimShard {
         for center in changed_cells {
             self.update_fence_neighbors(outputs, center);
         }
+        Some(primary_state)
+    }
+
+    /// Checks all final candidate cells before the first placement mutation.
+    /// Ordinary raw command/plugin/test world edits retain their distinct exact-
+    /// mutation semantics; this gate applies to player-attributed placement.
+    fn placement_body_obstructed(
+        &self,
+        player: PlayerId,
+        position: BlockPos,
+        held: BlockStateId,
+        computed: Option<&PlacementResult>,
+        pending_moves: &BTreeMap<PlayerId, PendingMove>,
+    ) -> bool {
+        let Some(actor) = self.players.get(&player) else {
+            return true;
+        };
+        if actor.game_mode == GameMode::Spectator {
+            return true;
+        }
+        let blocked = |position, state| {
+            self.players.iter().any(|(id, player)| {
+                if player.game_mode == GameMode::Spectator
+                    || player.owned.as_ref().is_some_and(|owned| !owned.connected)
+                {
+                    return false;
+                }
+                // Moves remain coalesced for output. Only the valid prefix already
+                // received before this placement contributes to collision geometry.
+                let feet = pending_moves
+                    .get(id)
+                    .and_then(|movement| movement.position)
+                    .unwrap_or(player.position);
+                let Some(body) = standing_player_body(feet) else {
+                    return true;
+                };
+                placement_intersects_body(state, position, body) != Some(false)
+            })
+        };
+        let primary_pos = computed
+            .and_then(|result| result.place_at)
+            .unwrap_or(position);
+        let primary_state = computed.map_or(held.as_u32(), |result| result.state_id);
+        blocked(primary_pos, primary_state)
+            || computed.is_some_and(|result| {
+                result
+                    .extra_blocks
+                    .iter()
+                    .any(|&(position, state)| blocked(position, state))
+            })
+    }
+
+    /// Correct every predicted candidate cell and end its action sequence.
+    fn reject_body_placement(
+        &self,
+        outputs: &mut Vec<GameOutput>,
+        player: PlayerId,
+        position: BlockPos,
+        sequence: i32,
+        held: BlockStateId,
+        computed: Option<&PlacementResult>,
+    ) {
+        if !self.players.contains_key(&player) {
+            return;
+        }
+        let primary = computed
+            .and_then(|result| result.place_at)
+            .unwrap_or(position);
+        outputs.push(GameOutput::BlockChangeRejected {
+            player,
+            position: primary,
+            sequence,
+            requested_state: held,
+            authoritative_state: self.authoritative_state(primary),
+        });
+        if let Some(computed) = computed {
+            for &(position, state) in &computed.extra_blocks {
+                outputs.push(GameOutput::BlockChangeRejected {
+                    player,
+                    position,
+                    sequence,
+                    requested_state: BlockStateId::new(state),
+                    authoritative_state: self.authoritative_state(position),
+                });
+            }
+        }
+    }
+
+    /// Chooses the clicked cell for narrow short-grass replacement, else adjacent.
+    ///
+    /// Reads only the current resident clicked state. Unknown, unloaded or
+    /// out-of-height cells fail closed to the supplied adjacent target. The App
+    /// uses this before placement hooks; the tick revalidates replacement and
+    /// final-state body collision before mutation. Other replaceable families
+    /// retain the existing adjacent-cell behavior.
+    #[must_use]
+    pub fn placement_target(
+        &self,
+        clicked: BlockPos,
+        adjacent: BlockPos,
+        held_state: BlockStateId,
+    ) -> BlockPos {
+        let replaceable = self
+            .chunks
+            .get(clicked.to_chunk_pos())
+            .and_then(|chunk| chunk.get_block(clicked))
+            .is_some_and(|state| is_short_grass_replaceable(state.as_u32(), held_state.as_u32()));
+        if replaceable {
+            clicked
+        } else {
+            adjacent
+        }
     }
 
     /// Returns `true` if `position` is a resident, in-range cell a placement may
-    /// occupy: it must hold air or a replaceable water *source*.
+    /// occupy: air, a water source, or short grass replaceable by the held block.
     ///
     /// A non-resident chunk or an out-of-range `y` returns `false` (the placement
     /// cannot safely land there). A water source counts as replaceable so a
-    /// waterloggable block can be placed into it; every other block (flowing water
-    /// included, and any solid) blocks the placement, preserving the usual "cannot
-    /// place into an occupied cell" rule.
-    fn is_placement_clear(&self, position: BlockPos) -> bool {
+    /// waterloggable block can be placed into it. Short grass follows the pinned
+    /// original replaceable registration and refuses its own held item. Other
+    /// occupied cells (including flowing water) retain the existing refusal.
+    fn is_placement_clear(&self, position: BlockPos, held: BlockStateId) -> bool {
         let Some(chunk) = self.chunks.get(position.to_chunk_pos()) else {
             return false;
         };
         let Some(state) = chunk.get_block(position) else {
             return false;
         };
-        state.is_air() || is_water_source(state.as_u32())
+        state.is_air()
+            || is_water_source(state.as_u32())
+            || is_short_grass_replaceable(state.as_u32(), held.as_u32())
     }
 
     /// Queues a region (cuboid) block edit for incremental application after a
@@ -1998,6 +2214,7 @@ mod tests {
     use crate::ticket::{ChunkTicket, TicketReason};
 
     mod fence_rules_tests;
+    mod placement_collision_tests;
 
     fn player(name: &str) -> PlayerId {
         PlayerId::offline(name)
@@ -2597,7 +2814,7 @@ mod tests {
         let target = BlockPos::new(8, 65, 8);
         s.enqueue(GameInput::PlayerJoin {
             player: p,
-            position: spawn(),
+            position: Vec3::new(6.0, 64.0, 8.0),
         })
         .expect("room");
         let _ = s.run_tick();
@@ -2638,7 +2855,7 @@ mod tests {
         let target = BlockPos::new(8, 65, 8); // air just above the surface
         s.enqueue(GameInput::PlayerJoin {
             player: p,
-            position: spawn(),
+            position: Vec3::new(6.0, 64.0, 8.0),
         })
         .expect("room");
         let _ = s.run_tick();
@@ -2679,7 +2896,7 @@ mod tests {
         let glass = BlockStateId::new(562);
         s.enqueue(GameInput::PlayerJoin {
             player: p,
-            position: spawn(),
+            position: Vec3::new(6.0, 64.0, 8.0),
         })
         .expect("room");
         let _ = s.run_tick();
@@ -2963,7 +3180,7 @@ mod tests {
         let mut s = shard_with_loaded_chunk(ChunkPos::new(0, 0)).await;
         s.enqueue(GameInput::PlayerJoin {
             player: p,
-            position: spawn(),
+            position: Vec3::new(6.0, 64.0, 8.0),
         })
         .expect("room");
         let _ = s.run_tick();
@@ -3421,7 +3638,7 @@ mod tests {
             let mut s = shard_with_loaded_chunk(center.to_chunk_pos()).await;
             s.enqueue(GameInput::PlayerJoin {
                 player: p,
-                position: Vec3::new(f64::from(center.x()), 64.0, f64::from(center.z())),
+                position: Vec3::new(f64::from(center.x()), 62.0, f64::from(center.z())),
             })
             .expect("room");
             s.run_tick();

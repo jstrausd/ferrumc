@@ -128,7 +128,7 @@ generator:
 - `WorldSeed`, `GenerationIdentity` and `ChunkGenerator` — explicit numeric seed
   and versioned identity for pure, reproducible chunk generation. The current
   identities are Minecraft 1.21.8 / Overworld, with flat revision 1 and natural
-  terrain preview revision 1.
+  terrain preview revisions 1 and 2.
 
 ## Generator contract
 
@@ -408,3 +408,13 @@ ore generation, trees, other vegetation, structures, fluid simulation and full
 lighting. Its public installation tests compare every FINAL block of the accepted
 original seam and signed-seed fixtures. It is terrain preview, not a complete
 Survival world or a live-Paper server acceptance claim.
+
+`NaturalWorldGenerator::with_grass_preview(seed)` and
+`RuntimeWorldGenerator::natural_with_grass(seed)` explicitly select natural
+preview revision 2. They add the original plains/forest short-grass placed
+features, independently accepted against pinned Paper per-source probes.
+Source chunks start from isolated cold terrain; their projected grass outputs
+are combined deterministically. A bounded immutable terrain cache amortizes
+adjacent requests, but first generation needs up to nine terrain chunks.
+Revision 1 and its saved baseline remain unchanged. This subset does not include
+other plants, trees, placed-feature ores, structures or mobs.

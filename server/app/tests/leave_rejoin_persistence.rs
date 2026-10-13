@@ -146,11 +146,11 @@ fn encoded_baseline(pos: ChunkPos) -> Vec<u8> {
 /// Bug B: a block placed in a spawn chunk is present in the chunk data a *later*
 /// joiner receives, while the original placer has already left the running server.
 async fn spawn_block_flow(addr: SocketAddr) -> anyhow::Result<()> {
-    // 1. Builder joins, places stone at (8, 64, 8) in spawn chunk (0, 0) (clicking
-    //    the top of the grass at (8, 63, 8), well within reach of spawn), and waits
-    //    for the ack proving the edit landed in the resident chunk.
+    // 1. Builder joins, places stone at (9, 64, 8) in spawn chunk (0, 0) (clicking
+    //    the top of the grass at (9, 63, 8), well within reach of spawn), and waits
+    //    for the ack ending the prediction; the later snapshot proves the write.
     let mut builder = login_to_play(addr, "Builder").await?;
-    send_place_on_top(&mut builder, (8, 63, 8), 1).await?;
+    send_place_on_top(&mut builder, (9, 63, 8), 1).await?;
     expect_ack(&mut builder, 1).await?;
 
     // 2. Builder leaves: dropping the client closes the socket, so the server runs
@@ -166,7 +166,7 @@ async fn spawn_block_flow(addr: SocketAddr) -> anyhow::Result<()> {
 
     let expected = encoded_with_edit(ChunkPos::new(0, 0), |chunk| {
         chunk
-            .set_block(BlockPos::new(8, 64, 8), BlockStateId::new(STONE_STATE))
+            .set_block(BlockPos::new(9, 64, 8), BlockStateId::new(STONE_STATE))
             .expect("set reference block");
     });
     anyhow::ensure!(

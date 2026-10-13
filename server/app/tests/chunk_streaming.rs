@@ -8,7 +8,7 @@
 //! - a `Set Center Chunk` for the new centre chunk;
 //! - at least one **new** `Chunk Data and Light` for a column that was *not* in
 //!   the spawn batch (a chunk newly within view distance);
-//! - at least one `Unload Chunk` for a column that left the view radius;
+//! - retained columns after one boundary crossing, then an unload beyond the extra ring;
 //! - and never a duplicate `Chunk Data` for a column the client already holds.
 //!
 //! Determinism without wall-clock sleeps: the client drives every step by hand
@@ -68,9 +68,34 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
     // (x = 24 lands in chunk 1; y/z stay in the spawn column.)
     send_position(&mut client, 24.0, 64.0, 8.0).await?;
 
-    // The crossing must re-centre the view, stream in at least one column that was
-    // not already sent at spawn, and unload at least one column that left the
-    // radius — all without re-sending a column the client already holds.
+    // The first crossing loads x=2 while retaining the old x=-1 edge. Read
+    // through a tick-driven clock broadcast so absence of unload is observable.
+    let mut first_center = false;
+    let mut first_new_column = false;
+    loop {
+        match client.next_play().await? {
+            ClientboundPlayPacket::SetCenterChunk(center) => {
+                anyhow::ensure!(
+                    (center.chunk_x(), center.chunk_z()) == (1, 0),
+                    "first centre"
+                );
+                first_center = true;
+            }
+            ClientboundPlayPacket::ChunkDataAndLight(chunk) => {
+                let pos = (chunk.x(), chunk.z());
+                anyhow::ensure!(ever_sent.insert(pos), "column {pos:?} sent twice");
+                first_new_column |= !spawn_columns.contains(&pos);
+            }
+            ClientboundPlayPacket::UnloadChunk(_) => {
+                anyhow::bail!("first boundary discarded retained ring")
+            }
+            ClientboundPlayPacket::UpdateTime(_) if first_center && first_new_column => break,
+            _ => {}
+        }
+    }
+    // A second boundary crossing moves x=-1 beyond radius+1 and retires it.
+    send_position(&mut client, 40.0, 64.0, 8.0).await?;
+
     let mut recentred = false;
     let mut streamed_new_column = false;
     let mut unloaded_departed_column = false;
@@ -78,8 +103,8 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
         match client.next_play().await? {
             ClientboundPlayPacket::SetCenterChunk(center) => {
                 anyhow::ensure!(
-                    (center.chunk_x(), center.chunk_z()) == (1, 0),
-                    "Set Center Chunk targeted ({}, {}); expected (1, 0)",
+                    (center.chunk_x(), center.chunk_z()) == (2, 0),
+                    "Set Center Chunk targeted ({}, {}); expected (2, 0)",
                     center.chunk_x(),
                     center.chunk_z(),
                 );
@@ -124,10 +149,10 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn crossing_a_chunk_boundary_streams_and_unloads_chunks() {
+async fn boundary_hysteresis_retains_then_unloads_chunks() {
     // Ephemeral port; a radius-1 spawn and view distance 1 make the crossing exact:
     // at spawn the client holds the 3x3 square around (0, 0); stepping one chunk
-    // east loads the new x = 2 column and unloads the x = -1 column.
+    // east loads x=2 and retains x=-1; the next step loads x=3 and unloads x=-1.
     let config = AppConfig::from_toml_str(
         "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1",
     )

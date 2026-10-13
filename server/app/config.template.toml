@@ -34,6 +34,10 @@
 # Play view distance advertised to clients, in chunks (0..=32). Together with
 # max_connections and chunk_stream_interval_ms it may request at most 1100000
 # view slots and 3000000 full-view scan units per second.
+# Client render distance may lower this cap. Streaming retains one extra ring
+# and speculatively prepares two rings; neither raises the requested send radius.
+# Natural preview fills progressively with two background producers and a bounded
+# RAM baseline cache (64 columns / 8 MiB charged storage, not disk pregeneration).
 # view_distance = 10
 
 # Play simulation distance advertised to clients, in chunks (0..=32).
@@ -141,7 +145,10 @@
 # seed = 0
 # preset = "ferrumc_flat"
 # Opt-in natural terrain preview: "ferrumc_natural_preview". Uses terrain, biomes,
-# surfaces and carvers; no populated ores, trees, features or structures.
+# surfaces and carvers, including density ore veins. Placed ores, trees,
+# features and structures are absent.
+# Optional "ferrumc_natural_grass_preview" adds isolated original plains/forest
+# short grass under revision2. It requires a fresh world and remains incomplete.
 # Lighting is direct vertical skylight only; lateral/block light is incomplete.
 # Natural preview chooses a safe dry surface within the configured spawn ring.
 # Use a fresh world_dir; an explicit preset/seed cannot replace a stored identity.

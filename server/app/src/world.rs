@@ -186,8 +186,31 @@ impl RuntimeGeneration {
         }
     }
 
+    pub(crate) fn baseline_generator(&self) -> Arc<dyn FallibleChunkGenerator> {
+        Arc::clone(&self.generator)
+    }
+
     pub(crate) fn identity(&self) -> GenerationIdentity {
         self.generator.identity()
+    }
+
+    /// Admit a warmed raw baseline through the ordinary storage/overlay gate.
+    pub(crate) async fn acquire_warmed(
+        &self,
+        chunks: &mut LoadedChunkMap,
+        store: &dyn WorldStore,
+        chunk: Arc<Chunk>,
+        ticket: ChunkTicket,
+    ) -> anyhow::Result<()> {
+        let pos = chunk.pos();
+        let generator = Arc::new(WarmedBaseline {
+            identity: self.identity(),
+            chunk,
+        });
+        chunks
+            .acquire_offthread(store, generator, &self.executor, pos, ticket)
+            .await?;
+        Ok(())
     }
 
     pub(crate) async fn acquire(
@@ -207,6 +230,28 @@ impl RuntimeGeneration {
             )
             .await?;
         Ok(())
+    }
+}
+
+/// Single-column immutable producer; it never bypasses stored records or overlays.
+struct WarmedBaseline {
+    identity: GenerationIdentity,
+    chunk: Arc<Chunk>,
+}
+
+impl FallibleChunkGenerator for WarmedBaseline {
+    fn identity(&self) -> GenerationIdentity {
+        self.identity
+    }
+
+    fn try_generate_chunk(&self, pos: ChunkPos) -> Result<Chunk, ferrumc_world::WorldError> {
+        if pos != self.chunk.pos() {
+            return Err(ferrumc_world::WorldError::NaturalGeneration {
+                stage: ferrumc_world::NaturalGenerationStage::Installation,
+                detail: "warmed baseline requested for a different column".to_owned(),
+            });
+        }
+        Ok((*self.chunk).clone())
     }
 }
 
@@ -241,9 +286,12 @@ pub(crate) async fn build_world(
     let identity = reconcile_generation(&*store, key, config).await?;
     let runtime_generator = tokio::task::spawn_blocking(move || match identity.generator_kind() {
         GeneratorKind::FerrumcFlat => Ok(RuntimeWorldGenerator::flat(identity.seed())),
-        GeneratorKind::FerrumcNaturalPreview => {
-            RuntimeWorldGenerator::natural(identity.seed()).map_err(anyhow::Error::from)
-        }
+        GeneratorKind::FerrumcNaturalPreview => match identity.generator_revision() {
+            1 => RuntimeWorldGenerator::natural(identity.seed()).map_err(anyhow::Error::from),
+            2 => RuntimeWorldGenerator::natural_with_grass(identity.seed())
+                .map_err(anyhow::Error::from),
+            _ => anyhow::bail!("unsupported natural generation revision {identity:?}"),
+        },
         _ => anyhow::bail!("unsupported persisted generation identity {identity:?}"),
     })
     .await
@@ -255,6 +303,7 @@ pub(crate) async fn build_world(
     let spawn = SpawnChunkTickets::new(spawn_center_chunk(config), config.spawn_chunk_radius());
 
     let mut shard = SimShard::with_generation(shard_pos, binding);
+    shard.enable_placement_completions();
     // Bound the region build commands (/fill, /replace, /undo) with the operator's
     // configured caps; the shard re-checks these defensively on every region edit.
     shard.set_region_limits(RegionLimits {
@@ -396,10 +445,16 @@ async fn reconcile_generation(
         Some(WorldGenerationPreset::FerrumcNaturalPreview) => {
             GenerationIdentity::natural_overworld(seed)
         }
+        Some(WorldGenerationPreset::FerrumcNaturalGrassPreview) => {
+            GenerationIdentity::natural_overworld_with_grass(seed)
+        }
         Some(preset) => anyhow::bail!("unsupported world generation preset {preset:?}"),
         None => match stored {
             Some(identity) => match identity.generator_kind() {
                 GeneratorKind::FerrumcFlat => GenerationIdentity::flat_overworld(seed),
+                GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 2 => {
+                    GenerationIdentity::natural_overworld_with_grass(seed)
+                }
                 GeneratorKind::FerrumcNaturalPreview => GenerationIdentity::natural_overworld(seed),
                 _ => anyhow::bail!("unsupported persisted generation identity {identity:?}"),
             },
@@ -588,7 +643,13 @@ fn safe_surface_y(chunks: &LoadedChunkMap, column: BlockPos) -> Option<i32> {
     safe_column_y(chunk, column, ground_y)
 }
 
-fn safe_column_y(chunk: &Chunk, column: BlockPos, ground_y: i32) -> Option<i32> {
+fn safe_column_y(chunk: &Chunk, column: BlockPos, mut ground_y: i32) -> Option<i32> {
+    // The optional grass feature adds one passable surface cell. Select its real
+    // support, preserving the revision-1 terrain/platform rules.
+    let top = chunk.get_block(BlockPos::new(column.x(), ground_y, column.z()))?;
+    if is_short_grass(top) {
+        ground_y = ground_y.checked_sub(1)?;
+    }
     if ground_y >= 318 {
         return None;
     }
@@ -622,14 +683,16 @@ fn safe_column_y(chunk: &Chunk, column: BlockPos, ground_y: i32) -> Option<i32> 
         return None;
     }
     for y in [ground_y + 1, ground_y + 2] {
-        if !chunk
-            .get_block(BlockPos::new(column.x(), y, column.z()))?
-            .is_air()
-        {
+        let state = chunk.get_block(BlockPos::new(column.x(), y, column.z()))?;
+        if !state.is_air() && !is_short_grass(state) {
             return None;
         }
     }
     Some(ground_y + 1)
+}
+
+fn is_short_grass(state: ferrumc_world::BlockStateId) -> bool {
+    ferrumc_registry::block_state::state_id_to_block_name(state.as_u32()) == Some("short_grass")
 }
 
 /// Assembles the shared [`JoinKit`] framing.
@@ -1106,6 +1169,56 @@ mod tests {
                 Some(identity)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn grass_preview_omission_retains_revision_and_rejects_baseline_switches() {
+        let store = InMemoryStore::with_generation_metadata();
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let identity = GenerationIdentity::natural_overworld_with_grass(WorldSeed::new(-42));
+        store
+            .ensure_generation_identity(key, identity)
+            .await
+            .expect("declare grass");
+        assert_eq!(
+            reconcile_generation(&store, key, &AppConfig::default())
+                .await
+                .expect("reuse"),
+            identity
+        );
+        for declaration in [
+            "preset='ferrumc_natural_preview'",
+            "seed=43",
+            "anvil_import_dir='/unused'",
+        ] {
+            let config =
+                AppConfig::from_toml_str(&format!("[world]\n{declaration}")).expect("parse");
+            assert!(
+                reconcile_generation(&store, key, &config).await.is_err(),
+                "{declaration}"
+            );
+            assert_eq!(
+                store.load_generation_identity(key).await.expect("read"),
+                Some(identity)
+            );
+        }
+    }
+
+    #[test]
+    fn short_grass_is_passable_spawn_space_on_a_real_support() {
+        let mut chunk = FlatWorldGenerator::new().generate(ChunkPos::ORIGIN);
+        let grass = BlockStateId::new(
+            ferrumc_registry::block_state::block_default_state("short_grass")
+                .expect("original grass"),
+        );
+        chunk
+            .set_block(BlockPos::new(8, 64, 8), grass)
+            .expect("place plant");
+        assert_eq!(safe_column_y(&chunk, BlockPos::new(8, 0, 8), 64), Some(64));
+        chunk
+            .set_block(BlockPos::new(8, 63, 8), BlockStateId::AIR)
+            .expect("remove support");
+        assert_eq!(safe_column_y(&chunk, BlockPos::new(8, 0, 8), 64), None);
     }
 
     #[tokio::test]

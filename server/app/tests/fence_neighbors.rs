@@ -406,10 +406,12 @@ async fn verify_restart(addr: SocketAddr, f: &Fixtures) -> anyhow::Result<()> {
 async fn ordinary_neighbor_placement_and_break_refresh_both_clients_and_survive_redb_restart() {
     let fixture = fixture_data().expect("independent Minecraft fixture IDs");
     let temp = tempfile::tempdir().expect("test world directory");
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses")
-        .with_world_dir(Some(temp.path().to_path_buf()))
-        .expect("durable config");
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 8.5]",
+    )
+    .expect("config parses")
+    .with_world_dir(Some(temp.path().to_path_buf()))
+    .expect("durable config");
 
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let result = timeout(GUARD, lifecycle(server.local_addr(), &fixture)).await;

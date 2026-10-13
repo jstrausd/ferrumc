@@ -63,6 +63,7 @@ impl InputDeliveryPolicy {
             GameInput::BlockBreak { .. }
             | GameInput::BlockPlace { .. }
             | GameInput::SetBlockExact { .. }
+            | GameInput::SetBlockExactTracked { .. }
             | GameInput::SetGameMode { .. }
             | GameInput::RegionEdit { .. }
             | GameInput::RegionUndo { .. }

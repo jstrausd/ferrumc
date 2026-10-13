@@ -50,7 +50,9 @@ use ferrumc_storage::{
 };
 use ferrumc_world::{BlockEntity, Chunk, GeneratorKind};
 
+use crate::chunk_preparation::ChunkPreparation;
 use crate::persistence::PersistenceTarget;
+use crate::placement_completion::{PlacementCompletions, PlacementReply};
 use crate::plugins::BlockEventDispatcher;
 use crate::storage_worker::StorageFlushRequest;
 use crate::world::{chunk_packet, RuntimeGeneration};
@@ -120,6 +122,7 @@ struct SnapshotCtx {
     /// Bounded roster of connected players (`PlayerId -> display name`), filled on
     /// join and pruned each tick against the router's public connection state.
     roster: BTreeMap<PlayerId, String>,
+    placements: PlacementCompletions,
     /// Recent tick timestamps within the last wall-second, used to derive the
     /// effective TPS. Bounded by [`TPS_WINDOW_CAP`].
     tps_window: VecDeque<Instant>,
@@ -146,6 +149,7 @@ impl SnapshotCtx {
                 .map_or(0, |since| since.as_secs()),
             start_instant: Instant::now(),
             roster: BTreeMap::new(),
+            placements: PlacementCompletions::new(),
             tps_window: VecDeque::new(),
             net_telemetry,
             block_events,
@@ -252,16 +256,39 @@ pub(crate) enum SimCommand {
     /// only decides *which* chunks based on the position it observed, and renders
     /// the returned packets to its socket.
     StreamChunks {
+        /// Canonical connection identity for fair speculative priorities.
+        viewer: PlayerId,
         /// Chunk columns to bring into view (load-or-generate, ticket acquired).
         load: Vec<ChunkPos>,
         /// Chunk columns that left view (player ticket released).
         unload: Vec<ChunkPos>,
+        /// Bounded nearest-first raw terrain preparation targets; no player tickets.
+        prefetch: Vec<ChunkPos>,
         /// One-shot channel the driver replies on with the built chunk packets for
         /// the subset of `load` that resolved (a store/encode failure skips just
         /// that chunk, so the connection only records what it actually received).
         /// Each [`StreamedChunk`] carries the column packet plus any block-entity
         /// (sign) render packets for that chunk, so a (re)joining or streaming
         /// player sees existing signs render as the chunk enters view.
+        reply: oneshot::Sender<Vec<StreamedChunk>>,
+    },
+    /// Update speculative terrain priorities without acquiring tickets or waiting for output.
+    PrepareChunks {
+        /// Canonical admitted viewer whose previous pending priorities are replaced.
+        viewer: PlayerId,
+        /// At most 64 nearest-first target positions.
+        positions: Vec<ChunkPos>,
+    },
+    /// Remove speculative work for a departing viewer, including a failed join.
+    CancelChunkPreparation {
+        /// Canonical connection identity whose pending priorities are discarded.
+        viewer: PlayerId,
+    },
+    /// Rebuild resident chunk packets for already-held tickets after writer backpressure.
+    ResendChunks {
+        /// Held columns to retry, bounded by the connection's ordinary stream batch.
+        positions: Vec<ChunkPos>,
+        /// No ticket is transferred by this snapshot-only response.
         reply: oneshot::Sender<Vec<StreamedChunk>>,
     },
     /// Release the player tickets on every chunk in `positions` without sending
@@ -297,24 +324,29 @@ pub(crate) enum SimCommand {
         /// Optional bounded-shard acceptance reply.
         acceptance: Option<DeliveryReply>,
     },
+    /// Resolve the narrow replaceable-grass target from resident simulation state.
+    PlacementTarget {
+        /// Original clicked cell.
+        clicked: BlockPos,
+        /// Cell adjacent to the clicked face.
+        adjacent: BlockPos,
+        /// Held block used by the original replaceability predicate.
+        held_state: BlockStateId,
+        /// Chosen cell; this query grants no mutation authority.
+        reply: oneshot::Sender<BlockPos>,
+    },
     /// Place the held block at `position` after a player `UseItemOn` (the only
     /// caller — plugin/command exact writes use [`SetBlockExact`](Self::SetBlockExact)).
     ///
-    /// The connection resolved `state` from the player's selected hotbar slot
-    /// (the simulation stays inventory-free), then routed it here. The driver
-    /// first admits the edit to the block's owning shard as a
-    /// [`GameInput::BlockPlace`]. Only after bounded admission does it preview the
-    /// refined placement on the resident chunk and reply with the final computed
-    /// state (so the connection can fire its `after_block_place` hook with the
-    /// state the world will hold). The simulation validates the admitted input
-    /// (actor present, chunk resident, in reach) at the tick boundary and, on
-    /// acceptance, writes the refined state. Spawn-protection veto and the
-    /// empty-hand / non-placeable cases are handled at the connection before this
-    /// command is ever sent.
+    /// The connection resolves the held state; this command admits the input
+    /// and retains its result owner until the simulation applies or refuses it.
+    /// A successful tick replies with the final primary position/state, a gameplay
+    /// refusal replies with None, and admission failure returns its session error.
+    /// The connection fires its after-hook only for an applied result.
     PlaceBlock {
         /// The placing player.
         player: PlayerId,
-        /// The block position to place at (already stepped off the clicked face).
+        /// The resolved target cell, including the supported replaceable-grass case.
         position: BlockPos,
         /// The block-action sequence to acknowledge on accept/reject.
         sequence: i32,
@@ -327,10 +359,21 @@ pub(crate) enum SimCommand {
         cursor_position: Vec3,
         /// The player's yaw in degrees at place time.
         player_yaw: f32,
-        /// One-shot reply carrying the final computed block-state only after
-        /// bounded shard acceptance, or the classified rejection that terminated
-        /// the overloaded session.
-        reply: oneshot::Sender<Result<BlockStateId, SessionError>>,
+        /// Applied primary position/state, None for a gameplay refusal, or an admission error.
+        reply: PlacementReply,
+    },
+    /// Exact replacement selected by a player's placement hook, with a tick outcome.
+    PlaceBlockExact {
+        /// Acting player.
+        player: PlayerId,
+        /// Requested target cell.
+        position: BlockPos,
+        /// Client prediction sequence.
+        sequence: i32,
+        /// Final state selected by the hook.
+        state: BlockStateId,
+        /// Some state only after an applied tick, None for a gameplay refusal.
+        reply: PlacementReply,
     },
     /// Write an exact, authoritative block-state at `position`, applied verbatim
     /// (NOT refined by `compute_placement`).
@@ -686,7 +729,7 @@ fn chunk_block_entity_packets(chunk: &Chunk) -> Vec<ClientboundPlayPacket> {
 /// ticket cannot safely disappear before its overlay commits. The per-update load
 /// count is capped by the connection (see `connection.rs`), bounding the work one
 /// command can request.
-#[allow(clippy::too_many_arguments)] // the driver owns several distinct pieces wired once at startup
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one owner loop coordinates ticks, commands, raw completions and shutdown
 pub(crate) async fn run(
     mut router: SessionRouter,
     mut shard: SimShard,
@@ -725,56 +768,96 @@ pub(crate) async fn run(
     // Read-only snapshot publishing state (roster, TPS window, build/start
     // context). Updated only from this task, never holding a lock across a tick.
     let mut snap_ctx = SnapshotCtx::new(snapshots, net_telemetry, block_events);
+    let mut preparation = ChunkPreparation::new(&generator);
+    let natural_preview =
+        generator.identity().generator_kind() == GeneratorKind::FerrumcNaturalPreview;
 
-    loop {
-        tokio::select! {
-            biased;
-            _ = shutdown.changed() => break,
-            _ = ticker.tick() => {
-                run_tick(
-                    &mut router,
-                    &mut shard,
-                    &mut shard_rx,
-                    &metrics,
-                    &clock,
-                    &mut tick,
-                    &mut world_time,
-                    &mut snap_ctx,
-                )?;
-                // End-of-tick flush: hand the tick's player edits to the storage
-                // worker without ever blocking the tick (see the helper).
-                if let Err(error) =
-                    try_flush_persist_dirty(&mut shard, &target, &storage_tx, tick, &mut next_mutation_id)
-                {
-                    let _ = fatal_shutdown.send(true);
-                    return Err(error);
-                }
-            }
-            maybe_command = commands.recv() => match maybe_command {
-                Some(command) => {
-                    if let Err(error) = handle_command(
+    let outcome = async {
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => break,
+                _ = ticker.tick() => {
+                    run_tick(
                         &mut router,
                         &mut shard,
-                        &target,
-                        &generator,
-                        &storage_tx,
-                        tick,
-                        &mut next_mutation_id,
+                        &mut shard_rx,
+                        &metrics,
+                        &clock,
+                        &mut tick,
                         &mut world_time,
-                        &mut snap_ctx.roster,
-                        command,
-                    )
-                    .await
+                        &mut snap_ctx,
+                    )?;
+                    preparation.retain_viewers(&snap_ctx.roster);
+                    // End-of-tick flush: hand the tick's player edits to the storage
+                    // worker without ever blocking the tick (see the helper).
+                    if let Err(error) =
+                        try_flush_persist_dirty(&mut shard, &target, &storage_tx, tick, &mut next_mutation_id)
                     {
                         let _ = fatal_shutdown.send(true);
                         return Err(error);
                     }
                 }
-                None => break,
-            },
+                completion = preparation.next_completion(), if preparation.has_jobs() => {
+                    if let Some(completion) = completion {
+                        if let Err(error) = preparation.completed(completion) {
+                            let _ = fatal_shutdown.send(true);
+                            return Err(ServerError::invalid_state(error.to_string()));
+                        }
+                    }
+                }
+                maybe_command = commands.recv() => match maybe_command {
+                    Some(SimCommand::StreamChunks { viewer, load, unload, prefetch, reply }) if natural_preview => {
+                        if let Err(error) = release_chunks(&mut shard, &target, &storage_tx, tick, &mut next_mutation_id, &unload).await {
+                            let _ = fatal_shutdown.send(true);
+                            return Err(error);
+                        }
+                        preparation.request(viewer, load.iter().chain(&prefetch).copied().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
+                        let packets = load_prepared_chunks(&mut shard, target.store(), &generator, &mut preparation, &load).await;
+                        if let Err(error) = deliver_streamed_chunks(reply, packets, &mut shard, &target, &storage_tx, tick, &mut next_mutation_id).await {
+                            let _ = fatal_shutdown.send(true);
+                            return Err(error);
+                        }
+                    }
+                    Some(SimCommand::PrepareChunks { viewer, positions }) if natural_preview => {
+                        preparation.request(viewer, positions.into_iter().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
+                    }
+                    Some(SimCommand::CancelChunkPreparation { viewer }) => {
+                        preparation.cancel(viewer);
+                    }
+                    Some(command) => {
+                        if let Err(error) = handle_command(
+                            &mut router,
+                            &mut shard,
+                            &target,
+                            &generator,
+                            &storage_tx,
+                            tick,
+                            &mut next_mutation_id,
+                            &mut world_time,
+                            &mut snap_ctx.roster,
+                            &mut snap_ctx.placements,
+                            command,
+                        )
+                        .await
+                        {
+                            let _ = fatal_shutdown.send(true);
+                            return Err(error);
+                        }
+                    }
+                    None => break,
+                },
+            }
         }
-    }
 
+        Ok(())
+    }.await;
+
+    if let Err(error) = preparation.drain().await {
+        let _ = fatal_shutdown.send(true);
+        return Err(ServerError::invalid_state(error.to_string()));
+    }
+    outcome?;
     // The last connection may drop the command sender before the server task
     // signals the driver. Both stop causes must hand off off-tick edits before
     // dropping `storage_tx`, whose closure lets the worker drain and exit.
@@ -993,6 +1076,42 @@ fn route_input_command(
     Ok(())
 }
 
+/// Reserve the result owner before admission; only a later tick resolves it.
+#[allow(clippy::too_many_arguments)] // one placement carries both its resync and its admitted input
+fn route_placement_command(
+    router: &mut SessionRouter,
+    placements: &mut PlacementCompletions,
+    player: PlayerId,
+    position: BlockPos,
+    sequence: i32,
+    state: BlockStateId,
+    input: GameInput,
+    reply: PlacementReply,
+) -> ServerResult<()> {
+    if let Err(reply) = placements.track(player, sequence, reply) {
+        route_input_command(
+            router,
+            player,
+            GameInput::RejectBlockEdit {
+                player,
+                position,
+                sequence,
+                requested_state: state,
+            },
+            None,
+            "placement completion capacity",
+        )?;
+        let _ = reply.send(Ok(None));
+        return Ok(());
+    }
+    let delivery = router.route_game_input_owned(player, input);
+    if let Err(error) = enforce_input_delivery(router, player, delivery, false, "block placement")?
+    {
+        placements.fail(player, error);
+    }
+    Ok(())
+}
+
 /// Routes a server-driven teleport and withholds its client sync until bounded
 /// shard admission succeeds.
 fn route_teleport_command(
@@ -1021,6 +1140,7 @@ async fn handle_command(
     next_mutation_id: &mut u64,
     world_time: &mut WorldTime,
     player_roster: &mut BTreeMap<PlayerId, String>,
+    placements: &mut PlacementCompletions,
     command: SimCommand,
 ) -> ServerResult<()> {
     match command {
@@ -1063,8 +1183,10 @@ async fn handle_command(
             reply_delivery(acceptance, outcome);
         }
         SimCommand::StreamChunks {
+            viewer: _,
             load,
             unload,
+            prefetch: _,
             reply,
         } => {
             // Release first (frees tickets the new view no longer needs) before
@@ -1081,6 +1203,12 @@ async fn handle_command(
                 next_mutation_id,
             )
             .await?;
+        }
+        SimCommand::PrepareChunks { .. } | SimCommand::CancelChunkPreparation { .. } => {}
+        SimCommand::ResendChunks { positions, reply } => {
+            // These packets represent existing owned tickets, never a new handoff.
+            let packets = resident_chunk_packets(shard, &positions);
+            let _ = reply.send(packets);
         }
         SimCommand::ReleaseChunks { positions } => {
             // Disconnect path: await the worker's commit before releasing tickets so
@@ -1111,6 +1239,14 @@ async fn handle_command(
                 "set game mode",
             )?;
         }
+        SimCommand::PlacementTarget {
+            clicked,
+            adjacent,
+            held_state,
+            reply,
+        } => {
+            let _ = reply.send(shard.placement_target(clicked, adjacent, held_state));
+        }
         SimCommand::PlaceBlock {
             player,
             position,
@@ -1121,8 +1257,13 @@ async fn handle_command(
             player_yaw,
             reply,
         } => {
-            let delivery = router.route_game_input_owned(
+            route_placement_command(
+                router,
+                placements,
                 player,
+                position,
+                sequence,
+                state,
                 GameInput::BlockPlace {
                     player,
                     position,
@@ -1132,27 +1273,31 @@ async fn handle_command(
                     cursor_position,
                     player_yaw,
                 },
-            );
-            let outcome =
-                enforce_input_delivery(router, player, delivery, false, "block placement")?;
-            match outcome {
-                Ok(()) => {
-                    // Preview only after admission. The tick recomputes through the
-                    // same helper, so the after-hook receives the final refined
-                    // state without previewing a rejected mutation.
-                    let computed = shard.preview_placement(
-                        state,
-                        clicked_face,
-                        cursor_position,
-                        player_yaw,
-                        position,
-                    );
-                    let _ = reply.send(Ok(computed));
-                }
-                Err(error) => {
-                    let _ = reply.send(Err(error));
-                }
-            }
+                reply,
+            )?;
+        }
+        SimCommand::PlaceBlockExact {
+            player,
+            position,
+            sequence,
+            state,
+            reply,
+        } => {
+            route_placement_command(
+                router,
+                placements,
+                player,
+                position,
+                sequence,
+                state,
+                GameInput::SetBlockExactTracked {
+                    player,
+                    position,
+                    sequence,
+                    state,
+                },
+                reply,
+            )?;
         }
         SimCommand::SetBlockExact {
             player,
@@ -1402,6 +1547,62 @@ fn chest_snapshots_match(actual: &[ItemStack], expected: &[ItemStack]) -> bool {
     })
 }
 
+fn resident_chunk_packets(shard: &SimShard, positions: &[ChunkPos]) -> Vec<StreamedChunk> {
+    positions
+        .iter()
+        .filter_map(|pos| {
+            let chunk = shard.loaded_chunks().get(*pos)?;
+            let packet = chunk_packet(*pos, chunk).ok()?;
+            Some(StreamedChunk {
+                chunk: packet,
+                block_entities: chunk_block_entity_packets(chunk),
+            })
+        })
+        .collect()
+}
+
+/// Cold terrain remains outside the shard until a completed raw baseline exists.
+async fn load_prepared_chunks(
+    shard: &mut SimShard,
+    store: &dyn WorldStore,
+    generator: &RuntimeGeneration,
+    preparation: &mut ChunkPreparation,
+    positions: &[ChunkPos],
+) -> Vec<StreamedChunk> {
+    let ticket = ChunkTicket::of(TicketReason::Player);
+    let mut acquired = Vec::new();
+    for &pos in positions {
+        let result = if shard.loaded_chunks().get(pos).is_some() {
+            generator
+                .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
+                .await
+        } else if let Some(chunk) = preparation.ready(pos) {
+            generator
+                .acquire_warmed(shard.loaded_chunks_mut(), store, chunk, ticket)
+                .await
+        } else {
+            continue;
+        };
+        match result {
+            Ok(()) => acquired.push(pos),
+            Err(error) => {
+                tracing::warn!(%error, x = pos.x(), z = pos.z(), "prepared chunk admission refused");
+            }
+        }
+    }
+    let packets = resident_chunk_packets(shard, &acquired);
+    let encoded: BTreeSet<_> = packets
+        .iter()
+        .map(|packet| ChunkPos::new(packet.chunk.x(), packet.chunk.z()))
+        .collect();
+    for pos in acquired {
+        if !encoded.contains(&pos) {
+            let _ = shard.loaded_chunks_mut().release(pos, ticket);
+        }
+    }
+    packets
+}
+
 /// Load-or-generates each chunk in `positions`, acquiring a player ticket on it,
 /// and returns the built [`ChunkDataAndLight`] packet for each that resolved.
 ///
@@ -1416,20 +1617,7 @@ async fn load_chunks(
 ) -> Vec<StreamedChunk> {
     let ticket = ChunkTicket::of(TicketReason::Player);
     let mut packets = Vec::with_capacity(positions.len());
-    let natural_preview =
-        generator.identity().generator_kind() == GeneratorKind::FerrumcNaturalPreview;
-    let mut new_columns = 0;
     for &pos in positions {
-        // Resident join columns remain immediate. Preview exploration admits
-        // only one absent column per command so a large view request cannot
-        // hold the driver across sixteen CPU generations. Deferred positions
-        // receive no tickets; the client's next diff requests them again.
-        if natural_preview && shard.loaded_chunks().get(pos).is_none() {
-            if new_columns >= 1 {
-                continue;
-            }
-            new_columns += 1;
-        }
         if let Err(err) = generator
             .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
             .await
@@ -1592,6 +1780,7 @@ fn run_tick(
     // this loop terminates and never recurses.
     let mut closed = Vec::new();
     for output in &outputs {
+        snap.placements.resolve(output);
         // Classify the block-edit metric from the requested/new state: air means a
         // break, any other state a place. An accepted edit surfaces as BlockChanged;
         // every rejection surfaces as BlockChangeRejected and is counted here — both
@@ -1880,9 +2069,12 @@ mod tests {
 
     use crate::storage_worker::StorageFlushRequest;
 
+    use crate::placement_completion::PlacementCompletions;
+
     use super::{
         deliver_streamed_chunks, drain_shard_inputs, handle_command, load_chunks, release_chunks,
-        release_chunks_acked, route_input_command, try_flush_persist_dirty, SimCommand,
+        release_chunks_acked, route_input_command, route_placement_command,
+        try_flush_persist_dirty, SimCommand,
     };
 
     #[test]
@@ -1955,6 +2147,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             roster,
+            &mut PlacementCompletions::new(),
             command,
         )
         .await
@@ -2888,60 +3081,80 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn place_block_command_replies_with_the_refined_state() {
-        // After bounded routing succeeds, the driver previews the FINAL computed
-        // state (an east-face oak_log refines to axis=x, state 136), so the
-        // connection fires after_block_place with the state the world will hold
-        // rather than the held default (137). An empty shard is enough: the
-        // axis-from-face rule consults the clicked face, not neighbours.
-        let mut router = SessionRouter::new();
-        let mut inbox = router.register_shard(ShardPos::new(0, 0));
-        let player = PlayerId::offline("placer");
-        let _handle = router
-            .join_player(player, "placer", spawn())
-            .expect("join placer");
-        assert!(matches!(
-            inbox.try_recv(),
-            Ok(GameInput::PlayerJoin { player: joined, .. }) if joined == player
-        ));
-        let mut shard = test_shard();
-        let generator = test_generator();
-        let (storage_tx, _storage_rx) = mpsc::channel(1);
-        let mut next_mutation_id = 0u64;
-        let mut world_time = WorldTime::new();
-        let mut player_roster = BTreeMap::new();
-        let (reply_tx, reply_rx) = oneshot::channel();
-
-        handle_command(
-            &mut router,
-            &mut shard,
-            &test_target().await,
-            &generator,
-            &storage_tx,
-            Tick::ZERO,
-            &mut next_mutation_id,
-            &mut world_time,
-            &mut player_roster,
-            SimCommand::PlaceBlock {
-                player,
-                position: BlockPos::new(8, 65, 8),
-                sequence: 1,
-                state: BlockStateId::new(137), // oak_log default (axis=y)
-                clicked_face: Direction::East,
-                cursor_position: Vec3::new(0.5, 0.5, 0.5),
-                player_yaw: 0.0,
-                reply: reply_tx,
-            },
-        )
-        .await
-        .expect("placement command does not cross a durability barrier");
-
-        assert_eq!(
-            reply_rx
+    async fn place_block_replies_only_after_the_real_refined_tick_outcome() {
+        for collision in [false, true] {
+            let mut router = SessionRouter::new();
+            let mut inbox = router.register_shard(ShardPos::new(0, 0));
+            let player = PlayerId::offline("placer");
+            let _handle = router.join_player(player, "placer", spawn()).expect("join");
+            let mut shard = test_shard();
+            shard.enable_placement_completions();
+            let store = test_store().await;
+            shard
+                .loaded_chunks_mut()
+                .acquire(
+                    &store,
+                    &FlatWorldGenerator::new(),
+                    ChunkPos::ORIGIN,
+                    ChunkTicket::of(TicketReason::Player),
+                )
                 .await
-                .expect("driver replied with the computed state"),
-            Ok(BlockStateId::new(136)),
-        );
+                .expect("load");
+            let mut placements = PlacementCompletions::new();
+            let (reply_tx, mut reply_rx) = oneshot::channel();
+            let position = BlockPos::new(if collision { 8 } else { 9 }, 65, 8);
+            route_placement_command(
+                &mut router,
+                &mut placements,
+                player,
+                position,
+                1,
+                BlockStateId::new(137),
+                GameInput::BlockPlace {
+                    player,
+                    position,
+                    sequence: 1,
+                    state: BlockStateId::new(137),
+                    clicked_face: Direction::East,
+                    cursor_position: Vec3::new(0.5, 0.5, 0.5),
+                    player_yaw: 0.0,
+                },
+                reply_tx,
+            )
+            .expect("admit");
+            assert!(
+                matches!(
+                    reply_rx.try_recv(),
+                    Err(oneshot::error::TryRecvError::Empty)
+                ),
+                "admission must not fire the after hook"
+            );
+            drain_shard_inputs(&mut shard, &mut inbox).expect("deliver");
+            for output in shard.run_tick() {
+                placements.resolve(&output);
+            }
+            assert_eq!(
+                reply_rx.try_recv(),
+                Ok(Ok(if collision {
+                    None
+                } else {
+                    Some((position, BlockStateId::new(136)))
+                }))
+            );
+            assert_eq!(
+                shard
+                    .loaded_chunks()
+                    .get(ChunkPos::ORIGIN)
+                    .expect("resident")
+                    .get_block(position)
+                    .expect("inside column"),
+                if collision {
+                    BlockStateId::AIR
+                } else {
+                    BlockStateId::new(136)
+                }
+            );
+        }
     }
 
     /// A fixed in-shard spawn used by the teleport/weather/gamemode driver tests.
@@ -2979,6 +3192,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             &mut roster,
+            &mut PlacementCompletions::new(),
             SimCommand::SetWeather { raining: true },
         )
         .await
@@ -3019,6 +3233,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             &mut roster,
+            &mut PlacementCompletions::new(),
             SimCommand::SetTime {
                 time_of_day: TIME_DAY,
             },
@@ -3060,6 +3275,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             &mut roster,
+            &mut PlacementCompletions::new(),
             SimCommand::Join {
                 player: PlayerId::offline("joiner"),
                 name: "joiner".to_string(),
@@ -3106,6 +3322,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             &mut roster,
+            &mut PlacementCompletions::new(),
             SimCommand::QueryTime { player: asker },
         )
         .await
@@ -3151,6 +3368,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             &mut roster,
+            &mut PlacementCompletions::new(),
             SimCommand::SetGameModeFor {
                 target: "Joe".to_string(),
                 mode: GameMode::Creative,
@@ -3262,6 +3480,7 @@ mod tests {
             &mut next_mutation_id,
             &mut world_time,
             &mut roster,
+            &mut PlacementCompletions::new(),
             SimCommand::TeleportToPlayer {
                 player: issuer,
                 target: "Joe".to_string(),
@@ -3312,55 +3531,97 @@ mod tests {
         assert_eq!(rx.try_recv().expect("accepted batch").overlays.len(), 1);
     }
     #[tokio::test]
-    async fn natural_preview_stream_defers_absent_columns_without_tickets() {
-        struct PreviewFixture;
-        impl ferrumc_world::FallibleChunkGenerator for PreviewFixture {
-            fn identity(&self) -> ferrumc_world::GenerationIdentity {
-                ferrumc_world::GenerationIdentity::natural_overworld(ferrumc_world::WorldSeed::new(
-                    0,
-                ))
-            }
-            fn try_generate_chunk(
-                &self,
-                pos: ChunkPos,
-            ) -> Result<ferrumc_world::Chunk, ferrumc_world::WorldError> {
-                Ok(FlatWorldGenerator::new().generate(pos))
-            }
+    async fn prepared_admission_reloads_current_snapshot_and_overlay_and_resends_without_tickets() {
+        use crate::chunk_preparation::ChunkPreparation;
+        use ferrumc_storage::{ChunkKey, ChunkOverlayRecord, ChunkRecord};
+        let store = test_store().await;
+        let mut shard = test_shard();
+        let generator = test_generator();
+        let mut preparation = ChunkPreparation::new(&generator);
+        let positions = [ChunkPos::ORIGIN, ChunkPos::new(1, 0), ChunkPos::new(2, 0)];
+        assert!(super::load_prepared_chunks(
+            &mut shard,
+            &store,
+            &generator,
+            &mut preparation,
+            &positions
+        )
+        .await
+        .is_empty());
+        for pos in positions {
+            assert_eq!(
+                shard.loaded_chunks().ticket_count(pos),
+                0,
+                "cold work owns no ticket"
+            );
+            preparation
+                .completed(Ok((pos, Ok(FlatWorldGenerator::new().generate(pos)))))
+                .expect("raw completion");
         }
-        let store = InMemoryStore::with_generation_metadata();
-        let identity =
-            ferrumc_world::GenerationIdentity::natural_overworld(ferrumc_world::WorldSeed::new(0));
-        let binding = ferrumc_sim::GenerationBinding::new(
-            ferrumc_storage::GenerationKey::new(
-                ferrumc_core::WorldId::new(0),
-                ferrumc_core::DimensionId::new(0),
-            ),
-            identity,
-        );
+        let binding = crate::persistence::fixtures::binding();
+        let key = |pos| ChunkKey::new(binding.key().world(), binding.key().dimension(), pos);
+        let snapshot_block = BlockPos::new(1, 80, 1);
+        let overlay_block = BlockPos::new(17, 80, 1);
+        let state = BlockStateId::new(1);
+        let mut snapshot = FlatWorldGenerator::new().generate(positions[0]);
+        snapshot
+            .set_block(snapshot_block, state)
+            .expect("snapshot edit");
         store
-            .ensure_generation_identity(binding.key(), identity)
+            .save_chunk(
+                key(positions[0]),
+                ChunkRecord::new(ferrumc_sim::CHUNK_SCHEMA_VERSION, snapshot),
+            )
             .await
-            .expect("natural metadata");
-        let mut shard = SimShard::with_generation(ShardPos::new(0, 0), binding);
-        let generator = super::RuntimeGeneration::new(Arc::new(PreviewFixture));
-        let positions = [
-            ChunkPos::new(0, 0),
-            ChunkPos::new(1, 0),
-            ChunkPos::new(2, 0),
-        ];
-        let first = load_chunks(&mut shard, &store, &generator, &positions).await;
-        assert_eq!(first.len(), 1);
-        assert_eq!(shard.loaded_chunks().ticket_count(positions[0]), 1);
-        assert_eq!(shard.loaded_chunks().ticket_count(positions[1]), 0);
-        assert_eq!(shard.loaded_chunks().ticket_count(positions[2]), 0);
-        let second = load_chunks(&mut shard, &store, &generator, &positions).await;
+            .expect("save after warm completion");
+        let mut overlay = FlatWorldGenerator::new().generate(positions[1]);
+        overlay
+            .set_block(overlay_block, state)
+            .expect("overlay edit");
+        overlay.mark_persist_dirty(overlay_block);
+        store
+            .save_chunk_overlays(vec![(
+                key(positions[1]),
+                ChunkOverlayRecord::try_from_chunk(
+                    ferrumc_sim::OVERLAY_SCHEMA_VERSION,
+                    positions[1],
+                    &overlay,
+                    7,
+                )
+                .expect("overlay"),
+            )])
+            .await
+            .expect("save current overlay");
+        let packets = super::load_prepared_chunks(
+            &mut shard,
+            &store,
+            &generator,
+            &mut preparation,
+            &positions,
+        )
+        .await;
+        assert_eq!(packets.len(), 3);
         assert_eq!(
-            second.len(),
-            2,
-            "resident column plus one newly admitted column"
+            shard
+                .loaded_chunks()
+                .get(positions[0])
+                .expect("snapshot resident")
+                .get_block(snapshot_block),
+            Some(state)
         );
-        assert_eq!(shard.loaded_chunks().ticket_count(positions[0]), 2);
-        assert_eq!(shard.loaded_chunks().ticket_count(positions[1]), 1);
-        assert_eq!(shard.loaded_chunks().ticket_count(positions[2]), 0);
+        assert_eq!(
+            shard
+                .loaded_chunks()
+                .get(positions[1])
+                .expect("overlay resident")
+                .get_block(overlay_block),
+            Some(state)
+        );
+        let retry = super::resident_chunk_packets(&shard, &positions);
+        assert_eq!(retry.len(), 3);
+        drop(retry); // An abandoned snapshot response owns no release obligation.
+        for pos in positions {
+            assert_eq!(shard.loaded_chunks().ticket_count(pos), 1);
+        }
     }
 }

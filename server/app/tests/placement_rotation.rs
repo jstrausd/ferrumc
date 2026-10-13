@@ -311,7 +311,7 @@ async fn rotate_in_place_then_place_flow(addr: SocketAddr) -> anyhow::Result<()>
 
 #[tokio::test]
 async fn rotate_in_place_then_place_orients_from_the_turned_yaw() {
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
+    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1\nsimulation_distance = 1")
         .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
@@ -329,7 +329,7 @@ async fn rotate_in_place_then_place_orients_from_the_turned_yaw() {
 
 #[tokio::test]
 async fn side_face_log_is_rotated_and_seen_by_second_client() {
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
+    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1\nsimulation_distance = 1")
         .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
@@ -349,7 +349,7 @@ async fn side_face_log_is_rotated_and_seen_by_second_client() {
 async fn placed_rotated_log_survives_rejoin() {
     let temp = tempfile::tempdir().expect("temp dir");
     let config = AppConfig::from_toml_str(
-        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1",
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1",
     )
     .expect("config parses")
     .with_world_dir(Some(temp.path().to_path_buf()))

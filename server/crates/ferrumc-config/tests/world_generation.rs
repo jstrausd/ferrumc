@@ -103,6 +103,13 @@ fn only_supported_profiles_are_accepted() {
         Some(WorldGenerationPreset::FerrumcNaturalPreview)
     );
     assert_eq!(natural.seed(), Some(-42));
+    let grass: WorldConfig =
+        toml::from_str("preset = 'ferrumc_natural_grass_preview'\nseed = -42").unwrap();
+    assert_eq!(
+        grass.preset(),
+        Some(WorldGenerationPreset::FerrumcNaturalGrassPreview)
+    );
+    assert_eq!(grass.seed(), Some(-42));
     for literal in [
         "'flat'",
         "'normal'",

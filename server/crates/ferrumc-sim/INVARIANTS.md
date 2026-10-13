@@ -570,3 +570,50 @@
   look and mode. Detached, stale, foreign, stopped and `SnapshotOnly` handles
   still produce no view. The Session held-slot resync and its driver wiring
   remain NET-04.2f.
+
+## Player placement body refusal
+
+- BlockPlace checks every final refined candidate cell, including relocated slab
+  merges and extra bed/door cells, before the first mutation. SetBlockExact
+  applies the same gate to the plugin-selected final state. Raw non-player
+  Command/Plugin/Test exact edits retain force-edit semantics.
+- Every present nonspectator player's standing body obstructs placement,
+  including the actor. Spectator actors refuse; disconnected owned players are
+  excluded. Only earlier valid FIFO coalesced movement prefixes are overlaid
+  for this check; future moves do not apply early or reorder existing outputs.
+- Geometry uses ferrumc-placement's pinned original collision fixtures. Unknown
+  or unsupported shapes/bodies refuse safely. A refusal leaves chunks, block
+  entities, dirty facts and journal unchanged and corrects the primary and all
+  extra predicted cells. Extra corrections repeat the input's ACK sequence.
+- SimShard::enable_placement_completions opts into exactly one internal
+  PlayerPlacementResolved per BlockPlace/SetBlockExactTracked, after all action edits
+  or corrections. Some carries the actual final primary state and position
+  (including relocated merges); every refusal reports the originally requested
+  position and None, including absent actors. Default-off preserves legacy output
+  collectors. Consumers resolve after-hooks from this event, not previews,
+  repeated sequence IDs on ordinary block changes, or extra-cell writes.
+- This is standing-player placement obstruction, not full original entity,
+  pose, support physics, canSee, survival inventory or plugin-event parity.
+
+## Short-grass replacement admission
+
+- Ordinary player placement may replace an existing short_grass cell with a
+  known different held block. The primary and extra-cell replaceability gate
+  use the original held state; placing short grass into itself still refuses.
+  Final-state body collision is checked before this gate and before every edit,
+  so a colliding replacement preserves the existing plant, dirty masks and
+  journal. Successful replacement journals the short-grass prior state.
+- The App selects clicked-versus-adjacent placement from authoritative state;
+  Sim still revalidates the target at the tick. This narrow policy adds no
+  general plant, support, survival, pose or Paper plugin-event mechanics.
+
+## Tracked exact placement completion
+
+- Ordinary SetBlockExact world intents use the same player-body collision gate,
+  but never emit PlayerPlacementResolved. Only explicit plugin Replace for a
+  placement action uses SetBlockExactTracked. A before_interact world intent
+  sharing the client's sequence cannot resolve the explicit placement reply.
+- Tracked exact refusal and acceptance each emit one opt-in internal outcome;
+  ordinary BlockPlace continues to do so. Session treats the tracked input as
+  authoritative data and routes by the final block's owner. Its internal
+  completion has no client packet or disconnect effect.

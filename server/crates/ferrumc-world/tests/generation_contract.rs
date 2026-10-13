@@ -306,7 +306,7 @@ fn natural_identity_is_distinct_roundtrips_and_rejects_unknown_revisions() {
             flat.ensure_compatible(natural),
             Err(GenerationError::IncompatibleIdentity { .. })
         ));
-        for revision in [0_u32, 2, u32::MAX] {
+        for revision in [0_u32, 3, u32::MAX] {
             expected[14..18].copy_from_slice(&revision.to_be_bytes());
             assert_eq!(
                 GenerationIdentity::decode(&expected),
@@ -316,5 +316,18 @@ fn natural_identity_is_distinct_roundtrips_and_rejects_unknown_revisions() {
                 })
             );
         }
+    }
+}
+
+#[test]
+fn grass_preview_revision_roundtrips_and_never_matches_revision_one() {
+    for seed in [i64::MIN, -1, 0, i64::MAX] {
+        let seed = WorldSeed::new(seed);
+        let grass = GenerationIdentity::natural_overworld_with_grass(seed);
+        assert_eq!(grass.generator_revision(), 2);
+        assert_eq!(GenerationIdentity::decode(&grass.encode()).unwrap(), grass);
+        assert!(grass
+            .ensure_compatible(GenerationIdentity::natural_overworld(seed))
+            .is_err());
     }
 }

@@ -351,6 +351,8 @@ struct Connection<'a> {
     compression: CompressionState,
     /// Shared connection context.
     ctx: &'a ConnContext,
+    /// Optional client render radius reported during configuration.
+    client_view_distance: Option<i8>,
     /// Per-connection rolling packet-trace holder, dumped on disconnect or a
     /// decode error. Boxed so the large trace rings live on the heap rather than
     /// bloating the connection task's stack/async frame.
@@ -370,6 +372,7 @@ impl<'a> Connection<'a> {
             encoder: OutboundEncoder::new(ctx.limits),
             compression: CompressionState::disabled(),
             ctx,
+            client_view_distance: None,
             debug: Box::new(SessionDebug::new(label)),
         }
     }
@@ -603,6 +606,18 @@ async fn advance(
     identity: &mut Option<LoginIdentity>,
     packet: &InboundPacket,
 ) -> anyhow::Result<LoginProgress> {
+    if matches!(
+        phase,
+        LoginPhase::AwaitingKnownPacks | LoginPhase::AwaitingFinishAck
+    ) {
+        if let InboundPacket::Configuration(ServerboundConfigurationPacket::ClientInformation(
+            settings,
+        )) = packet
+        {
+            conn.client_view_distance = Some(settings.view_distance());
+            return Ok(LoginProgress::Continue);
+        }
+    }
     match (*phase, packet) {
         (
             LoginPhase::Handshaking,

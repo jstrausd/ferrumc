@@ -5,7 +5,8 @@ Application entry point. Wires config, services, plugin registry, shutdown.
 ## Durable generation identity
 
 New worlds use storage format4. `[world].seed` accepts an optional signed64
-integer and `[world].preset` accepts `"ferrumc_flat"`. A fresh omission explicitly
+integer and `[world].preset` accepts `"ferrumc_flat"` or
+`"ferrumc_natural_preview"`. A fresh omission explicitly
 selects seed0 and FerrumC-flat-v1; this fixed layered terrain does not provide
 natural Overworld, Nether or End generation. Once stored, the seed is reused
 on restart when the setting is omitted. An explicitly different seed refuses
@@ -17,6 +18,33 @@ Anvil import supplies stored complete chunks before spawn. Chunks absent from
 the import use the explicitly declared FerrumC-flat-v1 fallback; importing does
 not recover Vanilla's seed or generator settings. Missing or malformed configured
 imports fail startup. This importer is not a completed Vanilla world migration.
+
+## Natural terrain preview streaming
+
+The natural preset includes terrain density, biome selection and surface material
+rules. It remains a preview: placed features, placed ores, trees and structures
+are absent; density ore veins are included. Lighting currently supplies vertical
+skylight and the motion-blocking heightmap uses highest non-air material. Natural
+spawn chooses a dry support column with two clear blocks in the resident spawn
+square. Natural worlds reject Anvil import, including when the preset is restored
+from metadata.
+
+Streaming prepares raw terrain outside the simulation task with at most two
+blocking producers. Every viewer has up to 64 priorities, scheduled fairly.
+Completed immutable baselines occupy an LRU of at most 64 chunks and 8 MiB of
+conservatively charged storage (512 KiB per result); generation scratch and
+resident chunks are additional. This RAM cache is not on-disk pregeneration.
+Normal admission rereads current metadata, full chunks and gameplay overlays, so
+cached terrain cannot replay stale edits. Departure and failed joins cancel
+pending priorities; shutdown waits already admitted producers.
+
+The client can request a smaller render radius than the configured server cap.
+Each pump admits at most 16 chunks or delivery retries and retires at most 16.
+One extra retained ring reduces boundary churn; a two-ring speculative margin
+prepares likely next columns. Dropped chunk or block-entity packets retry a fresh
+resident snapshot while retaining exactly one owned ticket. The initial view
+still fills progressively as terrain becomes ready; these bounds do not promise
+Vanilla/Paper throughput or complete loader parity.
 
 ## Explicit offline format3 migration
 

@@ -57,6 +57,7 @@ pub(super) async fn enter_play(
         compression,
         ctx,
         mut debug,
+        client_view_distance,
         ..
     } = conn;
     // Upgrade the session label from the peer address to the player name now that
@@ -184,7 +185,8 @@ pub(super) async fn enter_play(
     // the player's actual (restored) position so the first streaming pass centres on
     // where they rejoin: if they left far from spawn, their chunk is then streamed in
     // (centre-first) and the loading screen releases without waiting for a move.
-    let mut chunk_stream = ChunkStream::before_join(ctx);
+    let mut chunk_stream = ChunkStream::before_join(ctx, player);
+    chunk_stream.limit_view_distance(ctx.view_distance, client_view_distance);
     chunk_stream.observe(position);
 
     // Per-connection chat rate limiter, seeded at the current server tick. Lives
@@ -650,6 +652,13 @@ pub(super) async fn enter_play(
     // disconnect).
     observe_queue_len(&mut debug, ctx, &writer, budget.over_budget());
     debug.dump("disconnect");
+
+    // Cancel pending raw work before save/leave, even when the join kit failed.
+    // Already running immutable baselines may finish into the bounded LRU.
+    let _ = ctx
+        .commands
+        .send(SimCommand::CancelChunkPreparation { viewer: player })
+        .await;
 
     // Persist this player's state BEFORE releasing their chunk tickets, mirroring
     // the chunk-edit flush-before-release discipline (`release_chunks_acked` in the

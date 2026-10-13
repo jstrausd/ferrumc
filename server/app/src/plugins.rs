@@ -401,11 +401,9 @@ impl BlockEventDispatcher {
     /// Fires the [`PluginEvent::AfterBlockPlace`] notification to subscribers,
     /// returning any intents they emitted (e.g. messages) for the caller to route.
     ///
-    /// "After" means accepted at the intent boundary and routed to the simulation
-    /// (the `before_*` decision allowed/replaced the edit and the command was
-    /// sent), not tick-confirmed — the simulation may still reject the edit for
-    /// reach or chunk residency. A tick-confirmed variant is a documented
-    /// follow-up.
+    /// Placement notifications follow the actual successful simulation tick and
+    /// carry the applied primary position and final state, including merges.
+    /// Admission, prediction and gameplay refusals emit no notification.
     pub(crate) fn after_block_place(
         &self,
         player: PlayerId,
@@ -424,8 +422,8 @@ impl BlockEventDispatcher {
         )
     }
 
-    /// Fires the [`PluginEvent::AfterBlockBreak`] notification. See
-    /// [`after_block_place`](Self::after_block_place).
+    /// Fires the [`PluginEvent::AfterBlockBreak`] notification after accepted
+    /// intent routing. Break notifications are not yet tick-confirmed.
     pub(crate) fn after_block_break(
         &self,
         player: PlayerId,

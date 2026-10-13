@@ -73,7 +73,8 @@ pub enum GameInput {
     /// A player placed a block at `position`.
     ///
     /// Decoded upstream from a serverbound `UseItemOn`; `position` is the block
-    /// adjacent to the clicked face. The simulation validates the edit at the
+    /// selected by the host from the authoritative clicked/adjacent cells. The
+    /// simulation validates the edit at the
     /// tick boundary (the same checks as [`BlockBreak`](GameInput::BlockBreak))
     /// and, on acceptance, computes the *correct* placed block-state from
     /// `state` (the held item's default), `clicked_face`, `cursor_position`, and
@@ -117,8 +118,11 @@ pub enum GameInput {
     /// It is still validated by the same block-edit funnel as every other edit
     /// (actor present, target chunk resident, target within reach); on acceptance
     /// it emits a [`GameOutput::BlockChanged`] carrying the acting player so the
-    /// actor still gets the ack/resync. No fence-neighbour pass runs — an exact
-    /// write is authoritative, not a placement.
+    /// actor still gets the ack/resync. This ordinary world-intent variant never
+    /// emits a placement completion, even when client sequences repeat.
+    /// Player-attributed exact states must also
+    /// pass final-state player-body obstruction; spectators cannot apply them.
+    /// No placement refinement or fence-neighbour pass runs.
     SetBlockExact {
         /// Identity of the player on whose behalf the exact write is applied (the
         /// actor that receives the ack/resync).
@@ -129,6 +133,23 @@ pub enum GameInput {
         /// on accept.
         sequence: i32,
         /// The exact block-state to write, applied verbatim.
+        state: BlockStateId,
+    },
+    /// Explicit player placement replaced by a plugin-selected exact state.
+    ///
+    /// Applies the same exact-state validation and collision gate as
+    /// [`SetBlockExact`](Self::SetBlockExact), with one opt-in
+    /// [`PlayerPlacementResolved`](GameOutput::PlayerPlacementResolved) result.
+    /// Ordinary exact world intents must use `SetBlockExact` so a reused client
+    /// sequence cannot prematurely complete a different placement action.
+    SetBlockExactTracked {
+        /// Actor receiving the correction and acknowledgement.
+        player: PlayerId,
+        /// Absolute final primary cell.
+        position: BlockPos,
+        /// Original explicit placement action sequence.
+        sequence: i32,
+        /// Plugin-selected final exact state.
         state: BlockStateId,
     },
     /// Request a resync + acknowledgement for a block edit that was refused
@@ -349,6 +370,22 @@ pub enum GameOutput {
         /// The sign's full post-edit state (both faces). Boxed to keep
         /// [`GameOutput`] small (a [`Sign`] holds eight text lines).
         sign: Box<Sign>,
+    },
+    /// Final tick-boundary result of one player placement input.
+    ///
+    /// Emitted exactly once per `BlockPlace` or `SetBlockExactTracked` when the shard opts
+    /// into placement completions. It follows all edits/corrections for the
+    /// action, including multi-cell writes and relocated merges. Session routing
+    /// does not serialize this internal completion as a client packet.
+    PlayerPlacementResolved {
+        /// Actor, including an absent actor whose input was refused.
+        player: PlayerId,
+        /// Actual primary cell on success; original requested cell on refusal.
+        position: BlockPos,
+        /// Original action sequence.
+        sequence: i32,
+        /// Final primary state if applied; None for every refusal.
+        state: Option<BlockStateId>,
     },
     /// A player placed a sign and should be shown its editing screen.
     ///

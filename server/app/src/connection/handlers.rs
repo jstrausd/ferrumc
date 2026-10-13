@@ -94,6 +94,22 @@ pub(super) async fn handle_play_body(
     liveness: &mut ConnectionLiveness,
     pending_teleport: &mut PendingTeleport,
 ) -> anyhow::Result<()> {
+    let render_distance = match decode_client_render_distance(body) {
+        Ok(distance) => distance,
+        Err(err) => {
+            ctx.metrics.record_packet_decode_error(
+                PacketState::Play,
+                observe::body_decode_error_label(&err),
+            );
+            debug.dump("play_packet_decode_error");
+            return Err(err.into());
+        }
+    };
+    if let Some(radius) = render_distance {
+        liveness.valid_packet_observed(tokio::time::Instant::now())?;
+        chunk_stream.limit_view_distance(ctx.view_distance, Some(radius));
+        return Ok(());
+    }
     let decoded = match decode_play_body(body) {
         Ok(PlayBodyDecode::Modelled(decoded)) => decoded,
         Ok(PlayBodyDecode::Unmodelled { id }) => {
@@ -423,6 +439,29 @@ pub(super) async fn handle_play_body(
         })
         .await
         .map_err(|_| anyhow::anyhow!("simulation driver is gone"))
+}
+
+/// Protocol772 Play `ClientInformation` is id0x0d and has the same bounded body
+/// as configuration `ClientInformation`. Reuse its generated schema, not a new
+/// hand-maintained parser, and enforce complete-frame exhaustion.
+fn decode_client_render_distance(body: &[u8]) -> Result<Option<i8>, DecodeError> {
+    let state = ConnectionState::Play;
+    let mut reader = BoundedReader::new(body);
+    let id = reader
+        .read_var_int()
+        .map_err(|_| DecodeError::MalformedBody { state })?;
+    if id != 0x0d {
+        return Ok(None);
+    }
+    let settings = ferrumc_proto::generated::configuration::ClientInformation::decode(&mut reader)
+        .map_err(|_| DecodeError::MalformedBody { state })?;
+    if reader.remaining() != 0 {
+        return Err(DecodeError::TrailingBytes {
+            state,
+            trailing: reader.remaining(),
+        });
+    }
+    Ok(Some(settings.view_distance()))
 }
 
 /// Decodes one complete serverbound Play body to the generated schema's precision.
@@ -1116,9 +1155,9 @@ fn validated_placement_cursor(packet: &UseItemOn) -> Option<Vec3> {
 ///   decrements the stack) and refined by `compute_placement` — the only path that
 ///   runs it.
 ///
-/// On a non-denied placement any emitted intents are routed and the
-/// `after_block_place` notification fires with the FINAL state: the exact
-/// replacement for a Replace, or the driver-previewed computed state for an Allow.
+/// Emitted intents are routed after the placement result. Only an applied
+/// simulation result fires `after_block_place` with the final state. Admission,
+/// previews and gameplay refusals do not fire a successful after-hook.
 #[allow(clippy::too_many_arguments)] // one place step: inventory + plugin policy + placement context + I/O
 #[allow(clippy::too_many_lines)] // one place dispatch: deny + exact replace + refined allow arms
 async fn handle_use_item_on(
@@ -1138,13 +1177,29 @@ async fn handle_use_item_on(
     };
     let sequence = packet.sequence();
     // A malformed face index yields no target: just ack so the prediction ends.
-    let Some(position) = use_item_on_target(packet) else {
+    let Some(mut position) = use_item_on_target(packet) else {
         ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
         return Ok(());
     };
     // The clicked face shares `use_item_on_target`'s face decoding, so a `Some`
     // target guarantees a `Some` face; the fallback is unreachable but fails safe.
     let clicked_face = use_item_on_face(packet).unwrap_or(Direction::Up);
+
+    if let Some(held_state) = inventory.held().placeable_block() {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        ctx.commands
+            .send(SimCommand::PlacementTarget {
+                clicked: use_item_on_block(packet),
+                adjacent: position,
+                held_state: BlockStateId::new(held_state),
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+        position = reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver dropped placement target"))?;
+    }
 
     let perms = PermissionFacade::new(ctx.policy.permissions());
 
@@ -1303,35 +1358,37 @@ async fn handle_use_item_on(
                 )
                 .await;
             }
-            send_sim_command_accepted(
-                ctx,
-                SimCommand::SetBlockExact {
+            let (reply_tx, reply_rx) = oneshot::channel();
+            ctx.commands
+                .send(SimCommand::PlaceBlockExact {
                     player,
                     position,
                     sequence,
                     state: BlockStateId::new(block_state_id),
-                    acceptance: None,
-                },
-            )
-            .await?;
+                    reply: reply_tx,
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+            let applied = reply_rx
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?
+                .map_err(|err| anyhow::anyhow!("block placement admission rejected: {err}"))?;
             route_emitted_intents(ctx, player, writer, sequence, emitted, debug, compression)
                 .await?;
-            // The exact replacement state IS the final state, so the after-hook
-            // observes it directly (no refinement to wait on).
-            let after =
-                ctx.block_events
-                    .after_block_place(player, position, block_state_id, &perms);
+            let Some((applied_position, applied)) = applied else {
+                return Ok(());
+            };
+            let after = ctx.block_events.after_block_place(
+                player,
+                applied_position,
+                applied.as_u32(),
+                &perms,
+            );
             route_emitted_intents(ctx, player, writer, sequence, after, debug, compression).await
         }
         _ => {
-            // Allow: a player placement refined by compute_placement (the ONLY path
-            // that runs it). Creative places the held block without touching the
-            // stack; the clicked face, cursor hit point, and player yaw ride along
-            // so the sim derives the correct rotated/faced/halved state. After
-            // bounded shard admission, the driver previews that final state and
-            // replies before the tick, so the after-hook fires with the state the
-            // world will hold (e.g. a side-faced log's axis=x), not the held
-            // default.
+            // Await the real tick outcome, including collision and multi-cell
+            // validation, before notifying plugins that a placement succeeded.
             let (reply_tx, reply_rx) = oneshot::channel();
             ctx.commands
                 .send(SimCommand::PlaceBlock {
@@ -1352,9 +1409,15 @@ async fn handle_use_item_on(
                 .map_err(|err| anyhow::anyhow!("block placement rejected: {err}"))?;
             route_emitted_intents(ctx, player, writer, sequence, emitted, debug, compression)
                 .await?;
-            let after =
-                ctx.block_events
-                    .after_block_place(player, position, computed.as_u32(), &perms);
+            let Some((applied_position, computed)) = computed else {
+                return Ok(());
+            };
+            let after = ctx.block_events.after_block_place(
+                player,
+                applied_position,
+                computed.as_u32(),
+                &perms,
+            );
             route_emitted_intents(ctx, player, writer, sequence, after, debug, compression).await
         }
     }
@@ -2126,6 +2189,47 @@ mod tests {
     use crate::window::WindowState;
     use crate::world::build_world;
 
+    #[test]
+    fn client_information_render_distance_uses_protocol_772_and_rejects_malformed_frames() {
+        let packet = ferrumc_proto::generated::configuration::ClientInformation::new(
+            BoundedString::new("en_us".to_owned()).expect("locale"),
+            12,
+            0,
+            true,
+            127,
+            1,
+            false,
+            true,
+            0,
+        );
+        let mut body = BytesMut::new();
+        packet.encode(&mut body).expect("settings");
+        body[0] = 0x0d;
+        assert_eq!(
+            super::decode_client_render_distance(&body).expect("Play settings"),
+            Some(12)
+        );
+        for length in 0..body.len() {
+            assert!(
+                super::decode_client_render_distance(&body[..length]).is_err(),
+                "truncated length {length}"
+            );
+        }
+        let mut trailing = body.to_vec();
+        trailing.push(0);
+        assert!(super::decode_client_render_distance(&trailing).is_err());
+        let mut invalid_utf8 = body.to_vec();
+        invalid_utf8[2] = 0xff;
+        assert!(super::decode_client_render_distance(&invalid_utf8).is_err());
+        assert!(
+            super::decode_client_render_distance(&[0x0d, 0xff, 0xff, 0xff, 0xff, 0x7f]).is_err()
+        );
+        assert_eq!(
+            super::decode_client_render_distance(&[0x0c]).expect("tick end"),
+            None
+        );
+    }
+
     fn strict_body_disconnect_reason(body: &[u8]) -> DisconnectReason {
         let Err(error) = decode_play_body(body) else {
             panic!("body unexpectedly decoded");
@@ -2620,6 +2724,100 @@ mod tests {
             access: Arc::new(access),
             budget: config.budget(),
         }
+    }
+
+    #[tokio::test]
+    async fn chunk_and_block_entity_tail_drop_retries_snapshot_without_acquiring() {
+        use ferrumc_math::ChunkPos;
+        use ferrumc_net::{BatchLimits, OutboundPriority};
+        let (commands, mut inbox) = mpsc::channel(4);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let pos = ChunkPos::ORIGIN;
+        let snapshot = || crate::driver::StreamedChunk {
+            chunk: crate::world::chunk_packet(
+                pos,
+                &ferrumc_world::FlatWorldGenerator::new().generate(pos),
+            )
+            .expect("chunk"),
+            block_entities: vec![ClientboundPlayPacket::SetCenterChunk(SetCenterChunk::new(
+                0, 0,
+            ))],
+        };
+        let compression = CompressionState::disabled();
+        let mut trace = SessionDebug::new("retry");
+        let mut stream = ChunkStream::before_join(&ctx, PlayerId::offline("retry"));
+        let mut writer = PlayWriter::new(
+            ctx.limits,
+            PlayWriter::capacities_from(4, 4, 0, 4),
+            BatchLimits::default(),
+        );
+        super::super::chunk_stream::queue_streamed_chunk(
+            &ctx,
+            &mut writer,
+            &mut trace,
+            &compression,
+            &mut stream,
+            snapshot(),
+        );
+        assert!(
+            stream.loaded.contains(&pos),
+            "tail drop never loses ticket ownership"
+        );
+        assert!(!stream.sent.contains(&pos));
+        writer = PlayWriter::new(
+            ctx.limits,
+            PlayWriter::capacities_from(4, 4, 1, 4),
+            BatchLimits::default(),
+        );
+        super::super::chunk_stream::queue_streamed_chunk(
+            &ctx,
+            &mut writer,
+            &mut trace,
+            &compression,
+            &mut stream,
+            snapshot(),
+        );
+        assert!(
+            !stream.sent.contains(&pos),
+            "dropped block entity also leaves delivery pending"
+        );
+        assert_eq!(writer.queued_len(OutboundPriority::World), 1);
+        writer.drain_batch(&compression).expect("drain chunk");
+        writer = PlayWriter::with_defaults(ctx.limits);
+        let driver = async {
+            let SimCommand::ResendChunks { positions, reply } =
+                inbox.recv().await.expect("snapshot request")
+            else {
+                panic!("must not reacquire")
+            };
+            assert_eq!(positions, [pos]);
+            assert!(reply.send(vec![snapshot()]).is_ok());
+            let SimCommand::StreamChunks {
+                load,
+                unload,
+                reply,
+                ..
+            } = inbox.recv().await.expect("ordinary stream")
+            else {
+                panic!("stream")
+            };
+            assert!(load.is_empty(), "held column is not acquired twice");
+            assert_eq!(unload, []);
+            assert!(reply.send(Vec::new()).is_ok());
+        };
+        let pump = apply_chunk_stream(
+            &ctx,
+            &mut writer,
+            &mut stream,
+            &mut trace,
+            &compression,
+            None,
+        );
+        let (result, ()) = tokio::join!(pump, driver);
+        result.expect("retry succeeds");
+        assert_eq!(stream.loaded.len(), 1);
+        assert!(stream.sent.contains(&pos));
+        assert_eq!(writer.queued_len(OutboundPriority::World), 2);
     }
 
     /// Drives the complete decode/dispatch path without sockets while retaining
@@ -3720,6 +3918,11 @@ mod tests {
             while let Some(command) = commands_rx.recv().await {
                 command_calls_for_task.total.fetch_add(1, Ordering::Relaxed);
                 match command {
+                    SimCommand::PlacementTarget {
+                        adjacent, reply, ..
+                    } => {
+                        let _ = reply.send(adjacent);
+                    }
                     SimCommand::OpenContainer { reply, .. } => {
                         command_calls_for_task
                             .open_container
@@ -3759,7 +3962,7 @@ mod tests {
                                 cursor: cursor_position,
                                 yaw: player_yaw,
                             });
-                        let _ = reply.send(Ok(computed));
+                        let _ = reply.send(Ok(Some((position, computed))));
                     }
                     _ => panic!("placement test emitted an unexpected command"),
                 }
@@ -3937,7 +4140,7 @@ mod tests {
         assert_eq!(plugin_calls.interact.load(Ordering::Relaxed), 2);
         assert_eq!(plugin_calls.before_place.load(Ordering::Relaxed), 2);
         assert_eq!(plugin_calls.after_place.load(Ordering::Relaxed), 2);
-        assert_eq!(command_calls.total.load(Ordering::Relaxed), 4);
+        assert_eq!(command_calls.total.load(Ordering::Relaxed), 6);
         assert_eq!(command_calls.open_container.load(Ordering::Relaxed), 2);
         assert_eq!(command_calls.place_block.load(Ordering::Relaxed), 2);
         assert_eq!(command_calls.preview.load(Ordering::Relaxed), 2);

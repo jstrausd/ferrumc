@@ -250,11 +250,12 @@ impl ChunkLightData {
 
     /// Builds conservative vertical skylight from actual blocks.
     ///
-    /// Open air has sky level 15 until the first non-air block, after which the
-    /// column is dark. This omits lateral propagation, transparent-block handling
-    /// and emitted block light; it is a terrain-preview rendering approximation.
+    /// Open air and short grass have sky level 15 until the first other block,
+    /// after which the column is dark. This omits lateral propagation, other
+    /// transparent blocks and emitted light; it is a preview approximation.
     #[must_use]
     pub fn vertical_sky(chunk: &Chunk) -> Self {
+        let grass = ferrumc_registry::block_state::block_default_state("short_grass");
         let mut light = Self::full_bright();
         light.sky_light = vec![vec![0; LIGHT_SECTION_BYTES]; LIGHT_SECTION_COUNT];
         light.sky_light[LIGHT_SECTION_COUNT - 1].fill(0xFF);
@@ -266,7 +267,8 @@ impl ChunkLightData {
                         let Some(pos) = ferrumc_math::LocalBlockPos::new(x, y, z) else {
                             continue;
                         };
-                        if chunk.sections()[section].get(pos).is_air() && open {
+                        let state = chunk.sections()[section].get(pos);
+                        if (state.is_air() || Some(state.as_u32()) == grass) && open {
                             let index = usize::from(y) * 256 + usize::from(z) * 16 + usize::from(x);
                             light.sky_light[section + 1][index / 2] |= 15 << ((index % 2) * 4);
                         } else {

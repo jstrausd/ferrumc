@@ -41,6 +41,8 @@ pub enum NaturalGenerationStage {
     Surface,
     /// Accepted cold carver runtime.
     Carvers,
+    /// Explicit placed-feature subset preview.
+    Features,
     /// Complete producer output installation into a chunk value.
     Installation,
 }
@@ -68,7 +70,7 @@ struct Binding {
 /// budgets. Revision 1 omits placed features, trees, structures, fluid ticks and
 /// full lighting; it is a terrain preview. Clones share immutable seed bindings.
 #[derive(Clone)]
-pub struct NaturalWorldGenerator(Arc<Binding>);
+pub struct NaturalWorldGenerator(Arc<Binding>, Option<Arc<crate::grass::GrassPreview>>);
 impl std::fmt::Debug for NaturalWorldGenerator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NaturalWorldGenerator")
@@ -128,26 +130,100 @@ impl NaturalWorldGenerator {
             CarverBindBudget::new(90).map_err(|e| refusal(S, e))?,
         )
         .map_err(|e| refusal(S, e))?;
-        Ok(Self(Arc::new(Binding {
-            seed,
-            settings,
-            source,
-            geometry,
-            router,
-            tree,
-            temperatures,
-            rules,
-            columns,
-            carvers,
-        })))
+        Ok(Self(
+            Arc::new(Binding {
+                seed,
+                settings,
+                source,
+                geometry,
+                router,
+                tree,
+                temperatures,
+                rules,
+                columns,
+                carvers,
+            }),
+            None,
+        ))
     }
-    /// Returns the distinct revision-1 natural terrain preview identity.
+    /// Binds revision 2: original plains/forest short-grass patches with isolated sources.
+    ///
+    /// The explicit subset omits trees, other plants, placed ores and structures.
+    /// A bounded immutable raw-terrain cache is shared by clones. Revision 1 remains unchanged.
+    pub fn with_grass_preview(seed: WorldSeed) -> Result<Self, WorldError> {
+        let mut generator = Self::new(seed)?;
+        generator.1 = Some(Arc::new(crate::grass::GrassPreview::new()?));
+        Ok(generator)
+    }
+    /// Returns the selected immutable terrain-preview revision identity.
     #[must_use]
     pub fn identity(&self) -> GenerationIdentity {
-        GenerationIdentity::natural_overworld(self.0.seed)
+        if self.1.is_some() {
+            GenerationIdentity::natural_overworld_with_grass(self.0.seed)
+        } else {
+            GenerationIdentity::natural_overworld(self.0.seed)
+        }
     }
     /// Generates a complete real chunk or returns the refusing producer's error.
     pub fn try_generate_chunk(&self, center: ChunkPos) -> Result<Chunk, WorldError> {
+        if let Some(grass) = &self.1 {
+            return grass.generate(self, self.0.seed, center);
+        }
+        self.generate_raw_chunk(center)
+    }
+    #[cfg(test)]
+    pub(crate) fn grass_preview(&self) -> Option<&crate::grass::GrassPreview> {
+        self.1.as_deref()
+    }
+    pub(crate) fn grass_plain_count(&self, source: ChunkPos) -> Result<usize, WorldError> {
+        let noise = self
+            .0
+            .temperatures
+            .info_noise(
+                f64::from(source.x().wrapping_mul(16)) / 200.0,
+                f64::from(source.z().wrapping_mul(16)) / 200.0,
+            )
+            .map_err(|e| refusal(NaturalGenerationStage::Features, e))?;
+        Ok(if noise < -0.8 { 5 } else { 10 })
+    }
+    pub(crate) fn sample_center_biomes(
+        &self,
+        center: ChunkPos,
+    ) -> Result<Vec<ferrumc_registry::biome::BiomeResourceId>, WorldError> {
+        let b = &self.0;
+        let mut source = BiomeSourceSession::from_multinoise(BiomeSelectionSession::new(
+            Arc::clone(&b.tree),
+            BiomeWorkBudget::new(MAX_BIOME_SELECTION_WORK)
+                .map_err(|e| refusal(NaturalGenerationStage::Biomes, e))?,
+        ));
+        let mut result = None;
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                let pos = ChunkPos::new(center.x().wrapping_add(dx), center.z().wrapping_add(dz));
+                let mut noise = b
+                    .router
+                    .fresh_paper_noise_chunk(
+                        pos,
+                        NoiseChunkWorkBudget::new(MAX_NOISE_CHUNK_WORK)
+                            .map_err(|e| refusal(NaturalGenerationStage::Biomes, e))?,
+                    )
+                    .map_err(|e| refusal(NaturalGenerationStage::Biomes, e))?;
+                let array = source
+                    .sample_chunk_biomes(&mut noise, b.geometry)
+                    .map_err(|e| refusal(NaturalGenerationStage::Biomes, e))?;
+                if pos == center {
+                    result = Some(array.values().to_vec());
+                }
+            }
+        }
+        result.ok_or_else(|| {
+            refusal(
+                NaturalGenerationStage::Biomes,
+                "missing center biome projection",
+            )
+        })
+    }
+    pub(crate) fn generate_raw_chunk(&self, center: ChunkPos) -> Result<Chunk, WorldError> {
         use NaturalGenerationStage as S;
         let b = &self.0;
         let budget = || NoiseChunkWorkBudget::new(MAX_NOISE_CHUNK_WORK);
@@ -288,7 +364,7 @@ impl FallibleChunkGenerator for NaturalWorldGenerator {
 pub enum RuntimeWorldGenerator {
     /// Existing seed-independent fixed-layer profile.
     Flat(FlatWorldGenerator),
-    /// Real terrain preview through the accepted carver runtime.
+    /// Real terrain preview through carvers, optionally with the explicit grass subset.
     Natural(NaturalWorldGenerator),
 }
 impl RuntimeWorldGenerator {
@@ -300,6 +376,10 @@ impl RuntimeWorldGenerator {
     /// Binds real normal Overworld terrain for the selected seed.
     pub fn natural(seed: WorldSeed) -> Result<Self, WorldError> {
         NaturalWorldGenerator::new(seed).map(Self::Natural)
+    }
+    /// Selects the explicit revision-2 original short-grass subset preview.
+    pub fn natural_with_grass(seed: WorldSeed) -> Result<Self, WorldError> {
+        NaturalWorldGenerator::with_grass_preview(seed).map(Self::Natural)
     }
     /// Returns the selected complete baseline identity.
     #[must_use]

@@ -363,8 +363,8 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
     // protected area; both go through because the admin holds bypass.
     send_break(&mut admin, (8, 63, 8)).await?;
     observe_block_update(&mut viewer, (8, 63, 8), 0).await?;
-    send_place_on_top(&mut admin, (9, 63, 8)).await?;
-    observe_block_update(&mut viewer, (9, 64, 8), STONE_STATE).await?;
+    send_place_on_top(&mut admin, (11, 63, 8)).await?;
+    observe_block_update(&mut viewer, (11, 64, 8), STONE_STATE).await?;
 
     // Point 9 (veto): the griefer's break inside the protected area is vetoed.
     // Pipelined ahead of a far move (teleport) so the move fences the (absent)
@@ -418,6 +418,8 @@ async fn mvp_end_to_end() {
     let config = AppConfig::from_toml_str(&format!(
         "bind = \"127.0.0.1:0\"\n\
          spawn_chunk_radius = 1\n\
+         view_distance = 1\n\
+         simulation_distance = 1\n\
          builtin_plugins = true\n\
          spawn_protect_radius = {PROTECT_RADIUS}\n\
          spawn_protect_bypass = [\"Admin\"]\n\

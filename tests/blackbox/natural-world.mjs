@@ -28,13 +28,15 @@ async function bounded(promise, ms, label) {
 }
 function inspectColumn(chunk, x, z, excluded) {
   const digest = crypto.createHash('sha256'), terrain = crypto.createHash('sha256'), biomeHash = crypto.createHash('sha256');
-  const heights = [], biomes = new Set(); let solid = 0, undergroundAir = 0;
+  const excludedCells = Array.isArray(excluded) ? excluded : excluded ? [excluded] : [];
+  const heights = [], biomes = new Set(); let solid = 0, undergroundAir = 0, shortGrass = 0;
   const data = Buffer.alloc(4);
   for (let lz = 0; lz < 16; lz++) for (let lx = 0; lx < 16; lx++) {
     let top;
     for (let y = 319; y >= -64; y--) {
       const state = chunk.getBlockStateId(new Vec3(lx, y, lz)); data.writeUInt32BE(state); digest.update(data);
-      if (!excluded || excluded.x !== x * 16 + lx || excluded.y !== y || excluded.z !== z * 16 + lz) terrain.update(data);
+      if (!excludedCells.some(p => p.x === x * 16 + lx && p.y === y && p.z === z * 16 + lz)) terrain.update(data);
+      if (state === registry.blocksByName.short_grass.defaultState) shortGrass++;
       if (state !== 0) { solid++; if (top === undefined) top = y; } else if (y < 40 && y > -50) undergroundAir++;
     }
     assert(top !== undefined, 'natural column has material'); heights.push(top);
@@ -45,7 +47,7 @@ function inspectColumn(chunk, x, z, excluded) {
     data.writeUInt32BE(biome); biomeHash.update(data); biomes.add(biome);
   }
   assert(solid > 256, 'real terrain blocks'); assert(heights.some(y => y !== 63), 'not flat-v1');
-  return { chunk: [x, z], hash: digest.digest('hex'), terrainHash: terrain.digest('hex'), biomeHash: biomeHash.digest('hex'), heights: [Math.min(...heights), Math.max(...heights)], biomes: [...biomes].sort((a, b) => a - b), solid, undergroundAir };
+  return { chunk: [x, z], hash: digest.digest('hex'), terrainHash: terrain.digest('hex'), biomeHash: biomeHash.digest('hex'), heights: [Math.min(...heights), Math.max(...heights)], biomes: [...biomes].sort((a, b) => a - b), solid, undergroundAir, shortGrass };
 }
 if (process.argv.includes('--self-test')) {
   const chunk = new Chunk({ x: 0, z: 0 });
@@ -64,14 +66,16 @@ if (process.argv.includes('--self-test')) {
   const dir = process.env.MC_RUN_DIR ? path.resolve(process.env.MC_RUN_DIR) : fs.mkdtempSync(path.join(os.tmpdir(), 'ferrumc-natural-world-'));
   const port = Number(process.env.MC_PORT || 25567);
   assert(Number.isInteger(port) && port > 0 && port <= 65535, 'MC_PORT must be 1..65535');
+  const viewDistance = Number(process.env.MC_NATURAL_VIEW || 1);
+  assert(Number.isInteger(viewDistance) && viewDistance >= 1 && viewDistance <= 8, 'test view distance 1..8');
   const exploreEnabled = process.env.MC_NATURAL_EXPLORE !== '0';
   fs.mkdirSync(dir, { recursive: true });
   assert(!fs.existsSync(path.join(dir, 'world')), 'use a fresh MC_RUN_DIR; artifacts are preserved for diagnosis');
   const config = path.join(dir, 'config.toml');
   fs.writeFileSync(config, [
     `bind = ${JSON.stringify(`127.0.0.1:${port}`)}`, `world_dir = ${JSON.stringify(path.join(dir, 'world'))}`,
-    'view_distance = 1', 'simulation_distance = 1', 'spawn_chunk_radius = 0', 'spawn = [8.0, 64.0, 8.0]',
-    'dashboard_enabled = false', 'builtin_plugins = false', 'ops = ["NaturalProbe"]', '[world]', 'seed = 0', 'preset = "ferrumc_natural_preview"', '',
+    `view_distance = ${viewDistance}`, 'simulation_distance = 1', 'spawn_chunk_radius = 0', 'spawn = [8.0, 64.0, 8.0]',
+    'dashboard_enabled = false', 'builtin_plugins = false', 'ops = ["NaturalProbe"]', '[world]', 'seed = 0', `preset = ${JSON.stringify(process.env.MC_NATURAL_PRESET || 'ferrumc_natural_preview')}`, '',
   ].join('\n'));
   console.log(`Natural preview artifacts: ${dir}\nBinary SHA-256: ${binaryHash}`);
   let child, exited, serverError;
@@ -123,19 +127,20 @@ if (process.argv.includes('--self-test')) {
   }
   async function connect() {
     const client = mc.createClient({ host: '127.0.0.1', port, username: 'NaturalProbe', version: '1.21.8', auth: 'offline', keepAlive: false });
-    const state = { columns: new Map(), changes: new Map(), acks: new Set(), slots: new Map(), positionRevision: 0, slotRevision: 0, expectedEnd: false };
+    const state = { columns: new Map(), changes: new Map(), acks: new Set(), slots: new Map(), receivedColumns: new Map(), unloads: [], timeUpdates: [], positionRevision: 0, slotRevision: 0, expectedEnd: false };
     const connection = { client, state }; connections.add(connection);
     connection.ended = new Promise(resolve => client.once('end', reason => { state.ended = true; state.reason = reason; resolve(); }));
     client.on('error', error => { if (!state.expectedEnd) state.error = error; });
     for (const packet of ['kick_disconnect', 'disconnect']) client.on(packet, p => { if (!state.expectedEnd) state.error = new Error(JSON.stringify(p)); });
     client.on('keep_alive', p => client.write('keep_alive', { keepAliveId: p.keepAliveId }));
+    client.on('update_time', p => state.timeUpdates.push({ age: p.age.toString(), receivedAt: Date.now() }));
     client.on('login', p => { state.mode = p.worldState?.gamemode; });
     client.on('position', p => { state.position = { x: p.x, y: p.y, z: p.z }; state.positionRevision++; client.write('teleport_confirm', { teleportId: p.teleportId }); });
     client.on('map_chunk', p => {
-      try { const chunk = new Chunk({ x: p.x, z: p.z }); chunk.load(p.chunkData, true, false); state.columns.set(`${p.x},${p.z}`, chunk); }
+      try { const chunk = new Chunk({ x: p.x, z: p.z }); chunk.load(p.chunkData, true, false); state.columns.set(`${p.x},${p.z}`, chunk); state.receivedColumns.set(`${p.x},${p.z}`, (state.receivedColumns.get(`${p.x},${p.z}`) || 0) + 1); }
       catch (error) { state.error = error; }
     });
-    client.on('unload_chunk', p => state.columns.delete(`${p.chunkX},${p.chunkZ}`));
+    client.on('unload_chunk', p => { state.unloads.push(`${p.chunkX},${p.chunkZ}`); state.columns.delete(`${p.chunkX},${p.chunkZ}`); });
     client.on('block_change', p => {
       state.changes.set(blockKey(p.location), p.type);
       state.columns.get(columnKey(p.location))?.setBlockStateId(local(p.location), p.type);
@@ -158,6 +163,17 @@ if (process.argv.includes('--self-test')) {
     await until(() => connection.state.positionRevision > before, 'operator exploration teleport', connection, 30000);
     assert.deepEqual(connection.state.position, position, 'server-confirmed exploration position');
   }
+  async function convergeView(connection, position, label) {
+    const cx = Math.floor(position.x / 16), cz = Math.floor(position.z / 16), wanted = [];
+    for (let z = cz - viewDistance; z <= cz + viewDistance; z++) for (let x = cx - viewDistance; x <= cx + viewDistance; x++) wanted.push(`${x},${z}`);
+    const started = Date.now();
+    await until(() => wanted.every(key => connection.state.columns.has(key)), `${label}: complete ${(2 * viewDistance + 1) ** 2}-column view`, connection, 300000);
+    const firstCompleteAt = Date.now() - started;
+    const nextTimeUpdate = connection.state.timeUpdates.length + 2;
+    await until(() => connection.state.timeUpdates.length >= nextTimeUpdate, `${label}: live ticks and retained view`, connection, 30000);
+    assert(wanted.every(key => connection.state.columns.has(key)), 'all desired chunks remain visible while stationary');
+    return { count: wanted.length, milliseconds: firstCompleteAt };
+  }
   async function explore(connection, spawnPosition) {
     if (!exploreEnabled) return { status: 'SKIPPED_MC_NATURAL_EXPLORE_0' };
     const evidence = [];
@@ -165,6 +181,7 @@ if (process.argv.includes('--self-test')) {
       const position = { x, y: spawnPosition.y + 10, z: 8 }, cx = Math.floor(x / 16);
       await teleport(connection, position);
       await until(() => connection.state.columns.has(`${cx},0`), `exploration chunk ${cx},0`, connection);
+      await convergeView(connection, position, `stationary exploration ${cx},0`);
       evidence.push(inspectColumn(connection.state.columns.get(`${cx},0`), cx, 0));
     }
     await teleport(connection, spawnPosition);
@@ -192,27 +209,67 @@ if (process.argv.includes('--self-test')) {
     client.write('set_creative_slot', { slot: 36, item: { itemCount: 1, itemId: markerItem.id, addedComponentCount: 0, removedComponentCount: 0, components: [], removeComponents: [] } });
     await until(() => state.slots.get(36)?.revision > before, 'creative gold-block slot echo', connection, 30000);
     assert.equal(state.slots.get(36).item.itemId, markerItem.id, 'authoritative creative item');
-    const sequence = 1;
+    const collisions = [];
+    for (const [offset, sequence] of [[0, 1], [1, 2]]) {
+      const bodyCell = { x: Math.floor(state.position.x), y: Math.floor(state.position.y) + offset, z: Math.floor(state.position.z) };
+      const column = state.columns.get(columnKey(bodyCell));
+      const beforeState = column.getBlockStateId(local(bodyCell));
+      assert(['air', 'short_grass'].includes(column.getBlock(local(bodyCell)).name), 'body cell starts passable');
+      state.changes.delete(blockKey(bodyCell));
+      client.write('block_place', { hand: 0, location: { ...bodyCell, y: bodyCell.y - 1 }, direction: 1, cursorX: 0.5, cursorY: 1, cursorZ: 0.5, insideBlock: false, worldBorderHit: false, sequence });
+      await until(() => state.changes.has(blockKey(bodyCell)) && state.acks.has(sequence), `body collision ${offset} correction and ACK`, connection, 30000);
+      assert.equal(state.changes.get(blockKey(bodyCell)), beforeState, 'refused placement sends original authoritative block');
+      assert.equal(column.getBlockStateId(local(bodyCell)), beforeState, 'no solid block inserted into player');
+      assert.equal(state.slots.get(36).item.itemCount, 1, 'creative held stack retained');
+      collisions.push({ position: bodyCell, sequence, state: beforeState });
+    }
+    const sequence = 3;
     client.write('block_place', { hand: 0, location: { ...marker, y: marker.y - 1 }, direction: 1, cursorX: 0.5, cursorY: 1, cursorZ: 0.5, insideBlock: false, worldBorderHit: false, sequence });
     await until(() => state.changes.has(blockKey(marker)) && state.acks.has(sequence), 'gold-block update and action ACK', connection, 30000);
     assert.equal(state.changes.get(blockKey(marker)), markerBlock.defaultState, 'independent gold-block state id');
     assert.equal(state.columns.get('0,0').getBlock(local(marker)).name, 'gold_block', 'actual creative edit applied');
-    return { position: marker, stateId: markerBlock.defaultState, name: 'gold_block', sequence };
+    return { collisions, position: marker, stateId: markerBlock.defaultState, name: 'gold_block', sequence };
+  }
+  function grassCell(connection) {
+    const column = connection.state.columns.get('0,0');
+    for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) for (let y = -64; y < 319; y++) {
+      if (column.getBlockStateId(new Vec3(x, y, z)) === registry.blocksByName.short_grass.defaultState) return { x, y, z };
+    }
+    throw new Error('original grass subset missing from seed-0 origin');
+  }
+  async function replaceGrass(connection, clicked, spawnPosition) {
+    const adjacent = { ...clicked, y: clicked.y + 1 };
+    const column = connection.state.columns.get('0,0'), adjacentState = column.getBlockStateId(local(adjacent));
+    await teleport(connection, { x: clicked.x + 0.5, y: clicked.y + 2, z: clicked.z + 0.5 });
+    const sequence = 4;
+    connection.client.write('block_place', { hand: 0, location: clicked, direction: 1, cursorX: 0.5, cursorY: 0.5, cursorZ: 0.5, insideBlock: false, worldBorderHit: false, sequence });
+    await until(() => connection.state.changes.has(blockKey(clicked)) && connection.state.acks.has(sequence), 'grass replacement and ACK', connection, 30000);
+    assert.equal(column.getBlockStateId(local(clicked)), markerBlock.defaultState, 'solid block replaces clicked grass');
+    assert.equal(column.getBlockStateId(local(adjacent)), adjacentState, 'replacement does not write into adjacent cell');
+    await teleport(connection, spawnPosition);
+    return { position: clicked, adjacent, sequence, stateId: markerBlock.defaultState };
   }
   try {
     await start(1);
     const firstClient = await connect(), spawnPosition = { ...firstClient.state.position }, marker = chooseMarker(firstClient);
-    const before = inspectColumn(firstClient.state.columns.get('0,0'), 0, 0, marker);
+    const firstView = await convergeView(firstClient, spawnPosition, 'initial standing player');
+    const grass = process.env.MC_NATURAL_PRESET === 'ferrumc_natural_grass_preview' ? grassCell(firstClient) : null;
+    const excluded = [marker, grass].filter(Boolean);
+    const before = inspectColumn(firstClient.state.columns.get('0,0'), 0, 0, excluded);
+    if (process.env.MC_NATURAL_PRESET === 'ferrumc_natural_grass_preview') assert(before.shortGrass > 0, 'original grass subset is visible in the seed-0 origin column');
     const edit = await placeMarker(firstClient, marker);
-    const edited = inspectColumn(firstClient.state.columns.get('0,0'), 0, 0, marker);
+    if (grass) edit.grassReplacement = await replaceGrass(firstClient, grass, spawnPosition);
+    const edited = inspectColumn(firstClient.state.columns.get('0,0'), 0, 0, excluded);
     assert.notEqual(before.hash, edited.hash, 'creative edit changes actual terrain');
-    assert.equal(before.terrainHash, edited.terrainHash, 'edit changes exactly its marker cell');
+    assert.equal(before.terrainHash, edited.terrainHash, 'edits change exactly the tested marker cells');
     const firstExploration = await explore(firstClient, spawnPosition);
     await close(firstClient); await stop();
     await start(2);
     const secondClient = await connect();
-    const restarted = inspectColumn(secondClient.state.columns.get('0,0'), 0, 0, marker);
+    const secondView = await convergeView(secondClient, spawnPosition, 'restarted standing player');
+    const restarted = inspectColumn(secondClient.state.columns.get('0,0'), 0, 0, excluded);
     assert.equal(secondClient.state.columns.get('0,0').getBlock(local(marker)).name, 'gold_block', 'saved creative edit streams after restart');
+    if (grass) assert.equal(secondClient.state.columns.get('0,0').getBlock(local(grass)).name, 'gold_block', 'grass replacement survives restart');
     assert.equal(edited.hash, restarted.hash, 'all edited natural blocks survive restart');
     assert.equal(before.terrainHash, restarted.terrainHash, 'untouched natural terrain survives restart');
     assert.equal(before.biomeHash, restarted.biomeHash, 'every stored biome survives restart');
@@ -220,7 +277,7 @@ if (process.argv.includes('--self-test')) {
     const secondExploration = await explore(secondClient, spawnPosition);
     assert.deepEqual(firstExploration, secondExploration, 'positive and negative natural exploration regenerates identically');
     await close(secondClient); await stop();
-    const evidence = { status: 'PASS_NATURAL_PROTOCOL_EDIT_RESTART', scope: 'natural preview terrain and stored biomes, creative edit, graceful restart; no full Survival/Paper acceptance', binaryHash, spawn: spawnPosition, edit, before, edited, restarted, firstExploration, secondExploration };
+    const evidence = { status: 'PASS_NATURAL_PROTOCOL_EDIT_RESTART', scope: 'natural preview terrain and stored biomes, creative edit, graceful restart; no full Survival/Paper acceptance', binaryHash, viewDistance, firstView, secondView, spawn: spawnPosition, edit, before, edited, restarted, firstExploration, secondExploration };
     fs.writeFileSync(path.join(dir, 'acceptance.json'), JSON.stringify(evidence, null, 2));
     console.log(JSON.stringify(evidence));
   } finally {

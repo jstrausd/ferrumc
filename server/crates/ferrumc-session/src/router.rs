@@ -1237,7 +1237,8 @@ impl SessionRouter {
                     );
                 }
             }
-            // A despawn carries no wire packet here; leave handling lives in
+            // Internal PlayerPlacementResolved has no packet/disconnect effect.
+            // A despawn likewise carries no packet; leave handling lives in
             // disconnect_player.
             _ => {}
         }
@@ -1963,6 +1964,7 @@ impl SessionRouter {
             GameInput::BlockBreak { position, .. }
             | GameInput::BlockPlace { position, .. }
             | GameInput::SetBlockExact { position, .. }
+            | GameInput::SetBlockExactTracked { position, .. }
             | GameInput::RejectBlockEdit { position, .. } => {
                 self.binding_for_block(*position, entry.shard)
             }
@@ -2149,6 +2151,39 @@ mod tests {
     }
 
     #[test]
+    fn tracked_exact_routes_to_block_owner_and_internal_completion_has_no_wire_effect() {
+        let mut router = SessionRouter::new();
+        let mut home = router.register_shard(ShardPos::new(0, 0));
+        let mut owner = router.register_shard(ShardPos::new(1, 0));
+        let actor = player("tracked-exact-owner");
+        let mut handle = router
+            .join_player(actor, "tracked-exact-owner", spawn_pos())
+            .unwrap();
+        home.try_recv().unwrap(); // Join belongs to the home shard.
+        while handle.try_recv().is_some() {}
+        let target = BlockPos::new(128, 65, 8);
+        let input = GameInput::SetBlockExactTracked {
+            player: actor,
+            position: target,
+            sequence: 7,
+            state: BlockStateId::new(1),
+        };
+        router.route_game_input_owned(actor, input.clone()).unwrap();
+        assert_eq!(owner.try_recv().unwrap(), input);
+        assert!(home.try_recv().is_err());
+        assert_eq!(
+            router.route_output(&GameOutput::PlayerPlacementResolved {
+                player: actor,
+                position: target,
+                sequence: 7,
+                state: Some(BlockStateId::new(1)),
+            }),
+            [] as [PlayerId; 0]
+        );
+        assert!(handle.try_recv().is_none());
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)] // The table intentionally enumerates every current input variant.
     fn input_delivery_policy_classifies_every_current_variant() {
         let p = player("policy");
@@ -2201,6 +2236,16 @@ mod tests {
             ),
             (
                 GameInput::SetBlockExact {
+                    player: p,
+                    position: block,
+                    sequence: 3,
+                    state: BlockStateId::new(2),
+                },
+                DeliveryPolicy::Authoritative,
+                DeliveryLane::Data,
+            ),
+            (
+                GameInput::SetBlockExactTracked {
                     player: p,
                     position: block,
                     sequence: 3,

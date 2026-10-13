@@ -19,9 +19,9 @@ use serde::Deserialize;
 
 /// A supported `FerrumC` generator profile, independent of the numeric seed.
 ///
-/// The only accepted TOML spelling is `"ferrumc_flat"`: the implemented fixed
-/// flat profile, not Vanilla superflat settings or a claim of noise generation.
-/// Unknown or unimplemented preset names fail deserialization. This declarative
+/// Accepts the fixed flat profile and explicitly experimental natural previews.
+/// Preview names describe their implemented subset, not complete Survival.
+/// Unknown preset names fail deserialization. This declarative
 /// type does not depend on world/storage/simulation or construct a generator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[non_exhaustive]
@@ -32,6 +32,9 @@ pub enum WorldGenerationPreset {
     /// Experimental natural Overworld terrain; features and Survival remain incomplete.
     #[serde(rename = "ferrumc_natural_preview")]
     FerrumcNaturalPreview,
+    /// Natural terrain with an isolated original short-grass feature subset.
+    #[serde(rename = "ferrumc_natural_grass_preview")]
+    FerrumcNaturalGrassPreview,
 }
 
 /// Declarative world-content configuration, deserialized from the `[world]` TOML

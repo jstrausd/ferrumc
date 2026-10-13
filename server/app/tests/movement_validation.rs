@@ -53,8 +53,8 @@ const ACCEPTED_RESIDENT_CHUNKS: usize = 35;
 const CLEAN_RESIDENT_CHUNKS: usize = 25;
 /// Two 25-column join kits plus the accepted shift's ten entered columns.
 const ACCEPTED_SENT_MIN: u64 = 60;
-/// The accepted two-chunk shift releases ten columns from the actor's old square.
-const ACCEPTED_UNLOADED_MIN: u64 = 10;
+/// The retention ring keeps old x=-1; only five x=-2 columns retire.
+const ACCEPTED_UNLOADED_MIN: u64 = 5;
 
 /// Exact float tolerance; every accepted coordinate is binary-representable.
 const EPSILON: f64 = 1e-9;
@@ -198,13 +198,13 @@ async fn send_accepted(client: &mut TestClient) -> anyhow::Result<()> {
         .await
 }
 
-/// Waits for the accepted move's exact stream centre and all ten entered/departed
-/// columns from its two-chunk shift.
+/// Waits for the accepted move's exact stream centre, ten entering columns and
+/// five departures beyond the new one-ring retention margin.
 async fn expect_accepted_stream(client: &mut TestClient) -> anyhow::Result<()> {
     let mut centered = false;
     let mut entered = BTreeSet::new();
     let mut departed = BTreeSet::new();
-    while !(centered && entered.len() == 10 && departed.len() == 10) {
+    while !(centered && entered.len() == 10 && departed.len() == 5) {
         match client.next_play().await? {
             ClientboundPlayPacket::SetCenterChunk(center)
                 if ChunkPos::new(center.chunk_x(), center.chunk_z()) == ACCEPTED_CHUNK =>
@@ -214,7 +214,7 @@ async fn expect_accepted_stream(client: &mut TestClient) -> anyhow::Result<()> {
             ClientboundPlayPacket::ChunkDataAndLight(column) if column.x() >= 3 => {
                 entered.insert(ChunkPos::new(column.x(), column.z()));
             }
-            ClientboundPlayPacket::UnloadChunk(column) if column.chunk_x() < 0 => {
+            ClientboundPlayPacket::UnloadChunk(column) if column.chunk_x() < -1 => {
                 departed.insert(ChunkPos::new(column.chunk_x(), column.chunk_z()));
             }
             _ => {}

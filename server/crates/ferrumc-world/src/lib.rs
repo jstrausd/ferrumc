@@ -51,6 +51,7 @@ mod dirty;
 mod error;
 mod generation;
 mod generator;
+mod grass;
 mod heightmap;
 mod natural;
 mod network;

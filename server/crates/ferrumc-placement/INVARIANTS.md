@@ -50,3 +50,40 @@
   helper schedules no work, reads no I/O and emits no events.
 - No unsafe code, production `unwrap`/`expect`, or unbounded input allocation.
   Every public item has rustdoc.
+
+## Placement collision geometry
+
+- `standing_player_body` promotes the original float width/height (0.6F/1.8F)
+  before constructing the body. Nonfinite bodies refuse. Only standing-player
+  dimensions are authoritative in the current host; other poses are not inferred.
+- `placement_intersects_body` uses genuine placement-context collision boxes,
+  never visual boundingBox metadata or support/outline shapes. It allocates
+  nothing and translates boxes by the final candidate cell. Positive overlap
+  must exceed original shape epsilon 1e-7 on all axes; face touching is clear.
+- All 27,946 state IDs/names/properties match the pinned registry before fixture
+  generation. 27,902 states use 313 frozen shapes; 44 offset or moving-piston
+  states refuse with None. Fresh closed shulkers and placement-empty scaffolding
+  and powder snow are supported. Unknown IDs or malformed bodies also return
+  None, requiring the authoritative caller to refuse before mutation.
+- `data/collision/CollisionShapeOracle.java` calls the unmodified pinned Paper
+  runtime's actual placement context, collision shape, EntityDimensions body,
+  and Shapes.joinIsNotEmpty. It verifies jar hash, original class provenance,
+  release and protocol. The differential test checks all supported states at
+  16 genuine body probes each (origin and translated world coordinate), including
+  touching and 5e-8/2e-7 overlap controls. See data/collision/README.md for replay.
+- This fixture validates static/fresh placement geometry only. World support,
+  arbitrary block-entity animation, non-player entities, alternate poses,
+  canSee and Paper plugin/event behavior remain outside this geometry contract.
+
+## Narrow short-grass replacement
+
+- `is_short_grass_replaceable(current, held)` accepts only the pinned known
+  short_grass state with a known different held block family. It follows
+  Blocks.SHORT_GRASS's replaceable registration and inherited
+  BlockBehaviour.canBeReplaced's exclusion of the block's own item. Unknown
+  states fail closed; other vegetation and item-specific replacement remain
+  outside this narrow helper.
+- BlockPlaceContext in the reviewed original selects the clicked cell when its
+  state canBeReplaced(context), otherwise the adjacent face cell. The host must
+  read the authoritative clicked state and choose the target before placement
+  hooks. This helper does not read a world, select a target or emit events.

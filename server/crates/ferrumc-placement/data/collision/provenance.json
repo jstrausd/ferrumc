@@ -1,0 +1,23 @@
+{
+  "minecraft": "1.21.8",
+  "protocol": 772,
+  "paper_build": 60,
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "paper_inner_sha256": "c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507",
+  "original_shapes_sha256": "431c0816267798b08e65f1f36e51e511c29fc884972853ddfad6e825dfef96bb",
+  "original_probes_sha256": "7d16c9c1173b8701d67a0092512b81d172642b82c0631115bf4bec9d1272a211",
+  "registry_blocks_sha256": "197629a9e61f721462300cbb6d9d8fe6202a00694b80be6860517490632baa70",
+  "oracle_source_sha256": "4ad891db5e92a49407c46c588a2b8c02388d21750dbc5cae49bd1be3cf99138c",
+  "states": 27946,
+  "distinct_supported_shapes": 313,
+  "supported_states": 27902,
+  "excluded_blocks": [
+    "minecraft:bamboo",
+    "minecraft:moving_piston",
+    "minecraft:pointed_dripstone"
+  ],
+  "genuine_probe_cases": 447136,
+  "body_dimensions": "original EntityDimensions.scalable(0.6F,1.8F).makeBoundingBox; feet controls in probe-feet.json",
+  "shape_context": "actual CollisionContext.placementContext(null), EmptyBlockGetter; fresh placement only",
+  "scope": "static placement shapes and fresh closed shulkers; colliding offset and moving-piston states refuse; standing players only; no full entity/canSee/world support parity"
+}

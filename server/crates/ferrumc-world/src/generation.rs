@@ -63,7 +63,7 @@ impl GenerationMinecraftVersion {
 pub enum GeneratorKind {
     /// `FerrumC`'s existing fixed-layer flat profile, not Vanilla flat settings.
     FerrumcFlat,
-    /// Real cold Overworld terrain through carvers, without decoration or structures.
+    /// Cold Overworld terrain preview with explicitly versioned decoration subsets.
     FerrumcNaturalPreview,
 }
 
@@ -97,7 +97,7 @@ impl GenerationDimension {
 /// Complete supported identity of a reproducible generated chunk baseline.
 ///
 /// Supports Minecraft 1.21.8 / Overworld, with distinct flat revision 1 and
-/// natural terrain preview revision 1 identities. Decode rejects other metadata
+/// natural terrain preview revisions 1 and 2. Decode rejects other metadata
 /// explicitly. Seeds are retained even when an algorithm is seed-independent.
 ///
 /// This is a value contract. It does not persist the identity or guard the
@@ -137,6 +137,17 @@ impl GenerationIdentity {
             seed,
             dimension: GenerationDimension::Overworld,
         }
+    }
+
+    /// Selects the separately versioned original short-grass subset preview.
+    ///
+    /// Revision 2 runs plains/forest patches against isolated cold source chunks;
+    /// it omits other FEATURES and never reinterprets revision-1 saved terrain.
+    #[must_use]
+    pub const fn natural_overworld_with_grass(seed: WorldSeed) -> Self {
+        let mut identity = Self::natural_overworld(seed);
+        identity.generator_revision = 2;
+        identity
     }
 
     /// Returns the Minecraft release whose rules this baseline uses.
@@ -233,7 +244,9 @@ impl GenerationIdentity {
             _ => return Err(GenerationError::UnknownGenerator { kind }),
         };
         let revision = u32::from_be_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]);
-        if revision != supported_revision {
+        if revision != supported_revision
+            && !(generator_kind == GeneratorKind::FerrumcNaturalPreview && revision == 2)
+        {
             return Err(GenerationError::UnsupportedGeneratorRevision {
                 kind: generator_kind,
                 revision,
@@ -249,6 +262,9 @@ impl GenerationIdentity {
         }
         Ok(match generator_kind {
             GeneratorKind::FerrumcFlat => Self::flat_overworld(WorldSeed::new(seed)),
+            GeneratorKind::FerrumcNaturalPreview if revision == 2 => {
+                Self::natural_overworld_with_grass(WorldSeed::new(seed))
+            }
             GeneratorKind::FerrumcNaturalPreview => Self::natural_overworld(WorldSeed::new(seed)),
         })
     }

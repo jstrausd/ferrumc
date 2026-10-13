@@ -294,6 +294,26 @@ fn malformed_cases() -> Vec<MalformedCase> {
 
     vec![
         MalformedCase {
+            name: "truncated_client_information",
+            body: vec![0x0d],
+            metric_label: "malformed_body",
+            reason: DisconnectReason::MalformedPacket,
+            rejects_creative_echo: false,
+        },
+        MalformedCase {
+            name: "client_information_trailing_junk",
+            body: {
+                let mut body = vec![
+                    0x0d, 5, b'e', b'n', b'_', b'u', b's', 6, 0, 1, 127, 1, 0, 1, 0,
+                ];
+                body.push(0xde);
+                body
+            },
+            metric_label: "trailing_bytes",
+            reason: DisconnectReason::ProtocolViolation,
+            rejects_creative_echo: false,
+        },
+        MalformedCase {
             name: "missing_packet_id",
             body: Vec::new(),
             metric_label: "malformed_body",

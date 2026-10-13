@@ -144,3 +144,13 @@
   NET-04.2e1 F2): `ferrumc-storage` and `ferrumc-world` are **dev-dependencies**
   so contract tests can create genuine memory/redb admissions. A source-scan
   test refuses any mention of them outside `#[cfg(test)]` modules and `tests/`.
+
+## Tracked placement exact input
+
+- SetBlockExactTracked is authoritative data-lane input and routes to the final
+  block's registered owner with the same fallback as other block edits. It is
+  distinct from ordinary SetBlockExact world intents so matching client sequence
+  IDs do not make unrelated world edits complete an explicit placement action.
+- PlayerPlacementResolved is an internal App completion with actual primary
+  position/state (or a refusal). Session emits no packet, ACK or disconnect for
+  it. Ordinary BlockChanged/BlockChangeRejected retain their wire behavior.

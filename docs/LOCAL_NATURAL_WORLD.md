@@ -47,7 +47,8 @@ Set all top-level settings before the `[world]` table:
 ```toml
 world_dir = "fresh-natural-world"
 spawn_chunk_radius = 1
-view_distance = 3
+view_distance = 6
+chunk_stream_interval_ms = 50
 
 [world]
 seed = 0
@@ -64,20 +65,46 @@ do not preserve the required biome payload.
 Untouched terrain regenerates from the same versioned seed. Player edits
 are durable overlays on that baseline. Generation runs on a blocking worker
 with bounded admission; failed generation installs no partial chunk or flat
-replacement. Each stream request admits at most one nonresident natural
-column, and later client requests load the rest.
+replacement. Two bounded background jobs prepare new columns without awaiting generation
+inside the tick loop. Delivery retries do not acquire duplicate chunk tickets.
+The client keeps the requested view plus one retention ring; two additional
+rings are prepared ahead of movement. Prepared raw baselines have a 64-column /
+8 MiB charged cache. Resident gameplay chunks and worker scratch are additional.
+Far chunks may unload from memory after edits are durably saved; retaining the
+entire explored world in RAM would defeat the memory target.
+
+To test the optional grass revision, create a separate fresh directory and set
+`preset = "ferrumc_natural_grass_preview"` under `[world]`, or use:
+
+```sh
+FERRUMC_NATURAL_DIR="$PWD/local-natural/grass-preview" \
+FERRUMC_NATURAL_PRESET=ferrumc_natural_grass_preview \
+./scripts/run-natural-preview.sh
+```
+
+The preset variable selects newly created configuration only. Existing revision-1
+saves cannot be silently upgraded: their generation identity is deliberately
+checked before startup. Short grass is passable for spawn and replaceable by
+other blocks during placement.
+
+Player placement checks final collision shapes against live nonspectator
+players before any mutation, including refined slabs and both door/bed cells.
+A refusal resynchronizes the prediction and acknowledges the action. Original
+offset bamboo/dripstone/moving-piston shapes remain unsupported and fail closed.
 
 ## Preview limits
 
-- No placed-feature ore population, trees, vegetation or structures. Material
-  stage ore veins already supplied by the accepted producer remain present.
+- No placed-feature ore population, trees or structures. Material-stage ore
+  veins remain present. An explicit optional `ferrumc_natural_grass_preview`
+  preset adds original isolated plains/forest short-grass features (revision 2).
+  This is a subset, not complete vegetation or full feature chronology.
 - Overworld only. Complete Survival, mobs, Nether, End and the dragon remain
   separate work.
 - Lighting is direct vertical skylight; lateral propagation and emitted block
   light are incomplete. Heightmaps use the current highest-non-air model.
-- Initial spawn loading and exploration take generation time. The driver
-  currently waits for each worker result, so new chunks can pause simulation
-  ticks. This delivery makes no 20 TPS or performance-improvement claim.
+- Initial spawn loading and exploration still take generation time. Background
+  admission and caching reduce tick blocking and repeated work; no unmeasured
+  global TPS/RSS improvement or complete Paper loader parity is claimed.
 - The original cold context excludes structures/blending and complete chunk
   status scheduling. Source references and differential library fixtures do
   not establish complete live Paper or all-seed world parity.
@@ -89,6 +116,7 @@ With the existing `tests/blackbox` Node dependencies installed:
 ```sh
 MC_SERVER_BIN=/absolute/path/to/ferrumc \
 MC_RUN_DIR=/absolute/path/to/new-test-directory \
+MC_NATURAL_VIEW=6 \
 node tests/blackbox/natural-world.mjs
 ```
 

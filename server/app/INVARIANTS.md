@@ -23,14 +23,31 @@
   retain dirty facts, journal and unassigned mutation IDs. Unload and final stop
   use the same target. Worker validates metadata before every write/retry and
   before empty durability acknowledgments; foreign overlay scope is refused.
-- Natural preview generation uses a shared bounded one-worker executor outside
-  Tokio workers for spawn and streamed chunks. Flat spawn remains configured;
-  natural spawn selects a dry support column with two clear blocks within the
-  bounded already-resident spawn square, and `/spawn` uses that same position.
-  Preview startup reports missing feature/ore/tree/structure population explicitly.
-  Exploration admits at most one absent preview column per driver command;
-  deferred columns acquire no ticket and remain absent from the client sent set.
-  The driver still awaits that column, so generation may pause simulation ticks.
+- Natural preview startup uses a bounded one-worker executor outside Tokio workers.
+  Streaming prepares immutable raw baselines with at most two blocking jobs,
+  64 queued targets per viewer and 1024 viewers, scheduled round-robin. Shared
+  teardown cancels priorities even after failed join; completed late baselines
+  may enter the bounded LRU but own no tickets. At most 64 baselines and 8 MiB
+  conservatively charged storage remain cached; each result is at most 512 KiB.
+  Charge includes triple the palette-preserving section encoding, fixed
+  Chunk/allocator allowance and biomes. Worker scratch and resident gameplay chunks are additional; these
+  are allocation charges, not an RSS guarantee. At most 128 refused columns are
+  memoized. Shutdown waits admitted blocking producers without starting more.
+  Cold targets acquire no tickets. Real admission uses the ordinary Sim gate,
+  rereading exact metadata, full snapshots and overlays after preparation.
+  Ticket ownership and outbound delivery are separate sets: a tail-dropped
+  chunk or block entity retries a fresh resident snapshot without taking another
+  ticket. Unload retains one extra ring to avoid boundary churn; desired chunks
+  are ordered nearest-first and speculative targets extend two rings, biased
+  toward movement. Both load/retry and unload batches are bounded to 16.
+  Client render distance can lower the server cap; negative or absent sentinels
+  retain it. Configuration and Play settings use the same bounded schema; the
+  Play id0x0d body must be exhausted and repeated settings do not renew pre-Play
+  phase deadlines. This is a bounded FerrumC policy, not full Paper loader parity.
+  Flat spawn remains configured; natural spawn selects a dry support column
+  with two clear blocks within the bounded resident spawn square, and `/spawn`
+  uses that same position. Preview startup reports missing placed features,
+  ores, trees and structures; density-generated ore veins are included.
   Natural preview refuses Anvil imports before declaring metadata or importing
   chunks, including when the natural preset comes from stored metadata; imported
   full snapshots do not preserve the preview biome palette payload.
@@ -202,3 +219,14 @@
   adapter delivers these hooks; forced termination, including cancellation of
   an active completion during stop, cannot guarantee Java quit/disable hooks.
   The process boundary is not an OS permission sandbox.
+
+- Player-placement after-hooks wait for the dedicated tracked simulation result,
+  including the final primary position and state. Generic plugin intents cannot
+  satisfy that completion. Refusals emit no success hook. The live final shape
+  gate includes actor/other nonspectator bodies and all door/bed cells before
+  mutation. Interaction target resolution admits only the explicitly supported
+  short-grass replaceability subset; the tick revalidates mutation authority.
+- The explicit natural-grass preview binds algorithm2 revision2; omitted startup
+  declarations preserve its stored identity. Its isolated original plains/forest
+  short-grass features are not full FEATURES. Spawn skips grass to a real dry
+  support and both preview revisions reject Anvil imports before metadata writes.

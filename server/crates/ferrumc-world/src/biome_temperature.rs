@@ -260,6 +260,10 @@ impl BuiltinBiomeTemperatures {
         })
     }
 
+    pub(crate) fn info_noise(&self, x: f64, z: f64) -> Result<f64, NoiseError> {
+        self.info.sample(x, z)
+    }
+
     fn modified(&self, climate: Climate, position: BlockPos) -> Result<f32, NoiseError> {
         if climate.frozen {
             let x = f64::from(position.x());

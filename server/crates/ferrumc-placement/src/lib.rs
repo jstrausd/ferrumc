@@ -77,6 +77,10 @@
 //! water-bearing plants (kelp, seagrass, bubble columns) and flowing water — the
 //! latter correctly never waterlogs.
 
+mod collision;
+
+pub use collision::{placement_intersects_body, standing_player_body};
+
 use std::collections::BTreeMap;
 
 use ferrumc_math::{BlockPos, Direction, Vec3};
@@ -593,6 +597,18 @@ fn block_has_property(name: &str, prop: &str) -> bool {
 pub fn is_water_source(state_id: u32) -> bool {
     state_id_to_block_name(state_id) == Some(WATER_BLOCK)
         && state_property(state_id, "level") == Some(WATER_SOURCE_LEVEL)
+}
+
+/// Returns whether the held block may replace an existing short-grass cell.
+///
+/// Narrowly follows the pinned original short-grass registration and inherited
+/// `BlockBehaviour::canBeReplaced`: short grass is replaceable, but its own
+/// item does not replace it. Unknown states fail closed. This does not classify
+/// other vegetation, fluids, support requirements or item interactions.
+#[must_use]
+pub fn is_short_grass_replaceable(state_id: u32, held_state_id: u32) -> bool {
+    state_id_to_block_name(state_id) == Some("short_grass")
+        && state_id_to_block_name(held_state_id).is_some_and(|name| name != "short_grass")
 }
 
 /// Resolves the stair at `position` into its `(facing, half)`, or `None` when the
@@ -2437,5 +2453,22 @@ mod tests {
             compute_placement(&ctx(WHITE_BED, Direction::Up, 0.5, 180.0), &NoNeighbors).unwrap();
         assert_eq!(north.state_id, 1734); // facing=north, foot (default)
         assert_eq!(north.extra_blocks, vec![(BlockPos::new(0, 64, -1), 1733)]); // head one cell north
+    }
+}
+
+#[cfg(test)]
+mod short_grass_replacement_tests {
+    use super::is_short_grass_replaceable;
+    use ferrumc_registry::block_state::block_default_state;
+
+    #[test]
+    fn only_known_other_held_blocks_replace_short_grass() {
+        let grass = block_default_state("short_grass").unwrap();
+        let stone = block_default_state("stone").unwrap();
+        assert!(is_short_grass_replaceable(grass, stone));
+        assert!(!is_short_grass_replaceable(grass, grass));
+        assert!(!is_short_grass_replaceable(stone, grass));
+        assert!(!is_short_grass_replaceable(grass, u32::MAX));
+        assert!(!is_short_grass_replaceable(u32::MAX, stone));
     }
 }

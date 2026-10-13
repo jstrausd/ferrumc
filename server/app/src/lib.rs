@@ -13,6 +13,7 @@
 //! - [`build_command_tree`] exposes the `/spawn` + `/gamemode` command set for
 //!   direct server-side tests.
 
+mod chunk_preparation;
 mod cli;
 mod command;
 mod config;
@@ -23,6 +24,7 @@ mod java_bridge;
 mod observe;
 mod operators;
 mod persistence;
+mod placement_completion;
 mod player_admission;
 mod player_data;
 mod plugins;

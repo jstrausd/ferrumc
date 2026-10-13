@@ -1742,6 +1742,21 @@ mod tests {
                     append_sign_face(&mut bytes, sign.front());
                     append_sign_face(&mut bytes, sign.back());
                 }
+                GameOutput::PlayerPlacementResolved {
+                    player,
+                    position,
+                    sequence,
+                    state,
+                } => {
+                    bytes.push(8);
+                    append_player(&mut bytes, *player);
+                    append_block_position(&mut bytes, *position);
+                    bytes.extend_from_slice(&sequence.to_be_bytes());
+                    bytes.push(u8::from(state.is_some()));
+                    if let Some(state) = state {
+                        bytes.extend_from_slice(&state.as_u32().to_be_bytes());
+                    }
+                }
                 GameOutput::OpenSignEditor { player, position } => {
                     bytes.push(7);
                     append_player(&mut bytes, *player);

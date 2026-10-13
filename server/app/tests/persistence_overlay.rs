@@ -86,7 +86,7 @@ async fn send_place_on_top(
 }
 
 /// Reads play packets until an `AcknowledgeBlockChange` echoing `expected_sequence`
-/// arrives, proving the server applied the edit.
+/// arrives, ending prediction; the stored overlay proves the accepted write.
 async fn expect_ack(client: &mut TestClient, expected_sequence: i32) -> anyhow::Result<()> {
     loop {
         if let ClientboundPlayPacket::AcknowledgeBlockChange(ack) = client.next_play().await? {
@@ -100,14 +100,14 @@ async fn expect_ack(client: &mut TestClient, expected_sequence: i32) -> anyhow::
     }
 }
 
-/// Logs a client in and places stone on top of the spawn surface at (8, 63, 8),
+/// Logs a client in and places stone on top of the spawn surface at (9, 63, 8),
 /// returning once the place has been acknowledged by the server.
 async fn place_block_at_spawn(addr: SocketAddr) -> anyhow::Result<()> {
     let mut actor = login_to_play(addr, "Builder").await?;
-    // Spawn is (8, 64, 8); clicking the top of the grass at (8, 63, 8) places
-    // stone at (8, 64, 8), comfortably within reach and in the resident spawn
+    // Spawn is (8, 64, 8); clicking the top of the grass at (9, 63, 8) places
+    // stone at (9, 64, 8), comfortably within reach and in the resident spawn
     // chunk (0, 0).
-    send_place_on_top(&mut actor, (8, 63, 8), 1).await?;
+    send_place_on_top(&mut actor, (9, 63, 8), 1).await?;
     expect_ack(&mut actor, 1).await?;
     Ok(())
 }
@@ -150,7 +150,7 @@ async fn placed_block_survives_a_restart() {
     let mut chunk = FlatWorldGenerator::new().generate(placed_chunk);
     overlay.apply_to_chunk(&mut chunk).expect("apply overlay");
     assert_eq!(
-        chunk.get_block(BlockPos::new(8, 64, 8)),
+        chunk.get_block(BlockPos::new(9, 64, 8)),
         Some(BlockStateId::new(STONE_STATE)),
         "the placed stone must survive the restart",
     );

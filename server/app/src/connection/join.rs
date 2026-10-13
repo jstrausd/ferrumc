@@ -226,29 +226,21 @@ pub(super) async fn send_join_kit(
     let spawn_positions: Vec<ChunkPos> = kit.chunk_positions().collect();
     let chunks = acquire_join_chunks(
         &ctx.commands,
+        player,
         spawn_positions,
         &mut chunk_stream.loaded,
         &mut chunk_stream.ticket_handoff_pending,
     )
     .await?;
     for streamed in chunks {
-        let outcome = enqueue_traced_classified(
+        super::chunk_stream::queue_streamed_chunk(
+            ctx,
             writer,
             debug,
             compression,
-            clock,
-            ClientboundPlayPacket::ChunkDataAndLight(streamed.chunk),
+            chunk_stream,
+            streamed,
         );
-        // Count only chunks that actually entered the queue; a tail-dropped chunk
-        // never reaches the wire and must not inflate the counter.
-        if outcome.is_enqueued() {
-            ctx.metrics.incr_chunk_sent(1);
-        }
-        // Render any signs in the column right after it, so a (re)joining player
-        // sees text a previous session left on spawn-area signs.
-        for block_entity in streamed.block_entities {
-            enqueue_traced_classified(writer, debug, compression, clock, block_entity);
-        }
     }
     flush_writer(writer, stream, compression, ctx.io_timeout).await
 }
@@ -258,6 +250,7 @@ pub(super) async fn send_join_kit(
 /// a lost receiver makes the driver release only its actual acquired batch.
 async fn acquire_join_chunks(
     commands: &tokio::sync::mpsc::Sender<SimCommand>,
+    viewer: PlayerId,
     positions: Vec<ChunkPos>,
     acquired: &mut std::collections::BTreeSet<ChunkPos>,
     pending: &mut bool,
@@ -265,8 +258,10 @@ async fn acquire_join_chunks(
     let (reply, receive) = oneshot::channel();
     commands
         .send(SimCommand::StreamChunks {
+            viewer,
             load: positions,
             unload: Vec::new(),
+            prefetch: Vec::new(),
             reply,
         })
         .await
@@ -324,9 +319,15 @@ mod tests {
         let connection = tokio::spawn(async move {
             let mut acquired = BTreeSet::new();
             let mut pending = false;
-            let chunks = acquire_join_chunks(&commands, positions, &mut acquired, &mut pending)
-                .await
-                .expect("partial successful reply");
+            let chunks = acquire_join_chunks(
+                &commands,
+                PlayerId::offline("join_fixture"),
+                positions,
+                &mut acquired,
+                &mut pending,
+            )
+            .await
+            .expect("partial successful reply");
             acquired_ready
                 .send((acquired.clone(), pending))
                 .expect("inspect handoff");
@@ -370,6 +371,7 @@ mod tests {
         let mut pending = false;
         assert!(acquire_join_chunks(
             &commands,
+            PlayerId::offline("join_fixture"),
             vec![ChunkPos::new(0, 0)],
             &mut acquired,
             &mut pending

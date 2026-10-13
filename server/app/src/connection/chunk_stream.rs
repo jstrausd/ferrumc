@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use tokio::sync::oneshot;
 use tokio::time::sleep_until;
 
+use ferrumc_core::PlayerId;
 use ferrumc_math::{BlockPos, ChunkPos, Vec3};
 use ferrumc_net::{CompressionState, LivenessDeadline, OutboundPriority, PlayWriter};
 use ferrumc_observability::SessionDebug;
@@ -60,11 +61,17 @@ pub(super) const STREAM_VIEW_DISTANCE_MAX: i32 = 32;
 pub(super) struct ChunkStream {
     /// The chunk the client is currently centred on (the last `Set Center Chunk`).
     center: ChunkPos,
+    /// Canonical connection identity, used to keep background priorities fair.
+    viewer: PlayerId,
     /// The square radius, in chunks, of the streamed view (already clamped).
     view_distance: i32,
     /// Actual acquired player tickets, recorded before packet encoding/flush.
     /// Tail-dropped or unsent packets still require this owned ticket release.
     pub(super) loaded: BTreeSet<ChunkPos>,
+    /// Columns whose chunk and block-entity packets actually entered the writer.
+    pub(super) sent: BTreeSet<ChunkPos>,
+    /// Recent movement direction used only to prioritize speculative baselines.
+    movement_hint: ChunkPos,
     /// A join request was admitted but its exact acquired batch is unconfirmed.
     /// Failed handoff quarantines the UUID; guessed ticket releases are unsafe.
     pub(super) ticket_handoff_pending: bool,
@@ -87,11 +94,14 @@ pub(super) struct ChunkStream {
 
 impl ChunkStream {
     /// Starts before join-kit acquisition with no owned player tickets.
-    pub(super) fn before_join(ctx: &ConnContext) -> Self {
+    pub(super) fn before_join(ctx: &ConnContext, viewer: PlayerId) -> Self {
         Self {
             center: ctx.join_kit.spawn_chunk(),
+            viewer,
             view_distance: ctx.view_distance.clamp(0, STREAM_VIEW_DISTANCE_MAX),
             loaded: BTreeSet::new(),
+            sent: BTreeSet::new(),
+            movement_hint: ChunkPos::new(0, 0),
             ticket_handoff_pending: false,
             pending_position: None,
             last_position: None,
@@ -102,13 +112,35 @@ impl ChunkStream {
     /// Test fixture representing a client that has received the whole spawn kit.
     #[cfg(test)]
     pub(super) fn new(ctx: &ConnContext) -> Self {
-        let mut stream = Self::before_join(ctx);
+        let mut stream = Self::before_join(ctx, PlayerId::offline("chunk_fixture"));
         stream.loaded = ctx.join_kit.chunk_positions().collect();
+        stream.sent = stream.loaded.clone();
         stream
+    }
+
+    /// Client render radius is capped by the configured server view; an absent
+    /// or negative client sentinel retains that configured cap.
+    pub(super) fn limit_view_distance(&mut self, server_radius: i32, client_radius: Option<i8>) {
+        self.view_distance = effective_view_distance(server_radius, client_radius);
     }
 
     /// Records the client's latest validated and admitted position.
     pub(super) fn observe(&mut self, position: Vec3) {
+        if let Some(previous) = self.last_position {
+            let direction = |delta: f64| {
+                if delta > 0.01 {
+                    1
+                } else if delta < -0.01 {
+                    -1
+                } else {
+                    0
+                }
+            };
+            self.movement_hint = ChunkPos::new(
+                direction(position.x - previous.x),
+                direction(position.z - previous.z),
+            );
+        }
         self.pending_position = Some(position);
         self.last_position = Some(position);
     }
@@ -169,6 +201,7 @@ impl ChunkStream {
         // the pre-teleport block would turn the first client echo or tiny step at
         // the destination into one false world-spanning PlayerMove notification.
         self.last_move_block = Some(block_of(position));
+        self.movement_hint = ChunkPos::new(0, 0);
     }
 }
 
@@ -269,20 +302,49 @@ pub(super) async fn pump_chunk_stream(
     let center = chunk_stream.center;
 
     let desired = desired_chunks(center, chunk_stream.view_distance);
-    // Both sides of the transition are bounded. The pure helper recomputes from
-    // the latest centre each pump, so a superseding move discards stale planned
-    // work rather than draining an old teleport's queue.
+    let mut to_retry: Vec<_> = desired
+        .intersection(&chunk_stream.loaded)
+        .filter(|pos| !chunk_stream.sent.contains(pos))
+        .copied()
+        .collect();
+    to_retry.sort_by_key(|pos| (chebyshev_distance(center, *pos), pos.x(), pos.z()));
+    to_retry.truncate(MAX_CHUNK_LOADS_PER_UPDATE);
     let transition = next_chunk_transition(
         center,
         &desired,
         &chunk_stream.loaded,
-        MAX_CHUNK_LOADS_PER_UPDATE,
+        MAX_CHUNK_LOADS_PER_UPDATE - to_retry.len(),
         MAX_CHUNK_UNLOADS_PER_UPDATE,
     );
     let to_load = transition.load;
-    let to_unload = transition.unload;
-    if to_load.is_empty() && to_unload.is_empty() {
+    // One extra retained ring prevents immediate unload/regenerate churn when
+    // hovering at a chunk boundary. It is not an expanded client send radius.
+    let retained = desired_chunks(center, chunk_stream.view_distance + 1);
+    let to_unload: Vec<_> = chunk_stream
+        .loaded
+        .difference(&retained)
+        .take(MAX_CHUNK_UNLOADS_PER_UPDATE)
+        .copied()
+        .collect();
+    let prefetch = prefetch_targets(
+        center,
+        chunk_stream.view_distance,
+        chunk_stream.movement_hint,
+        &chunk_stream.loaded,
+    );
+    if to_load.is_empty() && to_unload.is_empty() && to_retry.is_empty() {
+        // Even a complete visible view prepares an outer ring before movement.
+        ctx.commands
+            .try_send(SimCommand::PrepareChunks {
+                viewer: chunk_stream.viewer,
+                positions: prefetch,
+            })
+            .ok(); // A full bounded command queue defers speculative work.
         return Ok(());
+    }
+    let mut packets = Vec::new();
+    if !to_retry.is_empty() {
+        packets = resend_chunk_snapshots(ctx, to_retry, deadline).await?;
     }
 
     // Queue departed columns now, but retain their ticket bookkeeping until the
@@ -297,19 +359,21 @@ pub(super) async fn pump_chunk_stream(
             OutboundPriority::World,
             ClientboundPlayPacket::UnloadChunk(UnloadChunk::new(pos.z(), pos.x())),
         );
-        // Count only unloads that actually reach the queue. Ticket bookkeeping
-        // changes only after the bounded driver send below succeeds.
-        if outcome.is_enqueued() {
-            ctx.metrics.incr_chunk_unloaded(1);
-        }
+        anyhow::ensure!(
+            outcome.is_enqueued(),
+            "outbound overflow while retiring a chunk column"
+        );
+        ctx.metrics.incr_chunk_unloaded(1);
     }
 
     let (reply_tx, reply_rx) = oneshot::channel();
     let send = async {
         ctx.commands
             .send(SimCommand::StreamChunks {
+                viewer: chunk_stream.viewer,
                 load: to_load,
                 unload: to_unload.clone(),
+                prefetch,
                 reply: reply_tx,
             })
             .await
@@ -322,43 +386,107 @@ pub(super) async fn pump_chunk_stream(
     }
     for pos in &to_unload {
         chunk_stream.loaded.remove(pos);
+        chunk_stream.sent.remove(pos);
     }
-    let packets = receive_stream_reply(reply_rx, deadline, &mut chunk_stream.loaded).await?;
+    packets.extend(receive_stream_reply(reply_rx, deadline, &mut chunk_stream.loaded).await?);
 
-    // Only the chunks the driver actually built come back; record exactly those so
-    // a skipped chunk is retried on a later update rather than treated as sent.
     for streamed in packets {
-        let pos = ChunkPos::new(streamed.chunk.x(), streamed.chunk.z());
-        // Track the column unconditionally: the driver already took a player ticket
-        // for it, and `loaded` is what the disconnect/unload path uses to release
-        // that ticket. Gating this on the enqueue would leak the ticket on a
-        // tail-drop. Only the send *counter* is gated on a real enqueue.
-        chunk_stream.loaded.insert(pos);
-        let outcome = enqueue_traced(
+        queue_streamed_chunk(ctx, writer, debug, compression, chunk_stream, streamed);
+    }
+    Ok(())
+}
+
+/// Snapshot retries never acquire or transfer tickets, including canceled replies.
+async fn resend_chunk_snapshots(
+    ctx: &ConnContext,
+    positions: Vec<ChunkPos>,
+    deadline: Option<LivenessDeadline>,
+) -> anyhow::Result<Vec<StreamedChunk>> {
+    let (reply, receive) = oneshot::channel();
+    let retry = async {
+        ctx.commands
+            .send(SimCommand::ResendChunks { positions, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+        receive
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver dropped snapshot reply"))
+    };
+    if deadline.is_some() {
+        super::play::guard_play_work(deadline, retry).await
+    } else {
+        retry.await
+    }
+}
+
+/// Ticket ownership and packet admission are separate facts. Backpressure retains
+/// the ticket while the next pump retries a fresh resident snapshot.
+pub(super) fn queue_streamed_chunk(
+    ctx: &ConnContext,
+    writer: &mut PlayWriter,
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+    chunk_stream: &mut ChunkStream,
+    streamed: StreamedChunk,
+) {
+    let pos = ChunkPos::new(streamed.chunk.x(), streamed.chunk.z());
+    chunk_stream.loaded.insert(pos);
+    let outcome = enqueue_traced(
+        writer,
+        debug,
+        compression,
+        &ctx.clock,
+        OutboundPriority::World,
+        ClientboundPlayPacket::ChunkDataAndLight(streamed.chunk),
+    );
+    let mut complete = outcome.is_enqueued();
+    if complete {
+        ctx.metrics.incr_chunk_sent(1);
+    }
+    for block_entity in streamed.block_entities {
+        complete &= enqueue_traced(
             writer,
             debug,
             compression,
-            clock,
+            &ctx.clock,
             OutboundPriority::World,
-            ClientboundPlayPacket::ChunkDataAndLight(streamed.chunk),
-        );
-        if outcome.is_enqueued() {
-            ctx.metrics.incr_chunk_sent(1);
-        }
-        // Render any signs in the column right after it (chunk-enter half of the
-        // sign loop), at the same World priority.
-        for block_entity in streamed.block_entities {
-            enqueue_traced(
-                writer,
-                debug,
-                compression,
-                clock,
-                OutboundPriority::World,
-                block_entity,
-            );
-        }
+            block_entity,
+        )
+        .is_enqueued();
     }
-    Ok(())
+    if complete {
+        chunk_stream.sent.insert(pos);
+    } else {
+        chunk_stream.sent.remove(&pos);
+    }
+}
+
+/// Visible targets precede an outer speculative ring, biased toward movement.
+fn prefetch_targets(
+    center: ChunkPos,
+    radius: i32,
+    direction: ChunkPos,
+    held: &BTreeSet<ChunkPos>,
+) -> Vec<ChunkPos> {
+    let lead = ChunkPos::new(
+        center.x().saturating_add(direction.x()),
+        center.z().saturating_add(direction.z()),
+    );
+    let mut targets: Vec<_> = desired_chunks(center, radius + 2)
+        .into_iter()
+        .filter(|pos| !held.contains(pos))
+        .collect();
+    targets.sort_by_key(|pos| {
+        (
+            chebyshev_distance(center, *pos) > i64::from(radius),
+            chebyshev_distance(lead, *pos),
+            chebyshev_distance(center, *pos),
+            pos.x(),
+            pos.z(),
+        )
+    });
+    targets.truncate(crate::chunk_preparation::MAX_PREPARATION_TARGETS);
+    targets
 }
 
 /// Closing before inspecting a timed-out receiver makes the ticket handoff
@@ -388,6 +516,13 @@ async fn receive_stream_reply(
             .await
             .map_err(|_| anyhow::anyhow!("simulation driver dropped the chunk-stream reply"))
     }
+}
+
+fn effective_view_distance(server_radius: i32, client_radius: Option<i8>) -> i32 {
+    let server = server_radius.clamp(0, STREAM_VIEW_DISTANCE_MAX);
+    client_radius
+        .filter(|radius| *radius >= 0)
+        .map_or(server, |radius| server.min(i32::from(radius)))
 }
 
 /// The chunk column the world `position` falls in (flooring so negatives land on
@@ -732,12 +867,56 @@ mod tests {
         super::ChunkStream {
             ticket_handoff_pending: false,
             center: ChunkPos::ORIGIN,
+            viewer: ferrumc_core::PlayerId::offline("chunk_fixture"),
             view_distance: 0,
             loaded: BTreeSet::new(),
+            sent: BTreeSet::new(),
+            movement_hint: ChunkPos::new(0, 0),
             pending_position: None,
             last_position: None,
             last_move_block: None,
         }
+    }
+
+    #[test]
+    fn client_distance_is_capped_and_prefetch_is_bounded_visible_first_and_directional() {
+        use ferrumc_math::ChunkPos;
+        assert_eq!(super::effective_view_distance(6, Some(3)), 3);
+        assert_eq!(super::effective_view_distance(6, Some(12)), 6);
+        assert_eq!(super::effective_view_distance(6, Some(-1)), 6);
+        assert_eq!(super::effective_view_distance(100, None), 32);
+        assert_eq!(super::effective_view_distance(6, Some(0)), 0);
+        let targets = super::prefetch_targets(
+            ChunkPos::ORIGIN,
+            3,
+            ChunkPos::new(1, 0),
+            &std::collections::BTreeSet::new(),
+        );
+        assert_eq!(targets.len(), 64);
+        assert!(targets[..49]
+            .iter()
+            .all(|pos| super::chebyshev_distance(ChunkPos::ORIGIN, *pos) <= 3));
+        assert!(targets[49..]
+            .iter()
+            .all(|pos| super::chebyshev_distance(ChunkPos::ORIGIN, *pos) > 3));
+        assert!(
+            targets[49..].iter().filter(|pos| pos.x() > 0).count()
+                > targets[49..].iter().filter(|pos| pos.x() < 0).count()
+        );
+        let complete_view = super::desired_chunks(ChunkPos::ORIGIN, 6);
+        let outer =
+            super::prefetch_targets(ChunkPos::ORIGIN, 6, ChunkPos::new(1, 0), &complete_view);
+        assert_eq!(
+            outer.len(),
+            64,
+            "full views larger than target limit still prepare outer columns"
+        );
+        assert!(outer
+            .iter()
+            .all(|pos| super::chebyshev_distance(ChunkPos::ORIGIN, *pos) > 6));
+        let retained = super::desired_chunks(ChunkPos::ORIGIN, 4);
+        assert_eq!(retained.len(), 81);
+        assert!(super::desired_chunks(ChunkPos::new(1, 0), 3).is_subset(&retained));
     }
 
     #[test]
