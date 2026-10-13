@@ -11,8 +11,8 @@
 //!   packets followed by Finish Configuration.
 //! - **play join sequence** — the keystone packets arrive in the order a real
 //!   client needs to leave the loading screen: `JoinGame`, `GameEvent(13)`,
-//!   `SetCenterChunk`, a `SynchronizePlayerPosition`, then at least one
-//!   `ChunkDataAndLight`.
+//!   `SetCenterChunk`, the destination `ChunkDataAndLight`, then the initial
+//!   `SynchronizePlayerPosition`.
 //! - **keep alive** — a clientbound `KeepAlive` arrives within the (short,
 //!   test-configured) timer window.
 //!
@@ -241,7 +241,7 @@ async fn drive_client(addr: SocketAddr) -> anyhow::Result<JoinObservations> {
             }
             _ => {}
         }
-        // The position sync precedes the chunk column; stop once both keystones
+        // The destination chunk precedes its position sync; stop once both keystones
         // have arrived so their relative order is captured.
         if play_order.contains(&"sync") && play_order.contains(&"chunk") {
             break;
@@ -291,10 +291,10 @@ async fn client_reaches_play_and_receives_the_flat_world() {
     );
 
     // The keystone play packets arrived in the loading-screen-releasing order:
-    // the position sync precedes the spawn-area chunk column.
+    // the actual destination column precedes the initial position sync.
     assert_eq!(
         observed.play_order,
-        vec!["join", "game_event", "center", "sync", "chunk"],
+        vec!["join", "game_event", "center", "chunk", "sync"],
         "join sequence out of order",
     );
 

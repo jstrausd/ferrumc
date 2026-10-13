@@ -48,6 +48,58 @@ fn parses_bind_override() {
     assert_eq!(cli.bind, "0.0.0.0:25565".parse::<SocketAddr>().ok());
 }
 
+/// The all-interface flag defaults off and preserves both configured ports while
+/// running after the Minecraft address and port overrides.
+#[test]
+fn all_interface_flag_preserves_ports_after_listener_overrides() {
+    assert!(
+        !Cli::try_parse_from(["ferrumc"])
+            .expect("default arguments")
+            .bind_all_interfaces
+    );
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "bind = '127.0.0.1:25575'\ndashboard_bind = '[::1]:9191'\ndashboard_enabled = false\n",
+    )
+    .expect("write explicit config");
+
+    for (args, expected_port) in [
+        (vec!["ferrumc", "--bind-all-interfaces"], 25575),
+        (
+            vec![
+                "ferrumc",
+                "--bind-all-interfaces",
+                "--bind",
+                "127.0.0.1:25585",
+                "--port",
+                "25595",
+            ],
+            25595,
+        ),
+    ] {
+        let cli = Cli::try_parse_from(args).expect("valid interface override");
+        assert!(cli.bind_all_interfaces);
+        let configured = load_or_init_config(&path, cli.port, cli.bind).expect("valid config");
+        assert_eq!(
+            configured.bind().ip(),
+            "127.0.0.1".parse::<std::net::IpAddr>().unwrap()
+        );
+        assert_eq!(configured.bind().port(), expected_port);
+        assert_eq!(configured.dashboard_bind(), "[::1]:9191".parse().unwrap());
+        let overridden = configured
+            .with_all_interface_binds()
+            .expect("valid interface override");
+        assert_eq!(
+            overridden.bind(),
+            SocketAddr::from(([0, 0, 0, 0], expected_port))
+        );
+        assert_eq!(overridden.dashboard_bind(), "0.0.0.0:9191".parse().unwrap());
+        assert!(!overridden.dashboard_enabled());
+    }
+}
+
 /// Invalid argument forms are all rejected by clap rather than silently accepted.
 #[test]
 fn rejects_bad_arguments() {

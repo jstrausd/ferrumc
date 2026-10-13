@@ -44,7 +44,7 @@ A creative/minigame development core targeting **Minecraft Java 1.21.8
 - Limited startup import of Anvil blocks, plain signs and empty chests.
 - Built-in and **trusted native plugins** with events, mutation intents and block-edit decisions through a versioned C ABI. Dynamic bundles are target-specific and require a manifest and pinned library hash; additional host facades remain unfinished.
 - Optional ordinary Bukkit `plugin.yml` JARs: lifecycle and configuration, declared commands/aliases, plugin argument completion, current-player identity/messages, Rust command permissions, and join/quit listeners. Unsupported Java APIs report concrete errors; see the [tested API contract](server/java-bridge/README.md).
-- A read-only observability dashboard at `http://127.0.0.1:9090` (loopback-only by design).
+- A read-only observability dashboard on `0.0.0.0:9090` (open locally at `http://localhost:9090`).
 
 **Limitations (not done yet):**
 
@@ -82,8 +82,9 @@ cargo build --release --locked -p ferrumc-app
 ./target/release/ferrumc --help
 ```
 
-The default Minecraft bind is loopback. To accept clients from outside the host,
-start with `--bind 0.0.0.0:25565`. Config and the persistent `world/` directory
+Minecraft and the read-only web dashboard bind to `0.0.0.0` by default.
+Use `--bind-all-interfaces` to apply this to both listeners when an existing
+config names a specific address, preserving the configured ports. Config and the persistent `world/` directory
 are created relative to the working directory. Container and Pterodactyl setup
 are documented in [deploy/README.md](deploy/README.md).
 

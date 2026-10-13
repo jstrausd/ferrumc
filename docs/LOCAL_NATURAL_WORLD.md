@@ -15,7 +15,9 @@ From the repository root:
 ./scripts/run-natural-preview.sh
 ```
 
-Connect a **Minecraft Java 1.21.8** client to **localhost:25566**. Stop with
+Connect a **Minecraft Java 1.21.8** client to **localhost:25566**, or this host's
+address from another machine. Minecraft and the enabled web dashboard bind to
+`0.0.0.0`; the launcher enforces this for existing configs too. Stop with
 Ctrl-C to flush world/player changes before restarting. If the delivered
 process is already running, connect directly; a second process cannot open
 the same world database. Its log is `local-natural/server.log`.
@@ -164,3 +166,18 @@ Paper-server benchmarks. Initial loading remains slow and other species,
 decorators, leaf decay and full Survival remain open.
 
 See [the exact validation and evidence](TREE_GENERATION_VALIDATION.md#loading-optimization-13-october-2026).
+
+## Joining above loaded ground
+
+Before the initial position sync, the server now sends and flushes the actual
+fresh or restored destination column. Cold generation retries observe one
+absolute join deadline and shutdown; a missing column refuses the join rather
+than releasing the player over unloaded ground. The client view centers on that
+actual destination, including a saved location outside the startup spawn area.
+The remaining view continues to stream through the bounded background loader.
+
+To expose both listeners from an existing custom config when starting the binary
+without the preview launcher, use `--bind-all-interfaces`. It preserves Minecraft
+and dashboard ports and the configured dashboard enablement. The dashboard
+serves read-only HTTP routes on the selected address. If disabled, enable it with
+`dashboard_enabled = true` before the `[world]` table; its default port is 9090.

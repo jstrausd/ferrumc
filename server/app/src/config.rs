@@ -14,13 +14,13 @@ use ferrumc_math::Vec3;
 use serde::Deserialize;
 
 /// Default address the server binds to when the config omits one.
-const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 25_565);
+const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 25_565);
 
-/// Default address the read-only observability dashboard binds to. Loopback by
-/// design: the dashboard is never exposed off-host unless the operator opts in.
+/// Default address the read-only observability dashboard binds to, accepting
+/// connections on every IPv4 interface just like the Minecraft listener.
 /// A typed [`SocketAddr`] const so the default needs no runtime parse (and so the
 /// [`Default`] impl carries no `parse().expect()`).
-const DEFAULT_DASHBOARD_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9090);
+const DEFAULT_DASHBOARD_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9090);
 
 /// Whether the read-only observability dashboard starts by default.
 const DEFAULT_DASHBOARD_ENABLED: bool = true;
@@ -253,8 +253,8 @@ pub struct AppConfig {
     world_dir: Option<PathBuf>,
     /// Whether the read-only observability dashboard starts alongside the server.
     dashboard_enabled: bool,
-    /// The socket address the read-only dashboard binds to. Defaults to a loopback
-    /// address so the dashboard is not reachable off-host unless reconfigured.
+    /// The socket address the read-only dashboard binds to. Defaults to all IPv4
+    /// interfaces, matching the Minecraft listener.
     dashboard_bind: SocketAddr,
     /// Access control for a public-facing server: the per-IP connection limit, the
     /// ban list, and the optional whitelist. Resolved (files read, entries
@@ -519,6 +519,25 @@ impl AppConfig {
     /// connection ceiling, or if another config invariant is invalid.
     pub fn with_access(mut self, access: AccessConfig) -> anyhow::Result<Self> {
         self.access = access;
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Returns a revalidated copy that binds both listeners to every IPv4 interface.
+    ///
+    /// Each listener keeps its configured port, including a Minecraft port already
+    /// replaced by command-line overrides. The dashboard enablement is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if this configuration no longer satisfies a numeric or
+    /// cross-field resource ceiling.
+    pub fn with_all_interface_binds(mut self) -> anyhow::Result<Self> {
+        self.bind = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.bind.port());
+        self.dashboard_bind = SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            self.dashboard_bind.port(),
+        );
         self.validate()?;
         Ok(self)
     }
@@ -1103,10 +1122,42 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_defaults_to_enabled_on_loopback() {
+    fn listeners_default_to_all_ipv4_interfaces() {
         let parsed = AppConfig::from_toml_str("").expect("empty config is valid");
         assert!(parsed.dashboard_enabled);
-        assert_eq!(parsed.dashboard_bind, "127.0.0.1:9090".parse().unwrap());
+        assert_eq!(parsed.bind, "0.0.0.0:25565".parse().unwrap());
+        assert_eq!(parsed.dashboard_bind, "0.0.0.0:9090".parse().unwrap());
+    }
+
+    #[test]
+    fn port_override_keeps_default_all_interfaces_and_preserves_explicit_address() {
+        let default = AppConfig::default()
+            .with_runtime_overrides(None, Some(25566), PathBuf::from("world"))
+            .expect("valid runtime port override");
+        assert_eq!(default.bind, "0.0.0.0:25566".parse().unwrap());
+        assert_eq!(default.dashboard_bind, "0.0.0.0:9090".parse().unwrap());
+
+        let explicit = AppConfig::from_toml_str("bind = '127.0.0.1:25565'")
+            .expect("valid explicit address")
+            .with_runtime_overrides(None, Some(25566), PathBuf::from("world"))
+            .expect("valid runtime port override");
+        assert_eq!(explicit.bind, "127.0.0.1:25566".parse().unwrap());
+    }
+
+    #[test]
+    fn all_interface_override_preserves_both_ports_and_dashboard_enablement() {
+        let explicit = AppConfig::from_toml_str(
+            "bind = '[::1]:25575'\ndashboard_bind = '127.0.0.1:9191'\ndashboard_enabled = false",
+        )
+        .expect("valid explicit listener addresses");
+        assert_eq!(explicit.bind, "[::1]:25575".parse().unwrap());
+        assert_eq!(explicit.dashboard_bind, "127.0.0.1:9191".parse().unwrap());
+        let overridden = explicit
+            .with_all_interface_binds()
+            .expect("valid all-interface override");
+        assert_eq!(overridden.bind, "0.0.0.0:25575".parse().unwrap());
+        assert_eq!(overridden.dashboard_bind, "0.0.0.0:9191".parse().unwrap());
+        assert!(!overridden.dashboard_enabled);
     }
 
     #[test]

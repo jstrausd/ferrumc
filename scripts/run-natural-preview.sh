@@ -25,7 +25,7 @@ if [[ ! -f "$RUN_DIR/config.toml" ]]; then
   cat > "$RUN_DIR/config.toml" <<TOML
 # Local Minecraft Java 1.21.8 natural terrain preview.
 # World data is separate from the ordinary server's world directory.
-bind = "127.0.0.1:25566"
+bind = "0.0.0.0:$PORT"
 world_dir = "world"
 max_connections = 8
 view_distance = 6
@@ -34,6 +34,7 @@ spawn_chunk_radius = 1
 spawn = [8.0, 64.0, 8.0]
 chunk_stream_interval_ms = 50
 dashboard_enabled = false
+dashboard_bind = "0.0.0.0:9090"
 builtin_plugins = false
 
 [world]
@@ -41,7 +42,7 @@ seed = 0
 preset = "$PRESET"
 TOML
 fi
-echo "Minecraft Java 1.21.8: localhost:$PORT"
+echo "Minecraft Java 1.21.8: listening on 0.0.0.0:$PORT (connect using localhost or this host’s IP)"
 echo "Config: $RUN_DIR/config.toml; stop with Ctrl-C to save."
 cd "$RUN_DIR"
-exec "$SERVER_BIN" --config "$RUN_DIR/config.toml" --bind "127.0.0.1:$PORT"
+exec "$SERVER_BIN" --config "$RUN_DIR/config.toml" --bind "0.0.0.0:$PORT" --bind-all-interfaces

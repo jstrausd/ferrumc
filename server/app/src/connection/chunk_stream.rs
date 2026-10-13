@@ -118,6 +118,14 @@ impl ChunkStream {
         stream
     }
 
+    /// Establishes the initial wire centre at the actual restored or fresh position.
+    /// No world-spawn centre is sent for a player returning elsewhere.
+    pub(super) fn initialize_center(&mut self, position: Vec3) -> ChunkPos {
+        self.center = chunk_of(position);
+        self.observe(position);
+        self.center
+    }
+
     /// Client render radius is capped by the configured server view; an absent
     /// or negative client sentinel retains that configured cap.
     pub(super) fn limit_view_distance(&mut self, server_radius: i32, client_radius: Option<i8>) {

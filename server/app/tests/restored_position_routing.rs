@@ -267,7 +267,8 @@ async fn expect_far_stream(client: &mut TestClient, target: (i32, i32)) -> anyho
     Ok(())
 }
 
-/// Requires exact restored state plus the chunk stream for its position.
+/// Requires exact restored state and its destination before sync. A far join
+/// never acquires an unrelated spawn column, so no spawn unload is needed.
 async fn expect_restored_join(
     client: &mut TestClient,
     expected: PlayerState,
@@ -278,12 +279,15 @@ async fn expect_restored_join(
     let mut synchronized = false;
     let mut centered = false;
     let mut chunk = false;
-    let mut spawn_unloaded = target == (0, 0);
     let mut mode_restored = false;
     let mut slot_restored = false;
-    while !(synchronized && centered && chunk && spawn_unloaded && mode_restored && slot_restored) {
+    while !(synchronized && centered && chunk && mode_restored && slot_restored) {
         match client.next_play().await? {
             ClientboundPlayPacket::SynchronizePlayerPosition(sync) if !synchronized => {
+                anyhow::ensure!(
+                    centered && chunk,
+                    "restored destination missing before sync"
+                );
                 let actual = Vec3::new(sync.x(), sync.y(), sync.z());
                 anyhow::ensure!(
                     same_position(actual, expected.position),
@@ -311,10 +315,10 @@ async fn expect_restored_join(
             {
                 chunk = true;
             }
-            ClientboundPlayPacket::UnloadChunk(column)
-                if (column.chunk_x(), column.chunk_z()) == (0, 0) =>
+            ClientboundPlayPacket::ChunkDataAndLight(column)
+                if target != (0, 0) && (column.x(), column.z()) == (0, 0) =>
             {
-                spawn_unloaded = true;
+                anyhow::bail!("far restored join received an unrelated spawn column");
             }
             ClientboundPlayPacket::GameEvent(event) if event.reason() == 3 => {
                 anyhow::ensure!(

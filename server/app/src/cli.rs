@@ -70,6 +70,10 @@ pub struct Cli {
     /// refines the port afterwards if also supplied.
     #[arg(long, value_name = "ADDR")]
     pub bind: Option<SocketAddr>,
+    /// Bind both Minecraft and the dashboard to `0.0.0.0`, preserving their
+    /// configured ports. Applied after the Minecraft `--bind` and `--port` flags.
+    #[arg(long)]
+    pub bind_all_interfaces: bool,
 }
 
 #[derive(Debug, Clone, Subcommand)]

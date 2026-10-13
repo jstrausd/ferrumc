@@ -60,21 +60,23 @@ fn persistent_config(world_dir: &Path) -> AppConfig {
         .expect("world directory preserves valid config")
 }
 
-/// Reads play packets until the first `SynchronizePlayerPosition`, returning its
-/// position and look. Bounded by the outer timeout guard.
-async fn read_sync(client: &mut TestClient) -> anyhow::Result<(f64, f64, f64, f32, f32)> {
+/// Reads the initial position and held slot without assuming an ordering between
+/// independent join state messages. Both must carry the persisted values.
+async fn read_restored_state(
+    client: &mut TestClient,
+) -> anyhow::Result<((f64, f64, f64, f32, f32), i32)> {
+    let mut position = None;
+    let mut slot = None;
     loop {
-        if let ClientboundPlayPacket::SynchronizePlayerPosition(p) = client.next_play().await? {
-            return Ok((p.x(), p.y(), p.z(), p.yaw(), p.pitch()));
+        match client.next_play().await? {
+            ClientboundPlayPacket::SynchronizePlayerPosition(p) => {
+                position = Some((p.x(), p.y(), p.z(), p.yaw(), p.pitch()));
+            }
+            ClientboundPlayPacket::ClientboundSetHeldItem(p) => slot = Some(p.slot()),
+            _ => {}
         }
-    }
-}
-
-/// Reads play packets until the first `ClientboundSetHeldItem`, returning its slot.
-async fn read_held_slot(client: &mut TestClient) -> anyhow::Result<i32> {
-    loop {
-        if let ClientboundPlayPacket::ClientboundSetHeldItem(p) = client.next_play().await? {
-            return Ok(p.slot());
+        if let (Some(position), Some(slot)) = (position, slot) {
+            return Ok((position, slot));
         }
     }
 }
@@ -144,7 +146,7 @@ async fn establish_state(addr: SocketAddr, name: &str) -> anyhow::Result<()> {
 async fn assert_restored(addr: SocketAddr, name: &str) -> anyhow::Result<()> {
     let mut client = login_to_play(addr, name).await?;
 
-    let (x, y, z, yaw, pitch) = read_sync(&mut client).await?;
+    let ((x, y, z, yaw, pitch), slot) = read_restored_state(&mut client).await?;
     anyhow::ensure!(
         (x - SAVED_X).abs() < EPS && (y - SAVED_Y).abs() < EPS && (z - SAVED_Z).abs() < EPS,
         "restored position ({x}, {y}, {z}) != saved ({SAVED_X}, {SAVED_Y}, {SAVED_Z})",
@@ -154,7 +156,6 @@ async fn assert_restored(addr: SocketAddr, name: &str) -> anyhow::Result<()> {
         "restored look (yaw {yaw}, pitch {pitch}) != saved (yaw {SAVED_YAW}, pitch {SAVED_PITCH})",
     );
 
-    let slot = read_held_slot(&mut client).await?;
     anyhow::ensure!(
         slot == i32::from(SAVED_SLOT),
         "restored held slot {slot} != saved {SAVED_SLOT}",

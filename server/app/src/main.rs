@@ -62,17 +62,23 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     let config_path = cli.config_path();
+    let bind_all_interfaces = cli.bind_all_interfaces;
     let config =
         tokio::task::spawn_blocking(move || load_or_init_config(&config_path, cli.port, cli.bind))
             .await
             .map_err(|error| anyhow::anyhow!("config bootstrap task failed: {error}"))??;
+    let config = if bind_all_interfaces {
+        config.with_all_interface_binds()?
+    } else {
+        config
+    };
 
     let server = ferrumc_app::run(&config).await?;
     log_startup_banner(&config, &server);
 
     // Start the read-only observability dashboard on its own task so it never
     // blocks or stalls the simulation tick. It reads the snapshot the driver
-    // publishes through `server.snapshot_handle()` and binds loopback by default.
+    // publishes through `server.snapshot_handle()` and uses the configured address.
     if config.dashboard_enabled() {
         let snapshots = server.snapshot_handle();
         let dashboard_bind = config.dashboard_bind();

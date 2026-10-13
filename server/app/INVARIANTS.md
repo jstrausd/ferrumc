@@ -239,3 +239,13 @@
   Tree blocks never support spawn, fluids and
   unknown obstructions stop descent. Revisions1/2 retain their previous policy.
   The oak/birch subset is incomplete FEATURES and does not imply Survival.
+
+- Initial joins center the client on the actual fresh/restored destination.
+  The destination column must be acquired, successfully queued at mandatory
+  initial-join admission and flushed before the first position sync. State
+  priority cannot overtake that separate World flush. Cold generation retries
+  share an absolute join deadline and observe shutdown; actual returned tickets
+  are transferred before socket work and canceled late replies release at driver.
+- Minecraft and dashboard default to IPv4 wildcard addresses. The explicit
+  `--bind-all-interfaces` startup flag applies after bind/port overrides, preserves
+  each listener port and dashboard enablement, and is used by the preview launcher.

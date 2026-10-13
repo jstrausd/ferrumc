@@ -264,7 +264,7 @@ async fn drive_client_with_unknown_config(addr: SocketAddr) -> anyhow::Result<Ve
             }
             _ => {}
         }
-        // The position sync precedes the chunk column; stop once both arrive.
+        // The destination chunk precedes its position sync; stop once both arrive.
         if play_order.contains(&"sync") && play_order.contains(&"chunk") {
             break;
         }
@@ -291,7 +291,7 @@ async fn unknown_configuration_packets_are_ignored_and_client_reaches_play() {
     // The server skipped every Plugin Message and still drove the full join.
     assert_eq!(
         play_order,
-        vec!["join", "game_event", "center", "sync", "chunk"],
+        vec!["join", "game_event", "center", "chunk", "sync"],
         "join sequence out of order after ignoring unknown configuration packets",
     );
 

@@ -8,7 +8,7 @@ repository.workspace = true
 [dependencies]
 # Source of the metrics/snapshot data the dashboard renders read-only.
 ferrumc-observability = { workspace = true }
-# HTTP router/server for the localhost dashboard (htmx fragments + JSON).
+# HTTP router/server for the read-only dashboard (htmx fragments + JSON).
 axum = { workspace = true }
 # Async runtime hosting the server task (workspace pins the "full" feature set).
 tokio = { workspace = true }
@@ -25,8 +25,8 @@ tower = { workspace = true }
 # Static-asset serving (`ServeDir` for the htmx page) and request tracing for the
 # read-only web server.
 tower-http = { workspace = true }
-# Structured logging for the bind-time loopback rejection in `run`; an existing
-# workspace dep, so this adds no new external crate.
+
+# Existing workspace logging dependency, retained for compatibility.
 tracing = { workspace = true }
 
 [dev-dependencies]

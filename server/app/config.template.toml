@@ -9,13 +9,14 @@
 #
 # Unknown keys are rejected, so do not invent new ones. After editing, restart the
 # server for changes to take effect. The CLI flags --port and --bind override the
-# corresponding values below at startup without editing this file.
+# corresponding values below at startup without editing this file. The flag
+# --bind-all-interfaces forces both listener IPs to 0.0.0.0 while keeping ports.
 
 # --- Networking ---
 
-# Socket address the TCP listener binds to ("IP:port"). Use 0.0.0.0:25565 to accept
-# connections from other machines on your network; 127.0.0.1 is loopback only.
-# bind = "127.0.0.1:25565"
+# Socket address the TCP listener binds to ("IP:port"). The default accepts
+# connections on every IPv4 interface; 127.0.0.1 restricts it to this host.
+# bind = "0.0.0.0:25565"
 
 # Ceiling on simultaneously accepted connections (1..=1024). Also advertised as
 # the player max in the server-list ping.
@@ -125,9 +126,9 @@
 # Whether the read-only observability dashboard starts alongside the server.
 # dashboard_enabled = true
 
-# Socket address the dashboard binds to. Loopback by design so it is not reachable
-# off-host unless you change this deliberately.
-# dashboard_bind = "127.0.0.1:9090"
+# Socket address the dashboard binds to. The default accepts connections on every
+# IPv4 interface, matching the Minecraft listener.
+# dashboard_bind = "0.0.0.0:9090"
 
 # --- World content ---
 #
