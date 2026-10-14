@@ -232,6 +232,7 @@ pub struct NaturalWorldGenerator(
     Option<Arc<crate::grass::GrassPreview>>,
     Option<Arc<crate::trees::TreePreview>>,
     Option<Arc<crate::survival_ores::SurvivalOrePreview>>,
+    Option<Arc<crate::playable_features::PlayableFeatures>>,
 );
 impl std::fmt::Debug for NaturalWorldGenerator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -312,6 +313,7 @@ impl NaturalWorldGenerator {
             None,
             None,
             None,
+            None,
         ))
     }
     /// Binds revision 2: original plains/forest short-grass patches with isolated sources.
@@ -343,10 +345,21 @@ impl NaturalWorldGenerator {
         generator.3 = Some(Arc::new(crate::survival_ores::SurvivalOrePreview::new()?));
         Ok(generator)
     }
+    /// Binds revision 5 with biome-specific vegetation and surface structures.
+    ///
+    /// Includes `FerrumC` cabins with real chest loot, desert-well shells and
+    /// swamp-hut shells. This is a playable subset, without Vanilla seed parity.
+    pub fn with_playable(seed: WorldSeed) -> Result<Self, WorldError> {
+        let mut generator = Self::with_survival_preview(seed)?;
+        generator.4 = Some(Arc::new(crate::playable_features::PlayableFeatures::new()?));
+        Ok(generator)
+    }
     /// Returns the selected immutable terrain-preview revision identity.
     #[must_use]
     pub fn identity(&self) -> GenerationIdentity {
-        if self.3.is_some() {
+        if self.4.is_some() {
+            GenerationIdentity::natural_overworld_playable(self.0.seed)
+        } else if self.3.is_some() {
             GenerationIdentity::natural_overworld_survival(self.0.seed)
         } else if self.2.is_some() {
             GenerationIdentity::natural_overworld_with_trees(self.0.seed)
@@ -382,9 +395,29 @@ impl NaturalWorldGenerator {
                 &mut chunk,
             )?;
         }
+        if let Some(features) = &self.4 {
+            features.apply(
+                self,
+                self.1.as_deref().ok_or_else(|| {
+                    refusal(
+                        NaturalGenerationStage::Features,
+                        "missing playable raw binding",
+                    )
+                })?,
+                self.0.seed,
+                &mut chunk,
+            )?;
+        }
         Ok(chunk)
     }
 
+    pub(crate) fn tree_allowed(&self, origin: BlockPos) -> Result<bool, WorldError> {
+        if self.4.is_some() {
+            crate::playable_features::tree_allowed(self.0.seed, origin, 3)
+        } else {
+            Ok(true)
+        }
+    }
     #[cfg(test)]
     pub(crate) fn tree_preview(&self) -> Option<&crate::trees::TreePreview> {
         self.2.as_deref()
@@ -608,6 +641,10 @@ impl RuntimeWorldGenerator {
         Ok(Self::Natural(NaturalWorldGenerator::with_survival_preview(
             seed,
         )?))
+    }
+    /// Selects revision 5 with wider vegetation and loot-bearing surface cabins.
+    pub fn natural_playable(seed: WorldSeed) -> Result<Self, WorldError> {
+        NaturalWorldGenerator::with_playable(seed).map(Self::Natural)
     }
     /// Returns the selected complete baseline identity.
     #[must_use]

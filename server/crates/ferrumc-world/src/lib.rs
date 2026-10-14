@@ -59,6 +59,7 @@ mod network;
 pub mod noise;
 mod packed_array;
 mod paletted_container;
+mod playable_features;
 pub mod random;
 mod sample_work;
 pub mod spline;

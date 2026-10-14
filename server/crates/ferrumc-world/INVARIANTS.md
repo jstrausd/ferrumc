@@ -1164,3 +1164,45 @@ The omitted cold charge is518669 units; original fresh-state46362 units and all
 position-dependent samples remain executed. Four focused tests cover full state,
 work, climate bits, signed seeds/domain seams, N-1/N/N+1/small refusal boundaries,
 foreign-router/invalid-domain fallback and the native ceilings.
+
+## Native playable generation revision 5
+
+- `with_playable` extends the separately preserved revision-4 pipeline. Revisions
+  1–4 never enable the new stage or tree exclusion checks. Revision 5 has a
+  separate durable generation identity; it is not an implicit overlay migration.
+- Added vegetation and surface structure plans are FerrumC native policies,
+  not a full Vanilla FEATURES implementation or Vanilla seed parity. Surface
+  biome routing reads the installed stored quart at the raw surface, without
+  claiming the original zoomed FeatureSorter biome predicate.
+- Each source reads immutable raw material/surface/carver terrain. At most nine
+  source-neighbor chunks, 1,048,576 charged work units (including worst-case
+  98,304 block scans per raw heightmap), 8,192 distinct writes, six supplemental
+  tree attempts and 192 plant attempts are admitted. A refusal publishes no
+  source plan and no requested chunk. The independent raw producer's established
+  work meters and memory limits remain in addition to this stage's limits.
+- Plans are projected from all nine neighboring sources in ascending coordinate
+  order. No target-dependent generation, edited world, request history, mutable
+  RNG or client residency enters a plan. Cache retention is FIFO, bounded to
+  32 plans and eight MiB using conservative 80 bytes per BTree entry plus 16 KiB
+  per chest. Fixed 32-stripe miss gates coalesce work; no cache mutex spans
+  generation, and the lock order remains SOURCE -> RAW -> BIOME/CLIMATE.
+- Whole tree crowns and structure footprints are admitted before any writes.
+  Potential structure source rectangles reserve clearings before revision-5
+  oak/birch and native tree placement; intersecting complete crowns are refused,
+  preventing structure projection from cutting trunks below surviving crowns.
+  Failed terrain admission keeps the conservative clearing. The reservations
+  depend only on seed and signed floor-divided 8×8 source region coordinates.
+  Structure source offsets stay in 1..=6, guaranteeing non-overlapping complete
+  rectangles even across neighboring signed regions. Projected native trunks
+  replace competing leaves; projected leaves never replace either old or new logs.
+- Native supplemental plants replace only air/short grass/fern/snow. Added ores
+  and solid terrain cannot be erased by botanical writes. Sugar cane requires
+  real raw neighboring water at the ground level; cactus requires empty raw
+  horizontal neighbors. These conservative predicates do not claim all tag,
+  light, random-tick growth or support-physics branches.
+- Desert-well and swamp-hut shells omit archaeology and witch/cat creation.
+  FerrumC abandoned cabins are original structures with one real typed chest,
+  checked canonical item stacks and deterministic loot. They do not stand in
+  for Vanilla villages, strongholds, monuments, mineshafts, temples or jigsaw
+  structure registration. Generated chest inventories belong to the baseline;
+  existing complete overlay persistence preserves subsequent owner edits.

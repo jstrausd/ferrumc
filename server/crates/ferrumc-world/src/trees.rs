@@ -200,6 +200,9 @@ impl TreePreview {
                     continue;
                 }
                 let origin = BlockPos::new(x, ocean, z);
+                if !region.tree_allowed(origin)? {
+                    continue;
+                }
                 let supports = Facts::flag(region.state(BlockPos::new(x, ocean - 1, z))?, 6);
                 // Plains has outer sapling before biome; birch's outer sapling is
                 // after biome, mixed forest uses the selected nested sapling guard.
@@ -330,12 +333,18 @@ fn rank(state: BlockStateId, grass: BlockStateId) -> u8 {
     }
 }
 trait TreeWorld: Region {
+    fn tree_allowed(&self, _origin: BlockPos) -> Result<bool, WorldError> {
+        Ok(true)
+    }
     #[cfg(test)]
     fn record(&mut self, _draws: &[String]) {}
     fn heights(&mut self, x: i32, z: i32) -> Result<(i32, i32), WorldError>;
     fn put(&mut self, pos: BlockPos, state: BlockStateId) -> Result<(), WorldError>;
 }
 impl TreeWorld for SourceRegion<'_> {
+    fn tree_allowed(&self, origin: BlockPos) -> Result<bool, WorldError> {
+        self.generator.tree_allowed(origin)
+    }
     fn heights(&mut self, x: i32, z: i32) -> Result<(i32, i32), WorldError> {
         self.source_heights(x, z)
     }

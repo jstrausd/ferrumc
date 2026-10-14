@@ -306,7 +306,7 @@ fn natural_identity_is_distinct_roundtrips_and_rejects_unknown_revisions() {
             flat.ensure_compatible(natural),
             Err(GenerationError::IncompatibleIdentity { .. })
         ));
-        for revision in [0_u32, 5, u32::MAX] {
+        for revision in [0_u32, 6, u32::MAX] {
             expected[14..18].copy_from_slice(&revision.to_be_bytes());
             assert_eq!(
                 GenerationIdentity::decode(&expected),
@@ -366,10 +366,26 @@ fn survival_identity_roundtrips_and_preserves_every_prior_identity() {
             assert!(survival.ensure_compatible(old).is_err());
         }
         let mut unknown = survival.encode();
-        unknown[14..18].copy_from_slice(&5_u32.to_be_bytes());
+        unknown[14..18].copy_from_slice(&6_u32.to_be_bytes());
         assert!(matches!(
             GenerationIdentity::decode(&unknown),
-            Err(GenerationError::UnsupportedGeneratorRevision { revision: 5, .. })
+            Err(GenerationError::UnsupportedGeneratorRevision { revision: 6, .. })
         ));
+    }
+}
+
+#[test]
+fn playable_identity_round_trips_and_cannot_relabel_prior_baselines() {
+    for seed in [i64::MIN, -1, 0, 17, i64::MAX] {
+        let seed = ferrumc_world::WorldSeed::new(seed);
+        let identity = ferrumc_world::GenerationIdentity::natural_overworld_playable(seed);
+        assert_eq!(identity.generator_revision(), 5);
+        assert_eq!(
+            ferrumc_world::GenerationIdentity::decode(&identity.encode()).unwrap(),
+            identity
+        );
+        assert!(identity
+            .ensure_compatible(ferrumc_world::GenerationIdentity::natural_overworld_survival(seed))
+            .is_err());
     }
 }
