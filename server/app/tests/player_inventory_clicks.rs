@@ -147,13 +147,11 @@ async fn ordinary_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let stale = view.clone();
     view = click(&mut client, &view, 0, 45, 0, 0).await?;
     anyhow::ensure!(view.slots[45] == Some((31, 1)) && view.cursor.is_none());
-    let before = view.clone();
     view = click(&mut client, &stale, 0, 45, 0, 0).await?;
     anyhow::ensure!(
-        view.slots == before.slots && view.cursor == before.cursor,
-        "stale mutated"
+        view.slots[45].is_none() && view.cursor == Some((31, 1)),
+        "predicted stale state executes authoritative pickup"
     );
-    view = click(&mut client, &view, 0, 45, 0, 0).await?;
     for (window, slot, button, mode) in [
         (99, 9, 0, 0),
         (0, 0, 0, 0),

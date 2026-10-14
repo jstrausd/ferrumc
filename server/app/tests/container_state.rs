@@ -1,6 +1,6 @@
-//! Real-socket chest regression: window/state guards and the driver's atomic
-//! snapshot check reject stale clicks before changing either slot section or the
-//! cursor. Two viewers deliberately hold conflicting snapshots; resync replies
+//! Real-socket chest regression: window guards and the driver's atomic
+//! snapshot check reject conflicting views before changing either slot section
+//! or the cursor. State IDs may lag during vanilla prediction. Two viewers deliberately hold conflicting snapshots; resync replies
 //! provide deterministic barriers without sleeps or proactive subscriptions.
 
 mod common;
@@ -113,8 +113,12 @@ async fn open(client: &mut TestClient, sequence: i32) -> anyhow::Result<Contents
 }
 
 fn click_body(window: i32, state: i32, slot: i16, mode: i32) -> Vec<u8> {
+    click_button_body(window, state, slot, 0, mode)
+}
+
+fn click_button_body(window: i32, state: i32, slot: i16, button: u8, mode: i32) -> Vec<u8> {
     let mut rest = slot.to_be_bytes().to_vec();
-    rest.push(0); // left button
+    rest.push(button);
     write_var_int(&mut rest, mode);
     write_var_int(&mut rest, 0); // no claimed changed slots
     write_var_int(&mut rest, 0); // claimed empty cursor; server ignores it
@@ -213,22 +217,18 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
         "actor conflict cannot dupe stack"
     );
 
-    // Stale IDs guard the local player-slot branch, too: glass must stay put.
-    actor_view = click(&mut actor, actor_window, actor_view.state - 1, 28).await?;
-    anyhow::ensure!(
-        actor_view.slots[PLAYER_SECTION_START + 1] == Some((5, glass))
-            && actor_view.cursor.is_none(),
-        "stale player-slot click cannot exchange"
-    );
-    // Replaying the pickup state, or forging a future state, must not put the
-    // viewer's carried stack back into the chest.
-    for state in [pickup_state, viewer_view.state + 100] {
-        viewer_view = click(&mut viewer, viewer_window, state, 0).await?;
-        anyhow::ensure!(
-            viewer_view.slots[0].is_none() && viewer_view.cursor == Some((8, stone)),
-            "invalid state leaves cursor and chest intact"
-        );
-    }
+    let (actor_after, viewer_after) = verify_predicted_state_clicks(
+        &mut actor,
+        actor_view,
+        &mut viewer,
+        viewer_view,
+        pickup_state,
+        stone,
+        glass,
+    )
+    .await?;
+    actor_view = actor_after;
+    viewer_view = viewer_after;
     for wrong_window in [viewer_window + 1, 0] {
         viewer
             .send_frame(&click_body(wrong_window, viewer_view.state, 0, 0))
@@ -246,6 +246,40 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
 
     verify_close_ids(&mut viewer, viewer_view, stone).await?;
     verify_spectator_chest(&mut actor, actor_view).await
+}
+
+async fn verify_predicted_state_clicks(
+    actor: &mut TestClient,
+    mut actor_view: Contents,
+    viewer: &mut TestClient,
+    mut viewer_view: Contents,
+    pickup_state: i32,
+    stone: i32,
+    glass: i32,
+) -> anyhow::Result<(Contents, Contents)> {
+    // State IDs are the last received server revision, not replay tokens.
+    // Late/predicted actions run against authoritative current stacks, once each.
+    actor_view = click(actor, actor_view.window, actor_view.state - 1, 28).await?;
+    anyhow::ensure!(
+        actor_view.cursor == Some((5, glass)),
+        "lagging local pickup accepted"
+    );
+    actor_view = click(actor, actor_view.window, actor_view.state + 100, 28).await?;
+    anyhow::ensure!(
+        actor_view.cursor.is_none() && actor_view.slots[28] == Some((5, glass)),
+        "future claimed state grants no client item authority"
+    );
+    viewer_view = click(viewer, viewer_view.window, pickup_state, 0).await?;
+    anyhow::ensure!(
+        viewer_view.slots[0] == Some((8, stone)) && viewer_view.cursor.is_none(),
+        "repeated action deposits exactly the current carried items"
+    );
+    viewer_view = click(viewer, viewer_view.window, viewer_view.state + 100, 0).await?;
+    anyhow::ensure!(
+        viewer_view.slots[0].is_none() && viewer_view.cursor == Some((8, stone)),
+        "next action picks up once without duplicate inventory"
+    );
+    Ok((actor_view, viewer_view))
 }
 
 async fn verify_spectator_chest(actor: &mut TestClient, mut view: Contents) -> anyhow::Result<()> {
@@ -333,7 +367,7 @@ async fn verify_close_ids(
 }
 
 #[tokio::test]
-async fn stale_clicks_and_closes_cannot_exchange_items_between_two_chest_viewers() {
+async fn conflicting_chest_snapshots_and_wrong_window_ids_cannot_exchange_items() {
     let config = AppConfig::from_toml_str(
         "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\nops = [\"ChestActor\"]\n",
     )
@@ -347,4 +381,136 @@ async fn stale_clicks_and_closes_cannot_exchange_items_between_two_chest_viewers
         .await
         .expect("shutdown completes")
         .expect("clean shutdown");
+}
+
+fn item_total(view: &Contents, item: i32) -> i32 {
+    view.slots
+        .iter()
+        .chain(std::iter::once(&view.cursor))
+        .flatten()
+        .filter(|(_, id)| *id == item)
+        .map(|(count, _)| *count)
+        .sum()
+}
+
+async fn run_rapid_flow(addr: SocketAddr) -> anyhow::Result<()> {
+    let stone = ItemId::from_name("stone").expect("stone").id();
+    let glass = ItemId::from_name("glass").expect("glass").id();
+    let chest = ItemId::from_name("chest").expect("chest").id();
+    let mut client = login_to_play(addr, "RapidChest").await?;
+    common::make_creative(&mut client).await?;
+    next_contents(&mut client).await?;
+    set_slot(&mut client, 9, stone, 64).await?;
+    set_slot(&mut client, 10, glass, 16).await?;
+    set_slot(&mut client, 36, chest, 1).await?;
+    interact(&mut client, BlockPosition::new(10, 63, 8), 1).await?;
+    loop {
+        if let ClientboundPlayPacket::BlockUpdate(update) = client.next_play().await? {
+            if update.location() == chest_position() {
+                break;
+            }
+        }
+    }
+    let mut view = open(&mut client, 2).await?;
+    // One TCP write, no read/ACK barrier: real vanilla prediction shares the
+    // last received state ID across pickup plus rapid single-item placements.
+    let mut bodies = vec![click_button_body(view.window, view.state, 27, 0, 0)];
+    for slot in 0..8 {
+        bodies.push(click_button_body(view.window, view.state, slot, 1, 0));
+    }
+    let refs: Vec<_> = bodies.iter().map(Vec::as_slice).collect();
+    client.send_frames(&refs).await?;
+    for deposited in 0..=8 {
+        view = next_contents(&mut client).await?;
+        anyhow::ensure!(
+            view.cursor == Some((64 - deposited, stone)),
+            "rapid cursor {deposited}"
+        );
+        anyhow::ensure!(
+            item_total(&view, stone) == 64 && item_total(&view, glass) == 16,
+            "rapid click conservation"
+        );
+        for slot in 0..deposited as usize {
+            anyhow::ensure!(view.slots[slot] == Some((1, stone)));
+        }
+    }
+    // Held right-button drag: select eight chest slots, one player slot, an
+    // incompatible glass slot, and duplicate one slot. Finish atomically.
+    bodies = vec![click_button_body(view.window, view.state, -999, 4, 5)];
+    for slot in [8, 9, 10, 11, 12, 13, 14, 15, 27, 28, 8] {
+        bodies.push(click_button_body(view.window, view.state, slot, 5, 5));
+    }
+    bodies.push(click_button_body(view.window, view.state, -999, 6, 5));
+    let refs: Vec<_> = bodies.iter().map(Vec::as_slice).collect();
+    client.send_frames(&refs).await?;
+    view = next_contents(&mut client).await?;
+    anyhow::ensure!(
+        view.cursor == Some((47, stone)) && view.slots[27] == Some((1, stone)),
+        "right drag deposits exactly once in each eligible selected slot"
+    );
+    for slot in 0..16 {
+        anyhow::ensure!(view.slots[slot] == Some((1, stone)));
+    }
+    anyhow::ensure!(
+        view.slots[28] == Some((16, glass)) && item_total(&view, stone) == 64,
+        "incompatible and repeated drag slots conserve"
+    );
+    // A left placement followed by both directions of shift transfer in one
+    // wire burst uses the authoritative result of each previous action.
+    bodies = vec![
+        click_button_body(view.window, view.state, 16, 0, 0),
+        click_button_body(view.window, view.state, 28, 0, 1),
+        click_button_body(view.window, view.state, 16, 0, 1),
+    ];
+    let refs: Vec<_> = bodies.iter().map(Vec::as_slice).collect();
+    client.send_frames(&refs).await?;
+    for _ in 0..3 {
+        view = next_contents(&mut client).await?;
+        anyhow::ensure!(
+            item_total(&view, stone) == 64 && item_total(&view, glass) == 16,
+            "rapid shift conservation"
+        );
+    }
+    anyhow::ensure!(
+        view.cursor.is_none()
+            && view.slots[16].is_none()
+            && view.slots[17] == Some((16, glass))
+            && view.slots[27] == Some((48, stone)),
+        "rapid shift completed in both directions"
+    );
+    // Shift first merged into the existing player stack. Left drag shares that
+    // complete 48-stack across five slots; the remainder stays carried.
+    view = click(&mut client, view.window, view.state, 27).await?;
+    bodies = vec![click_button_body(view.window, view.state, -999, 0, 5)];
+    for slot in [18, 19, 20, 21, 22] {
+        bodies.push(click_button_body(view.window, view.state, slot, 1, 5));
+    }
+    bodies.push(click_button_body(view.window, view.state, -999, 2, 5));
+    let refs: Vec<_> = bodies.iter().map(Vec::as_slice).collect();
+    client.send_frames(&refs).await?;
+    view = next_contents(&mut client).await?;
+    anyhow::ensure!(
+        view.cursor == Some((3, stone)) && item_total(&view, stone) == 64,
+        "left drag remainder conserved"
+    );
+    for slot in 18..23 {
+        anyhow::ensure!(view.slots[slot] == Some((9, stone)));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn rapid_predicted_right_clicks_drag_and_shift_transfers_preserve_every_item() {
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\nops = [\"RapidChest\"]\n",
+    ).expect("config");
+    let server = ferrumc_app::run(&config).await.expect("server starts");
+    timeout(GUARD, run_rapid_flow(server.local_addr()))
+        .await
+        .expect("rapid flow finishes")
+        .expect("rapid flow succeeds");
+    timeout(GUARD, server.shutdown())
+        .await
+        .expect("stop finishes")
+        .expect("stop succeeds");
 }

@@ -755,6 +755,17 @@ pub(crate) enum SimCommand {
         expected_slots: Vec<ItemStack>,
         reply: oneshot::Sender<Option<(Vec<ItemStack>, Vec<ItemStack>)>>,
     },
+    /// Complete, atomic, beforeimage-checked ordinary drag exchange.
+    ContainerDrag {
+        player: PlayerId,
+        position: BlockPos,
+        player_slots: Vec<ItemStack>,
+        cursor: ItemStack,
+        expected_slots: Vec<ItemStack>,
+        selection: Vec<usize>,
+        right: bool,
+        reply: oneshot::Sender<Option<ferrumc_items::ChestDragPlan>>,
+    },
     ContainerLeftClick {
         /// The clicking player.
         player: PlayerId,
@@ -2023,6 +2034,27 @@ async fn handle_command(
                 &expected_slots,
             );
             let _ = reply.send(outcome);
+        }
+        SimCommand::ContainerDrag {
+            player,
+            position,
+            player_slots,
+            cursor,
+            expected_slots,
+            selection,
+            right,
+            reply,
+        } => {
+            let result = shard.container_drag_checked(
+                player,
+                position,
+                &player_slots,
+                &cursor,
+                &expected_slots,
+                &selection,
+                right,
+            );
+            let _ = reply.send(result);
         }
         SimCommand::ContainerLeftClick {
             player,

@@ -1018,10 +1018,10 @@ impl PlayerInventory {
         });
     }
 
-    /// Advances the window state id (wrapping), used after a resync so the client
-    /// validates subsequent clicks against the new value.
+    /// Advances the nonnegative 15-bit revision published in container updates.
+    /// Predicted client clicks may still carry the previous received revision.
     pub(crate) fn bump_state_id(&mut self) {
-        self.state_id = self.state_id.wrapping_add(1);
+        self.state_id = (self.state_id + 1) & 32767;
     }
 
     /// Builds the `SetContainerContent` body for window 0: all [`SLOT_COUNT`]

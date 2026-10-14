@@ -117,6 +117,13 @@ fn only_supported_profiles_are_accepted() {
         Some(WorldGenerationPreset::FerrumcNaturalTreePreview)
     );
     assert_eq!(trees.seed(), Some(-42));
+    let playable: WorldConfig =
+        toml::from_str("preset = 'ferrumc_natural_playable'\nseed = -42").unwrap();
+    assert_eq!(
+        playable.preset(),
+        Some(WorldGenerationPreset::FerrumcNaturalPlayable)
+    );
+    assert_eq!(playable.seed(), Some(-42));
     for literal in [
         "'flat'",
         "'normal'",

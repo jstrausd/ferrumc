@@ -2488,24 +2488,14 @@ async fn handle_set_held_item(
         .map_err(|_| anyhow::anyhow!("simulation driver is gone"))
 }
 
-/// Handles a serverbound Click Container.
+/// Handles a click against the currently active screen's authoritative items.
 ///
-/// On the open chest window, the SAFE click subset is applied directly:
-/// **normal-mode left-click** (`mode = 0`, `button = 0`) on a chest or
-/// player-inventory slot runs the item-count-conserving exchange (pickup / place /
-/// merge / swap — chest mutations round-trip atomically to the simulation). EVERY
-/// other case — right-click, shift-click, drag, number-key swap, double-click,
-/// drop-outside, an out-of-window slot, or a malformed body — is treated as a
-/// no-op and the whole window is resynced (authoritative `SetContainerContent`)
-/// rather than guessed. Window and state IDs must match before either slot
-/// section can mutate. Stale
-/// IDs refresh the chest snapshot and resync the current window; clicks for an
-/// unknown window without an open chest resync the player inventory. The client's
-/// claimed result is never trusted. With no chest open, window 0 accepts normal
-/// left/right clicks in writable player slots; result and armor insertion remain
-/// unavailable, and unsupported actions resync. If the chest becomes inaccessible, exchanges
-/// are refused and the last snapshot/cursor are retained; server-driven closure
-/// of that screen is not yet modelled.
+/// The client state ID names its last received update, not a transaction token:
+/// vanilla can pipeline several predicted clicks before our first reply arrives.
+/// Each click therefore runs serially against the current cursor/slots and gets
+/// a complete authoritative resync even when its state ID differs. The window
+/// identity, accessibility, mode and exact shard-owned chest beforeimage still
+/// guard every exchange; claimed client items never become authority.
 #[allow(clippy::too_many_arguments)] // one click step: identity + window state + I/O + trace
 async fn handle_window_click(
     ctx: &ConnContext,
@@ -2517,14 +2507,11 @@ async fn handle_window_click(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    // Validate both IDs before parsing or mutating either chest or player slots.
-    // Even window 0 is stale while a chest is the active container screen.
+    // Window identity remains mandatory even when predicted clicks carry an old
+    // state ID. Window 0 is inactive while a container screen is open.
     if let Some(open) = window_state.open() {
         let previous_equipment = inventory.equipment_body()?;
-        if inventory.game_mode() != GameMode::Spectator
-            && packet.window_id() == open.window_id()
-            && packet.state_id() == open.state_id()
-        {
+        if inventory.game_mode() != GameMode::Spectator && packet.window_id() == open.window_id() {
             if open.is_crafting() {
                 if crafting_accessible(ctx, player, open.position()).await? {
                     if let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) {
@@ -2533,10 +2520,20 @@ async fn handle_window_click(
                         }
                     }
                 }
+            } else if decode_click_prefix(packet.rest()).is_some_and(|(_, _, mode)| mode == 5) {
+                if !apply_chest_drag(ctx, player, inventory, window_state, packet).await? {
+                    return Ok(());
+                }
             } else {
+                if let Some(open) = window_state.open_mut() {
+                    open.drag = None;
+                }
                 apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
             }
         } else {
+            if let Some(open) = window_state.open_mut() {
+                open.drag = None;
+            }
             refresh_chest_window(ctx, player, window_state).await?;
         }
         let equipment = inventory.equipment_body()?;
@@ -2580,14 +2577,14 @@ async fn handle_window_click(
     )
 }
 
-/// Validates window/state and supports only ordinary left/right player clicks.
+/// Validates the active window and applies authoritative player clicks.
 /// A malformed prefix, unsupported mode, result/armor insertion, outside slot or
 /// spectator action leaves all items untouched for the caller's full resync.
 fn apply_player_window_click(
     inventory: &mut PlayerInventory,
     packet: &WindowClick,
 ) -> anyhow::Result<Option<usize>> {
-    if packet.window_id() != WINDOW_ID || packet.state_id() != inventory.state_id() {
+    if packet.window_id() != WINDOW_ID {
         return Ok(None);
     }
     let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) else {
@@ -2610,8 +2607,8 @@ fn apply_player_window_click(
 /// Applies the SAFE subset of a click on the open chest window to the
 /// authoritative state, mutating the chest mirror / cursor / player inventory.
 ///
-/// Only normal-mode left-click is applied; any other mode/button, an out-of-window
-/// slot, or a malformed body is a no-op (the caller's resync heals the client).
+/// Supports normal left/right pickup, shift transfer and number-key swaps.
+/// Unsupported actions and malformed prefixes resync without exchanging items.
 /// The server recomputes the outcome from its own authoritative state and never
 /// trusts the click body's trailing changed-slots / cursor (`HashedSlot`) fields,
 /// which are not even parsed.
@@ -2670,7 +2667,7 @@ async fn apply_chest_window_click(
         }
         return Ok(());
     }
-    // Normal-mode left-click only; everything else resyncs.
+    // Normal pickup supports both mouse buttons; other actions resync.
     if mode != 0 || !matches!(button, 0 | 1) {
         refresh_chest_window(ctx, player, window_state).await?;
         return Ok(());
@@ -2731,6 +2728,146 @@ async fn apply_chest_window_click(
         }
     }
     Ok(())
+}
+
+/// Collects drag phases without modifying either owner, then commits all slots
+/// and the cursor in one checked shard operation. Returns whether to resync.
+async fn apply_chest_drag(
+    ctx: &ConnContext,
+    player: PlayerId,
+    inventory: &mut PlayerInventory,
+    windows: &mut WindowState,
+    packet: &WindowClick,
+) -> anyhow::Result<bool> {
+    let Some((slot, button, _)) = decode_click_prefix(packet.rest()) else {
+        return Ok(true);
+    };
+    let Some(open) = windows.open_mut() else {
+        return Ok(true);
+    };
+    // Only ordinary left/right quick-craft; Creative middle-fill is separate.
+    if !matches!(button, 0 | 1 | 2 | 4 | 5 | 6) {
+        open.drag = None;
+        return Ok(true);
+    }
+    let right = button >= 4;
+    let phase = button & 3;
+    if phase == 0 {
+        open.drag = None;
+        if slot != -999 || inventory.carried().item().is_none() {
+            return Ok(true);
+        }
+        // Validate every model and complete resource envelope before retaining
+        // even the start cursor; no cloned client-supplied stacks participate.
+        if ferrumc_items::plan_chest_drag(
+            open.chest_slots(),
+            inventory.window_slots(),
+            inventory.carried(),
+            &[],
+            right,
+        )
+        .is_err()
+        {
+            return Ok(true);
+        }
+        open.drag = Some(crate::window::ChestDrag {
+            right,
+            selection: Vec::with_capacity(crate::window::CHEST_WINDOW_SLOTS),
+            cursor: inventory.carried().clone(),
+        });
+        return Ok(false);
+    }
+    let Some(mut drag) = open.drag.take() else {
+        return Ok(true);
+    };
+    if drag.right != right
+        || drag.cursor.count() != inventory.carried().count()
+        || !ferrumc_items::same_stack_representation(&drag.cursor, inventory.carried())?
+    {
+        return Ok(true);
+    }
+    if phase == 1 {
+        if !select_chest_drag_slot(open, inventory, &mut drag, slot)? {
+            return Ok(true);
+        }
+        open.drag = Some(drag);
+        return Ok(false);
+    }
+    if slot != -999 {
+        return Ok(true);
+    }
+    let Ok(preview) = ferrumc_items::plan_chest_drag(
+        open.chest_slots(),
+        inventory.window_slots(),
+        inventory.carried(),
+        &drag.selection,
+        right,
+    ) else {
+        return Ok(true);
+    };
+    if inventory
+        .admit_container_candidate(preview.player(), preview.cursor())
+        .is_err()
+    {
+        return Ok(true);
+    }
+    let (reply, response) = oneshot::channel();
+    ctx.commands
+        .send(SimCommand::ContainerDrag {
+            player,
+            position: open.position(),
+            player_slots: inventory.window_slots().to_vec(),
+            cursor: inventory.carried().clone(),
+            expected_slots: open.chest_slots().to_vec(),
+            selection: drag.selection,
+            right,
+            reply,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("driver closed before chest drag"))?;
+    if let Some(result) = response
+        .await
+        .map_err(|_| anyhow::anyhow!("driver dropped chest drag receipt"))?
+    {
+        let (chest, slots, cursor) = result.into_parts();
+        inventory.set_window_slots(slots);
+        inventory.set_carried(cursor);
+        if let Some(open) = windows.open_mut() {
+            open.set_chest_slots(chest);
+        }
+    }
+    Ok(true)
+}
+
+/// Selects one compatible slot without cloning or changing any authoritative item.
+fn select_chest_drag_slot(
+    open: &OpenContainer,
+    inventory: &PlayerInventory,
+    drag: &mut crate::window::ChestDrag,
+    slot: i16,
+) -> anyhow::Result<bool> {
+    let Ok(index) = usize::try_from(slot) else {
+        return Ok(false);
+    };
+    let target = if index < ferrumc_world::CHEST_SLOTS {
+        open.chest_slots().get(index)
+    } else {
+        inventory
+            .window_slots()
+            .get(index - ferrumc_world::CHEST_SLOTS)
+    };
+    let Some(target) = target else {
+        return Ok(false);
+    };
+    if !drag.selection.contains(&index)
+        && usize::from(inventory.carried().count()) > drag.selection.len()
+        && (target.item().is_none()
+            || ferrumc_items::same_stack_representation(target, inventory.carried())?)
+        && target.count() <= ferrumc_items::stack_capacity(inventory.carried())?
+    {
+        drag.selection.push(index);
+    }
+    Ok(true)
 }
 
 /// Refreshes the open chest mirror through its owning driver. Returns true only
@@ -4176,7 +4313,6 @@ mod tests {
         let mut writer = PlayWriter::with_defaults(ctx.limits);
         let claims = [
             (99, 0, 9, 0, 0),   // wrong window
-            (0, -1, 9, 0, 0),   // stale state
             (0, 0, -999, 0, 0), // outside drop unsupported
             (0, 0, 46, 0, 0),   // outside player window
             (0, 0, 9, 2, 0),    // unsupported middle button
@@ -4300,7 +4436,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stale_container_ids_reject_both_slot_sections_before_mutation_and_refresh() {
+    async fn wrong_container_ids_reject_both_slot_sections_before_mutation_and_refresh() {
         use ferrumc_world::CHEST_SLOTS;
 
         // Each wrong ID is tested against chest AND local player-slot mutations.
@@ -4322,7 +4458,7 @@ mod tests {
         });
         let ctx = handler_context(commands, PluginHost::in_memory()).await;
         for slot in [0, 27] {
-            for (window_id, state_id) in [(1, 0), (1, 2), (1, -1), (2, 1), (0, 1)] {
+            for (window_id, state_id) in [(2, 1), (0, 1)] {
                 let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
                 *inventory.slot_mut(9).expect("main slot") = container_probe_stack(4);
                 let mut windows = WindowState::new();
@@ -4359,7 +4495,84 @@ mod tests {
             }
         }
         drop(ctx);
-        assert_eq!(probe.await.expect("request probe finished"), 10);
+        assert_eq!(probe.await.expect("request probe finished"), 4);
+    }
+
+    #[tokio::test]
+    async fn chest_drag_invalid_phases_and_intervening_cursor_change_never_dispatch_mutation() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        inventory.set_carried(container_probe_stack(5));
+        let mut windows = WindowState::new();
+        windows.open_chest(
+            BlockPos::new(8, 65, 8),
+            vec![ItemStack::empty(); ferrumc_world::CHEST_SLOTS],
+        );
+        let player = PlayerId::offline("DragProbe");
+        let packet = |slot: i16, button: u8| {
+            let mut rest = slot.to_be_bytes().to_vec();
+            rest.push(button);
+            write_var_int(&mut rest, 5);
+            WindowClick::new(1, 0, rest)
+        };
+        // Missing start, wrong type, and cursor changes cancel the complete drag.
+        assert!(
+            super::apply_chest_drag(&ctx, player, &mut inventory, &mut windows, &packet(0, 5))
+                .await
+                .unwrap()
+        );
+        assert!(!super::apply_chest_drag(
+            &ctx,
+            player,
+            &mut inventory,
+            &mut windows,
+            &packet(-999, 4)
+        )
+        .await
+        .unwrap());
+        assert!(
+            super::apply_chest_drag(&ctx, player, &mut inventory, &mut windows, &packet(0, 1))
+                .await
+                .unwrap()
+        );
+        assert!(!super::apply_chest_drag(
+            &ctx,
+            player,
+            &mut inventory,
+            &mut windows,
+            &packet(-999, 4)
+        )
+        .await
+        .unwrap());
+        assert!(!super::apply_chest_drag(
+            &ctx,
+            player,
+            &mut inventory,
+            &mut windows,
+            &packet(0, 5)
+        )
+        .await
+        .unwrap());
+        inventory.set_carried(container_probe_stack(4));
+        assert!(super::apply_chest_drag(
+            &ctx,
+            player,
+            &mut inventory,
+            &mut windows,
+            &packet(-999, 6)
+        )
+        .await
+        .unwrap());
+        assert!(inbox.try_recv().is_err());
+        assert_eq!(inventory.carried(), &container_probe_stack(4));
+        assert!(windows
+            .open()
+            .unwrap()
+            .chest_slots()
+            .iter()
+            .all(|stack| stack.item().is_none()));
+        assert!(windows.open().unwrap().drag.is_none());
     }
 
     #[tokio::test]

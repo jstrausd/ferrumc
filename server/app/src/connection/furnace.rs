@@ -164,10 +164,7 @@ pub(super) async fn click(
     let Some(open) = windows.furnace.as_ref() else {
         return Ok(());
     };
-    if packet.window_id() != open.window_id()
-        || packet.state_id() != open.state_id()
-        || inventory.game_mode() == GameMode::Spectator
-    {
+    if packet.window_id() != open.window_id() || inventory.game_mode() == GameMode::Spectator {
         return resync(ctx, writer, inventory, windows, debug, compression, true);
     }
     let Some((slot, button, mode)) = super::handlers::decode_click_prefix(packet.rest()) else {

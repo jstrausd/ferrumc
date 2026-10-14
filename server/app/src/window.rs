@@ -27,7 +27,7 @@ pub(crate) const GENERIC_9X3_TYPE: i32 = 2;
 pub(crate) const CRAFTING_TYPE: i32 = 12;
 
 /// The window state id stamped on the first `SetContainerContent`, bumped on every
-/// subsequent send so the client validates clicks against the latest value.
+/// subsequent send so the client can report its latest received revision.
 const INITIAL_STATE_ID: i32 = 1;
 
 /// The number of player-inventory slots shown in a container window (main grid +
@@ -46,6 +46,13 @@ pub(crate) enum WindowSlot {
     Player(usize),
 }
 
+/// One bounded, connection-owned ordinary chest drag; no world mutation yet.
+pub(crate) struct ChestDrag {
+    pub(crate) right: bool,
+    pub(crate) selection: Vec<usize>,
+    pub(crate) cursor: ItemStack,
+}
+
 /// A container window the player currently has open.
 pub(crate) struct OpenContainer {
     window_id: i32,
@@ -54,6 +61,7 @@ pub(crate) struct OpenContainer {
     slots: Vec<ItemStack>,
     state_id: i32,
     crafting: bool,
+    pub(crate) drag: Option<ChestDrag>,
 }
 
 impl OpenContainer {
@@ -66,6 +74,7 @@ impl OpenContainer {
             slots,
             state_id: INITIAL_STATE_ID,
             crafting: false,
+            drag: None,
         }
     }
 
@@ -100,9 +109,9 @@ impl OpenContainer {
         self.slots = slots;
     }
 
-    /// Advances the window state id (wrapping) before a clientbound resync.
+    /// Advances the window revision within the protocol's nonnegative 15-bit domain.
     pub(crate) fn bump_state_id(&mut self) {
-        self.state_id = self.state_id.wrapping_add(1);
+        self.state_id = (self.state_id + 1) & 32767;
     }
 
     /// Maps a raw wire slot index to the [`WindowSlot`] it addresses, or `None`

@@ -138,7 +138,7 @@ impl FurnaceWindow {
     ) -> Result<SetContainerContent, ItemValidationError> {
         Ok(SetContainerContent::new(
             self.window_id,
-            self.state_id,
+            self.state_id(),
             self.content_payload(player)?,
         ))
     }

@@ -567,7 +567,7 @@ impl AppConfig {
     pub(crate) fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
             !matches!(self.world.preset(),
-                Some(WorldGenerationPreset::FerrumcNaturalPreview | WorldGenerationPreset::FerrumcNaturalGrassPreview | WorldGenerationPreset::FerrumcNaturalTreePreview | WorldGenerationPreset::FerrumcNaturalSurvivalPreview))
+                Some(WorldGenerationPreset::FerrumcNaturalPreview | WorldGenerationPreset::FerrumcNaturalGrassPreview | WorldGenerationPreset::FerrumcNaturalTreePreview | WorldGenerationPreset::FerrumcNaturalSurvivalPreview | WorldGenerationPreset::FerrumcNaturalPlayable))
                 || self.world.anvil_import_dir().is_none(),
             "ferrumc_natural_preview cannot use anvil_import_dir: imported full chunks do not preserve preview biome palettes"
         );

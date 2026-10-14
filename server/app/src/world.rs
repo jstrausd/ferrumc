@@ -318,6 +318,8 @@ pub(crate) async fn build_world(
     let runtime_generator = tokio::task::spawn_blocking(move || match identity.generator_kind() {
         GeneratorKind::FerrumcFlat => Ok(RuntimeWorldGenerator::flat(identity.seed())),
         GeneratorKind::FerrumcNaturalPreview => match identity.generator_revision() {
+            5 => RuntimeWorldGenerator::natural_playable(identity.seed())
+                .map_err(anyhow::Error::from),
             1 => RuntimeWorldGenerator::natural(identity.seed()).map_err(anyhow::Error::from),
             2 => RuntimeWorldGenerator::natural_with_grass(identity.seed())
                 .map_err(anyhow::Error::from),
@@ -417,6 +419,8 @@ pub(crate) async fn build_world(
 /// Reports only the selected preview subset; revision3 does not imply FEATURES.
 fn report_natural_preview(revision: u32, selected: Vec3) {
     match revision {
+            5 => tracing::info!(x = selected.x, y = selected.y, z = selected.z,
+                "natural playable world ready: terrain, biomes, caves, grass, trees, ores and bounded structures; full Vanilla feature parity remains incomplete"),
             4 => tracing::info!(x = selected.x, y = selected.y, z = selected.z,
                 "Survival terrain preview ready: terrain, biomes, surfaces, caves, short grass, bounded oak/birch trees and placed ores; structures and complete biome features remain incomplete"),
             3 => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
@@ -507,10 +511,16 @@ async fn reconcile_generation(
         Some(WorldGenerationPreset::FerrumcNaturalSurvivalPreview) => {
             GenerationIdentity::natural_overworld_survival(seed)
         }
+        Some(WorldGenerationPreset::FerrumcNaturalPlayable) => {
+            GenerationIdentity::natural_overworld_playable(seed)
+        }
         Some(preset) => anyhow::bail!("unsupported world generation preset {preset:?}"),
         None => match stored {
             Some(identity) => match identity.generator_kind() {
                 GeneratorKind::FerrumcFlat => GenerationIdentity::flat_overworld(seed),
+                GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 5 => {
+                    GenerationIdentity::natural_overworld_playable(seed)
+                }
                 GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 4 => {
                     GenerationIdentity::natural_overworld_survival(seed)
                 }
@@ -1451,6 +1461,37 @@ mod tests {
                 Some(record.clone())
             );
         }
+    }
+
+    #[tokio::test]
+    async fn playable_preset_reuses_exact_stored_identity_and_refuses_old_revision() {
+        let store = InMemoryStore::with_generation_metadata();
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        let config =
+            AppConfig::from_toml_str("[world]\nseed=17\npreset='ferrumc_natural_playable'")
+                .unwrap();
+        let identity = reconcile_generation(&store, key, &config).await.unwrap();
+        assert_eq!(
+            identity,
+            GenerationIdentity::natural_overworld_playable(WorldSeed::new(17))
+        );
+        assert_eq!(
+            reconcile_generation(&store, key, &AppConfig::default())
+                .await
+                .unwrap(),
+            identity
+        );
+        let old =
+            AppConfig::from_toml_str("[world]\npreset='ferrumc_natural_survival_preview'").unwrap();
+        assert!(reconcile_generation(&store, key, &old).await.is_err());
+        assert_eq!(
+            store.load_generation_identity(key).await.unwrap(),
+            Some(identity)
+        );
+        assert!(AppConfig::from_toml_str(
+            "[world]\npreset='ferrumc_natural_playable'\nanvil_import_dir='/unused'"
+        )
+        .is_err());
     }
 
     #[tokio::test]

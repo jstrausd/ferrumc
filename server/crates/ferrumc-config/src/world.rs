@@ -41,6 +41,9 @@ pub enum WorldGenerationPreset {
     /// Natural grass/trees and a pinned ordinary ore subset, isolated revision four.
     #[serde(rename = "ferrumc_natural_survival_preview")]
     FerrumcNaturalSurvivalPreview,
+    /// Natural Survival terrain with additional vegetation and bounded structures.
+    #[serde(rename = "ferrumc_natural_playable")]
+    FerrumcNaturalPlayable,
 }
 
 /// Declarative world-content configuration, deserialized from the `[world]` TOML

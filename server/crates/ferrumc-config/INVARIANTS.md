@@ -22,7 +22,9 @@
   text, random tokens, floats, other types and out-of-range values are rejected.
 - The private preset choice accepts `ferrumc_flat` and the explicitly experimental
   `ferrumc_natural_preview`, `ferrumc_natural_grass_preview` and
-  `ferrumc_natural_tree_preview` variants. Grass/tree profiles select separate
+  `ferrumc_natural_tree_preview`, `ferrumc_natural_survival_preview` and
+  `ferrumc_natural_playable` variants. The playable profile selects revision5
+  with additional vegetation and bounded structures. Grass/tree profiles select separate
   revisions with isolated short-grass and bounded oak/birch subsets.
   These previews do not declare complete features or Survival. Unknown presets and unknown/duplicate keys reject the
   configuration; no stringly typed or catch-all fallback is accepted.

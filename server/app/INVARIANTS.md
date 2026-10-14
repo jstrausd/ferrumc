@@ -146,8 +146,10 @@
   transfers ticket ownership before packet encoding/flush; failed setup before
   that reply releases no guessed spawn tickets, and an unconfirmed admitted
   handoff quarantines the player UUID.
-- A chest click may exchange items only after both active window and state IDs
-  match. The driver also compares that viewer's bounded chest snapshot atomically
+- A chest click requires the active window ID. A valid older client StateId
+  does not deny a predicted pipelined action: the action uses the current server
+  slots and cursor, then receives complete authoritative content. Client
+  changed-slot/cursor predictions never grant or replace items. The driver also compares that viewer's bounded chest snapshot atomically
   before a chest-slot exchange using exact lossless item encodings, including
   NBT float bits; conflicting views return the unchanged cursor and fresh
   contents. Resyncs include both slot sections and the cursor.
@@ -372,3 +374,18 @@
   refresh remain serial. GUI/cursor drops, Paper item-drop events/cancellation,
   stats, map tracking, same-tick drop-rate policy and crash atomicity are outside
   this held-mainhand slice.
+
+- The no-argument launcher uses the native natural playable revision5 and a
+  separate `local-play` save, with `RUST_LOG=debug` unless explicitly overridden.
+  World metadata remains authoritative: existing generator revisions are never
+  silently reinterpreted. The runtime reports the selected implemented subset;
+  additional native structures do not establish full Vanilla world-generation
+  or original structure-placement parity.
+
+- Ordinary chest QUICK_CRAFT collects at most 63 unique compatible slot indices
+  without mutation during start/add phases. Finish admits the complete player
+  save envelope and commits one complete FCIS-checked chest/player/cursor
+  postimage at the exclusive owner. Invalid sequence, changed cursor, conflicting
+  viewer or resource refusal leaves the inventory parts unchanged. Left/right
+  distribution is supported; Creative middle-fill and Java drag events remain
+  separate behavior.
