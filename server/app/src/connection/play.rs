@@ -5,6 +5,10 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, watch};
 use tokio::time::{interval_at, sleep_until, Instant, Interval, MissedTickBehavior};
+enum ConnectionWake {
+    Play(PlayWake),
+    Effect(Option<crate::gameplay::GameplayEffect>),
+}
 
 use ferrumc_codec::BoundedString;
 use ferrumc_core::{GameMode, PlayerId};
@@ -30,7 +34,7 @@ use crate::window::WindowState;
 
 use super::chunk_stream::{apply_chunk_stream, mirror_server_teleport, ChunkStream};
 use super::context::ConnContext;
-use super::handlers::handle_play_body;
+use super::handlers::{handle_gameplay_effect, handle_play_body};
 use super::ingress::{is_exact_keep_alive, IngressFence};
 use super::join::send_join_kit;
 use super::outbound::{
@@ -108,6 +112,10 @@ pub(super) async fn enter_play(
         PlayerLoad::NotFound => None,
     };
     let is_returning = restored.is_some();
+    let restored_vitals = restored.as_ref().map_or_else(
+        || ferrumc_sim::PlayerVitals::new().snapshot(),
+        |(data, _)| data.vitals(),
+    );
 
     // Resolve the join state from the restored record or the spawn defaults. The
     // authoritative server-side inventory is built here, BEFORE the join, so the
@@ -162,8 +170,13 @@ pub(super) async fn enter_play(
                 position,
                 0.0_f32,
                 0.0_f32,
-                GameMode::Creative,
-                PlayerInventory::with_creative_kit(GameMode::Creative),
+                GameMode::Survival,
+                PlayerInventory::from_persisted(
+                    GameMode::Survival,
+                    0,
+                    std::array::from_fn(|_| ferrumc_items::ItemStack::empty()),
+                    ferrumc_items::ItemStack::empty(),
+                ),
             )
         };
 
@@ -215,7 +228,21 @@ pub(super) async fn enter_play(
     // Subscribe before the initial graph. Any concurrent mutation during the
     // join kit remains pending and triggers a fresh graph after the handoff.
     let mut operator_changes = ctx.policy.operators().subscribe();
+    let (effect_tx, mut effect_rx) = tokio::sync::mpsc::channel(crate::gameplay::EFFECT_CAPACITY);
     let setup: anyhow::Result<()> = async {
+        let (reply, registered) = oneshot::channel();
+        ctx.commands
+            .send(SimCommand::RegisterGameplay {
+                player,
+                sender: effect_tx,
+                reply,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+        anyhow::ensure!(
+            registered.await?,
+            "trusted gameplay receiver registration refused"
+        );
         send_sim_command_accepted(
             ctx,
             SimCommand::SetGameMode {
@@ -233,6 +260,7 @@ pub(super) async fn enter_play(
             ctx,
             &mut debug,
             player,
+            handle.entity_id(),
             name.as_str(),
             position,
             player_yaw,
@@ -254,6 +282,23 @@ pub(super) async fn enter_play(
     // returned via `?`, so this connection still runs the shared leave-save and
     // chunk-ticket release teardown below instead of leaking the join's tickets.
     let mut deferred_break = setup.err();
+    if deferred_break.is_none() {
+        if let Err(error) = send_sim_command_accepted(
+            ctx,
+            SimCommand::GameplayInput {
+                player,
+                input: ferrumc_sim::GameInput::RestoreVitals {
+                    player,
+                    snapshot: restored_vitals,
+                },
+                acceptance: None,
+            },
+        )
+        .await
+        {
+            deferred_break = Some(error);
+        }
+    }
     // Per-connection open-container window state (a chest screen, when open). The
     // always-open player inventory lives in `inventory`; this tracks the at-most-one
     // container window layered on top of it.
@@ -366,6 +411,60 @@ pub(super) async fn enter_play(
     let mut read_buf = [0u8; READ_CHUNK];
     let mut next_work = 0;
     let result = loop {
+        // Immutable ordinary equipment facts are refreshed before any later
+        // interaction command, including changes caused by owner pickup effects.
+        let profile = crate::combat::CombatProfile::from_inventory(&inventory).ok();
+        let combat_revision = (
+            inventory.state_id(),
+            inventory.selected(),
+            inventory.game_mode(),
+        );
+        if window_state.combat_revision != Some(combat_revision)
+            || window_state.combat_profile != profile
+        {
+            if ctx
+                .commands
+                .send(SimCommand::CombatProfile {
+                    player,
+                    profile: inventory
+                        .combat_snapshot()
+                        .ok()
+                        .filter(|p| p.encoded_bytes() <= 64 * 1024)
+                        .map(std::sync::Arc::new),
+                })
+                .await
+                .is_err()
+            {
+                break Err(anyhow::anyhow!(
+                    "driver closed while refreshing combat profile"
+                ));
+            }
+            window_state.combat_profile = profile;
+            window_state.combat_revision = Some(combat_revision);
+        }
+        if window_state.consumption.pending.is_none() {
+            if let Err(error) = super::furnace::poll(
+                ctx,
+                player,
+                &mut writer,
+                &inventory,
+                &mut window_state,
+                &mut debug,
+                &compression,
+            )
+            .await
+            {
+                break Err(error);
+            }
+        }
+        if let Err(error) =
+            super::handlers::advance_consumption(ctx, player, &inventory, &mut window_state).await
+        {
+            break Err(error);
+        }
+        if let Err(error) = chunk_stream.report_delivered(&ctx.commands, player).await {
+            break Err(error);
+        }
         // A deferred failure from the pre-loop drain (e.g. a budget kick on a
         // flood pipelined during the login handoff) breaks here so the teardown
         // below still runs — the same save + ticket-release path a steady-state
@@ -384,6 +483,7 @@ pub(super) async fn enter_play(
             biased;
             _ = shutdown.changed() => break Ok(()),
             () = sleep_until(deadline.at()) => break Err(deadline.timeout().into()),
+            effect = effect_rx.recv() => ConnectionWake::Effect(effect),
             wake = next_play_wake(
                 &mut next_work,
                 &mut keep_alive,
@@ -404,7 +504,136 @@ pub(super) async fn enter_play(
                 },
                 operator_changes.changed(),
                 quota_ready,
-            ) => wake,
+            ) => ConnectionWake::Play(wake),
+        };
+        let wake = match wake {
+            ConnectionWake::Play(wake) => wake,
+            ConnectionWake::Effect(Some(effect)) => {
+                if let crate::gameplay::GameplayEffect::Respawned { position } = &effect {
+                    let world = ctx.join_kit.join_game().world_state();
+                    let spawn = ferrumc_proto::generated::play::SpawnInfo::new(
+                        world.dimension_type(),
+                        world.dimension_name().clone(),
+                        world.hashed_seed(),
+                        inventory.game_mode().as_id(),
+                        inventory.game_mode().as_id(),
+                        world.is_debug(),
+                        world.is_flat(),
+                        None,
+                        world.portal_cooldown(),
+                        world.sea_level(),
+                    );
+                    let respawn = ClientboundPlayPacket::Respawn(
+                        ferrumc_proto::generated::play::Respawn::new(spawn, 0),
+                    );
+                    let outcome = async {
+                        send_mandatory(&mut writer, &mut debug, &compression, &ctx.clock, respawn)?;
+                        flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout)
+                            .await?;
+                        let destination = ferrumc_math::BlockPos::new(
+                            position.x.floor() as i32,
+                            0,
+                            position.z.floor() as i32,
+                        )
+                        .to_chunk_pos();
+                        let (reply, receive) = oneshot::channel();
+                        if chunk_stream.loaded.contains(&destination) {
+                            ctx.commands
+                                .send(SimCommand::ResendChunks {
+                                    positions: vec![destination],
+                                    reply,
+                                })
+                                .await
+                                .map_err(|_| {
+                                    anyhow::anyhow!("driver closed preparing respawn ground")
+                                })?;
+                            let columns = receive
+                                .await
+                                .map_err(|_| anyhow::anyhow!("respawn ground snapshot canceled"))?;
+                            let column = columns.into_iter().next().ok_or_else(|| {
+                                anyhow::anyhow!("respawn support is no longer resident")
+                            })?;
+                            super::join::queue_destination_chunk(
+                                ctx,
+                                &mut writer,
+                                &mut debug,
+                                &compression,
+                                &mut chunk_stream,
+                                column,
+                            )?;
+                        } else {
+                            let column = super::join::await_destination_chunk(
+                                &ctx.commands,
+                                player,
+                                destination,
+                                &mut chunk_stream.loaded,
+                                &mut chunk_stream.ticket_handoff_pending,
+                                ctx.chunk_stream_interval,
+                                Instant::now() + ctx.io_timeout,
+                                shutdown,
+                            )
+                            .await?;
+                            super::join::queue_destination_chunk(
+                                ctx,
+                                &mut writer,
+                                &mut debug,
+                                &compression,
+                                &mut chunk_stream,
+                                column,
+                            )?;
+                        }
+                        flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout)
+                            .await?;
+                        let sync =
+                            pending_teleport.issue(&super::spawn_sync(0, *position, 0.0, 0.0));
+                        mirror_server_teleport(
+                            &mut chunk_stream,
+                            &mut player_yaw,
+                            &mut player_pitch,
+                            &sync,
+                        );
+                        send_mandatory(
+                            &mut writer,
+                            &mut debug,
+                            &compression,
+                            &ctx.clock,
+                            ClientboundPlayPacket::SynchronizePlayerPosition(sync),
+                        )?;
+                        Ok::<(), anyhow::Error>(())
+                    }
+                    .await;
+                    if let Err(error) = outcome {
+                        break Err(error);
+                    }
+                }
+                if let Err(error) = handle_gameplay_effect(
+                    ctx,
+                    player,
+                    handle.entity_id(),
+                    &mut writer,
+                    &mut inventory,
+                    &mut window_state,
+                    effect,
+                    &mut debug,
+                    &compression,
+                )
+                .await
+                {
+                    break Err(error);
+                }
+                if let Err(error) = guard_play_work(
+                    liveness.next_deadline(),
+                    flush_writer(&mut writer, &mut stream, &compression, ctx.io_timeout),
+                )
+                .await
+                {
+                    break Err(error);
+                }
+                continue;
+            }
+            ConnectionWake::Effect(None) => {
+                break Err(anyhow::anyhow!("trusted gameplay producer closed"))
+            }
         };
         match wake {
             PlayWake::Operators(changed) => {
@@ -704,6 +933,64 @@ pub(super) async fn enter_play(
     // Return the carried item even without an open screen; full-bag overflow
     // stays player-owned and is persisted alongside the inventory. The
     // client cleared its own cursor on disconnect, so no clientbound sync is needed.
+    // Remove the producer before draining: FIFO acknowledgment proves no further
+    // owner offer can enter this connection. Even a failed socket must apply committed
+    // tool wear and return owned pickup remainders before its durable save.
+    while window_state.consumption.pending.is_some() {
+        if let Some(effect) = effect_rx.recv().await {
+            if let Err(error) = handle_gameplay_effect(
+                ctx,
+                player,
+                handle.entity_id(),
+                &mut writer,
+                &mut inventory,
+                &mut window_state,
+                effect,
+                &mut debug,
+                &compression,
+            )
+            .await
+            {
+                reservation.quarantine();
+                tracing::warn!(%error, "pending food result failed during leave");
+            }
+        } else {
+            reservation.quarantine();
+            break;
+        }
+    }
+    let (reply, unregistered) = oneshot::channel();
+    match ctx
+        .commands
+        .send(SimCommand::UnregisterGameplay { player, reply })
+        .await
+    {
+        Ok(()) => {
+            if unregistered.await.is_err() {
+                reservation.quarantine();
+            }
+        }
+        Err(_) => reservation.quarantine(),
+    }
+    effect_rx.close();
+    while let Some(effect) = effect_rx.recv().await {
+        if let Err(error) = handle_gameplay_effect(
+            ctx,
+            player,
+            handle.entity_id(),
+            &mut writer,
+            &mut inventory,
+            &mut window_state,
+            effect,
+            &mut debug,
+            &compression,
+        )
+        .await
+        {
+            reservation.quarantine();
+            tracing::warn!(%error, %player, "could not apply committed gameplay effect during leave");
+        }
+    }
     window_state.take();
     inventory.return_carried();
 
@@ -713,17 +1000,37 @@ pub(super) async fn enter_play(
     }
 
     let save_position = chunk_stream.last_position().unwrap_or(position);
-    let player_data = PlayerData::capture(save_position, player_yaw, player_pitch, &inventory);
-    match player_data.to_record(inventory.game_mode()) {
-        Ok(record) => {
-            if let Err(err) = ctx.player_store.save_player(player, record).await {
-                reservation.quarantine();
-                tracing::warn!(%err, %player, name = name.as_str(), "failed to save player state on leave; UUID quarantined until server restart");
-            }
+    let mut player_data = PlayerData::capture(save_position, player_yaw, player_pitch, &inventory);
+    let (reply, vitals) = oneshot::channel();
+    let captured = if ctx
+        .commands
+        .send(SimCommand::ReadVitals { player, reply })
+        .await
+        .is_ok()
+    {
+        match vitals.await {
+            Ok(Some(snapshot)) => player_data.set_vitals(snapshot).is_ok(),
+            _ => false,
         }
-        Err(err) => {
-            reservation.quarantine();
-            tracing::warn!(%err, %player, name = name.as_str(), "failed to encode player state on leave; UUID quarantined until server restart");
+    } else {
+        false
+    };
+    if !captured {
+        reservation.quarantine();
+        tracing::warn!(%player, "live vitals unavailable; preserving previous player record");
+    }
+    if captured {
+        match player_data.to_record(inventory.game_mode()) {
+            Ok(record) => {
+                if let Err(err) = ctx.player_store.save_player(player, record).await {
+                    reservation.quarantine();
+                    tracing::warn!(%err, %player, name = name.as_str(), "failed to save player state on leave; UUID quarantined until server restart");
+                }
+            }
+            Err(err) => {
+                reservation.quarantine();
+                tracing::warn!(%err, %player, name = name.as_str(), "failed to encode player state on leave; UUID quarantined until server restart");
+            }
         }
     }
 

@@ -25,7 +25,7 @@ use ferrumc_session::{
     net_event_to_input, open_screen, use_item_on_block, use_item_on_face, use_item_on_target,
     NetEvent,
 };
-use ferrumc_sim::{BlockStateId, GameInput};
+use ferrumc_sim::{BlockStateId, GameInput, MiningTool};
 use tokio::sync::oneshot;
 
 use crate::command::{parse_gamemode, GAMEMODE_COMMAND, SPAWN_COMMAND};
@@ -94,6 +94,55 @@ pub(super) async fn handle_play_body(
     liveness: &mut ConnectionLiveness,
     pending_teleport: &mut PendingTeleport,
 ) -> anyhow::Result<()> {
+    let before_selected = inventory.selected();
+    let before = ferrumc_items::encode_persisted_stack(inventory.held())?;
+    let result = handle_play_body_inner(
+        ctx,
+        player,
+        name,
+        writer,
+        chunk_stream,
+        chat_limiter,
+        inventory,
+        window_state,
+        player_yaw,
+        player_pitch,
+        body,
+        debug,
+        compression,
+        liveness,
+        pending_teleport,
+    )
+    .await;
+    let after = ferrumc_items::encode_persisted_stack(inventory.held())?;
+    if before_selected != inventory.selected() || before != after {
+        window_state.consumption.cancel();
+        window_state.mining.changed();
+        notify_mining_tool_changed(ctx, player, inventory, window_state).await?;
+    }
+    result
+}
+
+/// Dispatches one fully framed play observation.
+#[allow(clippy::too_many_arguments)] // one play step: framing + policy + trace state
+#[allow(clippy::too_many_lines)] // one dispatch: chat, inventory, place, movement fallthrough
+pub(super) async fn handle_play_body_inner(
+    ctx: &ConnContext,
+    player: PlayerId,
+    name: &str,
+    writer: &mut PlayWriter,
+    chunk_stream: &mut ChunkStream,
+    chat_limiter: &mut ChatRateLimiter,
+    inventory: &mut PlayerInventory,
+    window_state: &mut WindowState,
+    player_yaw: &mut f32,
+    player_pitch: &mut f32,
+    body: &[u8],
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+    liveness: &mut ConnectionLiveness,
+    pending_teleport: &mut PendingTeleport,
+) -> anyhow::Result<()> {
     let render_distance = match decode_client_render_distance(body) {
         Ok(distance) => distance,
         Err(err) => {
@@ -134,6 +183,36 @@ pub(super) async fn handle_play_body(
         }
     };
     let packet = decoded.packet;
+    if window_state.consumption.pending.is_some() {
+        if let ServerboundPlayPacket::CloseContainer(close) = &packet {
+            let current = window_state
+                .open()
+                .map_or(WINDOW_ID, OpenContainer::window_id);
+            if close.window_id() == current {
+                window_state.consumption.deferred_close = Some(current);
+            }
+            liveness.valid_packet_observed(tokio::time::Instant::now())?;
+            return Ok(());
+        }
+    }
+    if window_state.consumption.pending.is_some()
+        && matches!(
+            &packet,
+            ServerboundPlayPacket::WindowClick(_)
+                | ServerboundPlayPacket::SetCreativeSlot(_)
+                | ServerboundPlayPacket::ServerboundSetHeldItem(_)
+                | ServerboundPlayPacket::UseItemOn(_)
+                | ServerboundPlayPacket::UseItem(_)
+                | ServerboundPlayPacket::PlayerAction(_)
+                | ServerboundPlayPacket::ChatCommand(_)
+                | ServerboundPlayPacket::InteractEntity(_)
+        )
+    {
+        // The full prepared inventory is pinned for at most the owner result.
+        // Hostile client hashes never replace the server-owned pending snapshot.
+        liveness.valid_packet_observed(tokio::time::Instant::now())?;
+        return Ok(());
+    }
     let creative_item = decoded.creative_item;
 
     // A movement packet is one atomic hostile observation. Reject it before even
@@ -170,6 +249,12 @@ pub(super) async fn handle_play_body(
     }
 
     if let Some(movement) = movement {
+        let ground = match &packet {
+            ServerboundPlayPacket::SetPlayerPosition(p) => p.flags() & 1 != 0,
+            ServerboundPlayPacket::SetPlayerPositionAndRotation(p) => p.flags() & 1 != 0,
+            ServerboundPlayPacket::SetPlayerRotation(p) => p.flags() & 1 != 0,
+            _ => window_state.on_ground(),
+        };
         // Paper permits looking around while a teleport is pending, but neither
         // its positional component nor plugin movement/stream effects run.
         if pending_teleport.is_pending() {
@@ -206,6 +291,23 @@ pub(super) async fn handle_play_body(
         .await?;
 
         if let Some(position) = movement.position {
+            send_sim_command_accepted(
+                ctx,
+                SimCommand::GameplayInput {
+                    player,
+                    input: GameInput::FallMovement {
+                        player,
+                        position,
+                        on_ground: ground,
+                        sprinting: window_state.sprinting,
+                    },
+                    acceptance: None,
+                },
+            )
+            .await?;
+        }
+        window_state.set_on_ground(ground);
+        if let Some(position) = movement.position {
             chunk_stream.observe(position);
             // Fire the observe-only PlayerMove plugin event only for a validated,
             // admitted move, throttled to block granularity. Movement cannot be
@@ -227,7 +329,211 @@ pub(super) async fn handle_play_body(
         return Ok(());
     }
 
+    if window_state.mining.has_unsettled() && can_change_mining_beforeimage(&packet) {
+        if let ServerboundPlayPacket::UseItemOn(p) = &packet {
+            if validated_placement_cursor(p).is_none() {
+                return Ok(());
+            }
+        }
+        if let ServerboundPlayPacket::InteractEntity(p) = &packet {
+            crate::combat::decode_interaction(p)?;
+        }
+        // Owner replies and gameplay effects use separate queues. Awaiting an
+        // attack/container/drop reply cannot settle an earlier mining effect.
+        // Keep its exact tool witness until the terminal effect is processed.
+        window_state.consumption.cancel();
+        window_state.mining.changed();
+        notify_mining_tool_changed(ctx, player, inventory, window_state).await?;
+        match &packet {
+            ServerboundPlayPacket::UseItem(p) => {
+                ack_sequence(writer, debug, compression, &ctx.clock, p.sequence())?;
+            }
+            ServerboundPlayPacket::UseItemOn(p) => {
+                let slot = match p.hand() {
+                    0 => Some(crate::inventory::HOTBAR_START + usize::from(inventory.selected())),
+                    1 => Some(crate::inventory::OFFHAND_SLOT),
+                    _ => None,
+                };
+                let state = slot
+                    .and_then(|slot| inventory.slot(slot))
+                    .and_then(ItemStack::placeable_block);
+                if let (Some(state), Some(adjacent)) = (state, use_item_on_target(p)) {
+                    let held_state = BlockStateId::new(state);
+                    let (reply, result) = oneshot::channel();
+                    ctx.commands
+                        .send(SimCommand::PlacementTarget {
+                            clicked: use_item_on_block(p),
+                            adjacent,
+                            held_state,
+                            reply,
+                        })
+                        .await
+                        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+                    let position = result.await.map_err(|_| {
+                        anyhow::anyhow!("simulation driver dropped placement target")
+                    })?;
+                    reject_block_edit(ctx, player, position, p.sequence(), held_state).await?;
+                } else {
+                    ack_sequence(writer, debug, compression, &ctx.clock, p.sequence())?;
+                }
+            }
+            _ => {}
+        }
+        resync_chest_window(ctx, writer, inventory, window_state, debug, compression)?;
+        return Ok(());
+    }
+
     match &packet {
+        ServerboundPlayPacket::SetPlayerOnGround(p) => {
+            if !pending_teleport.is_pending() {
+                if let Some(position) = chunk_stream.last_position() {
+                    send_sim_command_accepted(
+                        ctx,
+                        SimCommand::GameplayInput {
+                            player,
+                            input: GameInput::FallMovement {
+                                player,
+                                position,
+                                on_ground: p.flags() & 1 != 0,
+                                sprinting: window_state.sprinting,
+                            },
+                            acceptance: None,
+                        },
+                    )
+                    .await?;
+                }
+                window_state.set_on_ground(p.flags() & 1 != 0);
+            }
+            return Ok(());
+        }
+        ServerboundPlayPacket::PlayerInput(p) => {
+            window_state.set_secondary_use(p.inputs() & 32 != 0);
+            window_state.sprinting = p.inputs() & 64 != 0;
+            return Ok(());
+        }
+        ServerboundPlayPacket::InteractEntity(packet) => {
+            if pending_teleport.is_pending() {
+                return Ok(());
+            }
+            let interaction = crate::combat::decode_interaction(packet)?;
+            window_state.set_secondary_use(interaction.secondary());
+            if interaction.is_attack() {
+                let Ok(snapshot) = inventory.combat_snapshot() else {
+                    return Ok(());
+                };
+                if snapshot.encoded_bytes() > 64 * 1024 {
+                    return Ok(());
+                }
+                tracing::trace!(
+                    slot = snapshot.hand_witness().slot,
+                    "captured exact attack weapon"
+                );
+                let token = window_state.attack_token()?;
+                let (reply, result) = oneshot::channel();
+                // The serial non-canceled handler pins the attacker inventory
+                // until the matching actual owner receipt, including disconnect.
+                ctx.commands
+                    .send(SimCommand::AttackEntity {
+                        player,
+                        target: packet.target(),
+                        profile: snapshot.profile(),
+                        token,
+                        reply,
+                    })
+                    .await
+                    .map_err(|_| anyhow::anyhow!("driver closed while attacking entity"))?;
+                let accepted = result
+                    .await
+                    .map_err(|_| anyhow::anyhow!("attack owner receipt lost"))?;
+                if let Some(plan) =
+                    crate::combat_wear::plan_weapon_wear(&snapshot, inventory, accepted)?
+                {
+                    inventory.apply_wear_plan(plan)?;
+                    window_state.mining.changed();
+                    notify_mining_tool_changed(ctx, player, inventory, window_state).await?;
+                    resync_chest_window(ctx, writer, inventory, window_state, debug, compression)?;
+                    ctx.commands
+                        .send(SimCommand::SetEquipment {
+                            player,
+                            equipment: inventory.equipment_body()?,
+                        })
+                        .await
+                        .map_err(|_| anyhow::anyhow!("driver closed after attack wear"))?;
+                }
+            }
+            return Ok(());
+        }
+        ServerboundPlayPacket::UseItem(packet) => {
+            if pending_teleport.is_pending() {
+                return Ok(());
+            }
+            if super::bucket::use_bucket(
+                ctx,
+                player,
+                writer,
+                inventory,
+                window_state,
+                packet,
+                chunk_stream.last_position(),
+                debug,
+                compression,
+            )
+            .await?
+            {
+                return Ok(());
+            }
+            let slot = match packet.hand() {
+                0 => crate::inventory::HOTBAR_START + usize::from(inventory.selected()),
+                1 => crate::inventory::OFFHAND_SLOT,
+                _ => return Ok(()),
+            };
+            window_state
+                .consumption
+                .start(inventory, slot, ctx.clock.now().get())?;
+            return Ok(());
+        }
+        ServerboundPlayPacket::ClientStatus(packet) => {
+            if packet.action() == 0 {
+                window_state.consumption.cancel();
+                send_sim_command_accepted(
+                    ctx,
+                    SimCommand::GameplayInput {
+                        player,
+                        input: GameInput::Respawn {
+                            player,
+                            position: ctx.join_kit.spawn_position(),
+                        },
+                        acceptance: None,
+                    },
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+        ServerboundPlayPacket::PlayerAction(packet) if matches!(packet.status(), 3 | 4) => {
+            if pending_teleport.is_pending() {
+                return Ok(());
+            }
+            window_state.consumption.cancel();
+            if super::held_drop::drop_held(ctx, player, inventory, packet.status()).await? {
+                window_state.mining.changed();
+                notify_mining_tool_changed(ctx, player, inventory, window_state).await?;
+                ctx.commands
+                    .send(SimCommand::SetEquipment {
+                        player,
+                        equipment: inventory.equipment_body()?,
+                    })
+                    .await
+                    .map_err(|_| anyhow::anyhow!("driver closed after held drop commit"))?;
+            }
+            // Both refusal and success heal any predicted Q/CtrlQ inventory image.
+            resync_chest_window(ctx, writer, inventory, window_state, debug, compression)?;
+            return Ok(());
+        }
+        ServerboundPlayPacket::PlayerAction(packet) if packet.status() == 5 => {
+            window_state.consumption.cancel();
+            return Ok(());
+        }
         ServerboundPlayPacket::ChatCommand(command) => {
             let command = command.command().as_str().to_owned();
             return handle_command(
@@ -379,6 +685,22 @@ pub(super) async fn handle_play_body(
         // Click Container: an open chest window applies the safe left-click subset
         // (everything else resyncs); a click on window 0 resyncs the inventory.
         ServerboundPlayPacket::WindowClick(p) => {
+            if window_state.furnace.is_some() {
+                return super::furnace::click(
+                    ctx,
+                    player,
+                    writer,
+                    inventory,
+                    window_state,
+                    p,
+                    chunk_stream.last_position(),
+                    *player_yaw,
+                    *player_pitch,
+                    debug,
+                    compression,
+                )
+                .await;
+            }
             return handle_window_click(
                 ctx,
                 player,
@@ -411,26 +733,95 @@ pub(super) async fn handle_play_body(
     }
 
     let event = NetEvent::play(player, packet);
-    // A block break crosses the plugin intent boundary: the loaded plugins'
-    // `before_block_break` decision hooks decide whether (and how) it proceeds.
-    // Every other event reaching this fallthrough carries no block decision and
-    // routes straight to the simulation; movement returned through its validated
-    // admission path above.
-    if let Some(GameInput::BlockBreak {
-        position, sequence, ..
-    }) = net_event_to_input(&event)
-    {
-        return handle_block_break(
-            ctx,
-            player,
-            writer,
-            position,
-            sequence,
-            event,
-            debug,
-            compression,
+    if let Some(input) = net_event_to_input(&event) {
+        let tool = MiningTool::new(
+            inventory.held().item().map(ferrumc_items::ItemId::id),
+            window_state.on_ground(),
+            false,
         )
-        .await;
+        .ok_or_else(|| anyhow::anyhow!("invalid authoritative held item"))?;
+        match input {
+            GameInput::MiningStart {
+                position, sequence, ..
+            }
+            | GameInput::BlockBreak {
+                position, sequence, ..
+            } => {
+                if window_state.mining.has_unsettled() {
+                    // Cancel still-active work, but retain any committed wear
+                    // witness until its positive terminal owner receipt arrives.
+                    // A second old-FCIS witness could otherwise lose its wear.
+                    window_state.mining.changed();
+                    notify_mining_tool_changed(ctx, player, inventory, window_state).await?;
+                    reject_block_edit(ctx, player, position, sequence, BlockStateId::AIR).await?;
+                    return Ok(());
+                }
+                // Creative commits never charge mining tool wear. Token zero
+                // preserves instant Creative input ordering without an unused
+                // delayed beforeimage blocking the next edit or placement.
+                let token = if inventory.game_mode() == GameMode::Creative {
+                    0
+                } else {
+                    window_state.mining.start(inventory)?
+                };
+                let admitted = handle_block_break(
+                    ctx,
+                    player,
+                    writer,
+                    position,
+                    sequence,
+                    GameInput::MiningStart {
+                        player,
+                        position,
+                        sequence,
+                        tool: tool.with_token(token),
+                    },
+                    debug,
+                    compression,
+                )
+                .await?;
+                if !admitted {
+                    window_state.mining.release(token);
+                }
+                return Ok(());
+            }
+            GameInput::MiningFinish {
+                position, sequence, ..
+            } => {
+                return send_sim_command_accepted(
+                    ctx,
+                    SimCommand::GameplayInput {
+                        player,
+                        input: GameInput::MiningFinish {
+                            player,
+                            position,
+                            sequence,
+                            tool: tool.with_token(window_state.mining.active()),
+                        },
+                        acceptance: None,
+                    },
+                )
+                .await;
+            }
+            GameInput::MiningAbort {
+                position, sequence, ..
+            } => {
+                return send_sim_command_accepted(
+                    ctx,
+                    SimCommand::GameplayInput {
+                        player,
+                        input: GameInput::MiningAbort {
+                            player,
+                            position,
+                            sequence,
+                        },
+                        acceptance: None,
+                    },
+                )
+                .await;
+            }
+            _ => {}
+        }
     }
     ctx.commands
         .send(SimCommand::Event {
@@ -645,15 +1036,19 @@ async fn handle_block_break(
     writer: &mut PlayWriter,
     position: BlockPos,
     sequence: i32,
-    event: NetEvent,
+    input: GameInput,
     debug: &mut SessionDebug,
     compression: &CompressionState,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     let perms = PermissionFacade::new(ctx.policy.permissions());
     let (decision, emitted) = ctx
         .block_events
         .before_block_break(&BlockBreakAttempt::new(player, position), &perms);
 
+    let forwarded = !matches!(
+        &decision,
+        ResolvedDecision::Deny { .. } | ResolvedDecision::Replace { .. }
+    );
     match decision {
         ResolvedDecision::Deny { message } => {
             // Heal the actor through the single reject funnel: the sim reads the
@@ -664,7 +1059,7 @@ async fn handle_block_break(
             deliver_deny_message(ctx, writer, debug, compression, message);
             route_emitted_intents(ctx, player, writer, sequence, emitted, debug, compression)
                 .await?;
-            return Ok(());
+            return Ok(false);
         }
         ResolvedDecision::Replace { block_state_id } => {
             // A plugin Replace supplies an EXACT state: write it verbatim through
@@ -681,7 +1076,7 @@ async fn handle_block_break(
                 reject_block_edit(ctx, player, position, sequence, BlockStateId::AIR).await?;
                 route_emitted_intents(ctx, player, writer, sequence, emitted, debug, compression)
                     .await?;
-                return Ok(());
+                return Ok(false);
             }
             send_sim_command_accepted(
                 ctx,
@@ -698,8 +1093,9 @@ async fn handle_block_break(
         _ => {
             send_sim_command_accepted(
                 ctx,
-                SimCommand::Event {
-                    event,
+                SimCommand::GameplayInput {
+                    player,
+                    input,
                     acceptance: None,
                 },
             )
@@ -708,9 +1104,388 @@ async fn handle_block_break(
     }
 
     route_emitted_intents(ctx, player, writer, sequence, emitted, debug, compression).await?;
-    // The edit was accepted at the intent boundary and routed: notify after_*.
-    let after = ctx.block_events.after_block_break(player, position, &perms);
-    route_emitted_intents(ctx, player, writer, sequence, after, debug, compression).await
+    // The committed-break consumer fires after_block_break only after the tick removes the block.
+    Ok(forwarded)
+}
+
+/// Applies a trusted committed owner effect to the sole inventory writer.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)] // one ordered owner-effect dispatcher, with pinned transaction completion
+pub(super) async fn handle_gameplay_effect(
+    ctx: &ConnContext,
+    player: PlayerId,
+    entity_id: i32,
+    writer: &mut PlayWriter,
+    inventory: &mut PlayerInventory,
+    windows: &mut WindowState,
+    effect: crate::gameplay::GameplayEffect,
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+) -> anyhow::Result<()> {
+    if windows.consumption.pending.is_some()
+        && (matches!(&effect, crate::gameplay::GameplayEffect::BlockBroken { tool_damage, .. } if *tool_damage > 0)
+            || matches!(
+                &effect,
+                crate::gameplay::GameplayEffect::ArmorHurt { .. }
+                    | crate::gameplay::GameplayEffect::Died { .. }
+            ))
+    {
+        anyhow::ensure!(
+            windows.consumption.deferred_breaks.len() < 64,
+            "committed mining wear exceeded its witness bound"
+        );
+        if matches!(&effect, crate::gameplay::GameplayEffect::ArmorHurt { .. }) {
+            tracing::debug!(%player, "armor receipt deferred behind pinned food");
+        }
+        windows.consumption.deferred_breaks.push(effect);
+        return Ok(());
+    }
+    match effect {
+        crate::gameplay::GameplayEffect::BlockBroken {
+            position,
+            sequence,
+            held_item,
+            experience,
+            tool_damage,
+            tool_token,
+        } => {
+            if let Some(witness) = windows.mining.release(tool_token) {
+                if tool_damage > 0 && inventory.damage_witness(&witness, u32::from(tool_damage))? {
+                    windows.mining.changed();
+                    notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+                }
+            } else if tool_damage > 0 {
+                anyhow::bail!("committed mining wear has no exact tool witness");
+            }
+            tracing::trace!(
+                experience,
+                held_item,
+                "committed mining experience; orb runtime pending"
+            );
+            let perms = PermissionFacade::new(ctx.policy.permissions());
+            let after = ctx.block_events.after_block_break(player, position, &perms);
+            route_emitted_intents(ctx, player, writer, sequence, after, debug, compression).await?;
+            let equipment = inventory.equipment_body()?;
+            ctx.commands
+                .send(SimCommand::SetEquipment { player, equipment })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+            if windows.has_open() {
+                resync_chest_window(ctx, writer, inventory, windows, debug, compression)?;
+            } else {
+                send_mandatory(
+                    writer,
+                    debug,
+                    compression,
+                    &ctx.clock,
+                    ClientboundPlayPacket::SetContainerContent(SetContainerContent::new(
+                        WINDOW_ID,
+                        inventory.state_id(),
+                        inventory.container_content_payload()?,
+                    )),
+                )?;
+            }
+        }
+        crate::gameplay::GameplayEffect::ArmorHurt {
+            snapshot,
+            raw_damage,
+        } => {
+            tracing::debug!(%player, raw_damage, "applying reserved armor receipt");
+            let plan = crate::combat_wear::plan_armor_wear(&snapshot, inventory, true, raw_damage)?;
+            if inventory.apply_armor_wear(plan)? {
+                windows.mining.changed();
+                notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+                resync_chest_window(ctx, writer, inventory, windows, debug, compression)?;
+                ctx.commands
+                    .send(SimCommand::SetEquipment {
+                        player,
+                        equipment: inventory.equipment_body()?,
+                    })
+                    .await
+                    .map_err(|_| anyhow::anyhow!("driver closed after armor wear"))?;
+            }
+            ctx.commands
+                .send(SimCommand::CombatWearApplied {
+                    player,
+                    profile: inventory
+                        .combat_snapshot()
+                        .ok()
+                        .filter(|p| p.encoded_bytes() <= 64 * 1024)
+                        .map(std::sync::Arc::new),
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("driver closed after applying armor receipt"))?;
+        }
+        crate::gameplay::GameplayEffect::FoodResolved { token, accepted } => {
+            let pending = windows
+                .consumption
+                .pending
+                .take()
+                .ok_or_else(|| anyhow::anyhow!("food result has no prepared inventory"))?;
+            anyhow::ensure!(
+                pending.token == token,
+                "food owner token differs from pinned inventory"
+            );
+            if accepted {
+                inventory.commit_consumption(pending.inventory);
+            }
+            tracing::debug!(%player, token, accepted, "food inventory resolved after owner receipt");
+            // Accepted break receipts remain ordered, but cannot mutate slots
+            // underneath the complete food snapshot before its owner ACK.
+            for effect in std::mem::take(&mut windows.consumption.deferred_breaks) {
+                Box::pin(handle_gameplay_effect(
+                    ctx,
+                    player,
+                    entity_id,
+                    writer,
+                    inventory,
+                    windows,
+                    effect,
+                    debug,
+                    compression,
+                ))
+                .await?;
+            }
+            if let Some(id) = windows.consumption.deferred_close.take() {
+                handle_close_container(
+                    ctx,
+                    player,
+                    writer,
+                    inventory,
+                    windows,
+                    &CloseContainer::new(id),
+                    debug,
+                    compression,
+                )
+                .await?;
+            }
+            windows.mining.changed();
+            notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+            if accepted {
+                send_mandatory(
+                    writer,
+                    debug,
+                    compression,
+                    &ctx.clock,
+                    ClientboundPlayPacket::EntityEvent(
+                        ferrumc_proto::generated::play::EntityEvent::new(entity_id, 9),
+                    ),
+                )?;
+            }
+            if windows.has_open() {
+                resync_chest_window(ctx, writer, inventory, windows, debug, compression)?;
+            } else {
+                send_mandatory(
+                    writer,
+                    debug,
+                    compression,
+                    &ctx.clock,
+                    ClientboundPlayPacket::SetContainerContent(SetContainerContent::new(
+                        WINDOW_ID,
+                        inventory.state_id(),
+                        inventory.container_content_payload()?,
+                    )),
+                )?;
+            }
+            ctx.commands
+                .send(SimCommand::SetEquipment {
+                    player,
+                    equipment: inventory.equipment_body()?,
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver closed after food result"))?;
+        }
+        crate::gameplay::GameplayEffect::Died { position } => {
+            windows.consumption.cancel();
+            windows.mining.changed();
+            let plan = crate::death_inventory::DeathInventoryPlan::prepare(inventory, position)?;
+            anyhow::ensure!(
+                plan.encoded_bytes() <= ferrumc_storage::MAX_PLAYER_DATA_LEN
+                    && plan.matches(inventory)?,
+                "death inventory preflight differs"
+            );
+            let (drops, cleared) = plan.into_parts();
+            anyhow::ensure!(
+                cleared.encoded_bytes() <= ferrumc_storage::MAX_PLAYER_DATA_LEN,
+                "death inventory evidence exceeds bound"
+            );
+            let (reply, received) = tokio::sync::oneshot::channel();
+            ctx.commands
+                .send(SimCommand::PlayerDeathDrops {
+                    player,
+                    drops,
+                    reply,
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("driver closed before whole death drop admission"))?;
+            received.await.map_err(|_| {
+                anyhow::anyhow!("whole death drop acceptance unknown; inventory retained")
+            })??;
+            inventory.commit_death(cleared)?;
+            windows.take();
+            notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+            resync_chest_window(ctx, writer, inventory, windows, debug, compression)?;
+            ctx.commands
+                .send(SimCommand::SetEquipment {
+                    player,
+                    equipment: inventory.equipment_body()?,
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("driver closed after death inventory clear"))?;
+            tracing::debug!(%player, "whole death inventory moved to ground owner");
+            send_mandatory(
+                writer,
+                debug,
+                compression,
+                &ctx.clock,
+                ClientboundPlayPacket::CombatDeath(
+                    ferrumc_proto::generated::play::CombatDeath::new(entity_id, {
+                        let mut text = ferrumc_nbt::NbtCompound::new();
+                        text.push("text", ferrumc_nbt::NbtTag::String("You died".to_owned()));
+                        ferrumc_nbt::NbtTag::Compound(text)
+                    }),
+                ),
+            )?;
+        }
+        crate::gameplay::GameplayEffect::Respawned { .. } => {}
+        crate::gameplay::GameplayEffect::MiningReleased { token } => {
+            // A late finish can publish an uncommitted release after a positive
+            // break receipt already entered the pinned-food FIFO. That receipt
+            // owns the witness until its actual wear commit is processed.
+            let committed_deferred = windows.consumption.deferred_breaks.iter().any(|effect| {
+                matches!(effect, crate::gameplay::GameplayEffect::BlockBroken { tool_token, .. }
+                    if *tool_token == token)
+            });
+            if !committed_deferred {
+                windows.mining.release(token);
+            }
+        }
+        crate::gameplay::GameplayEffect::Pickup {
+            ticket,
+            wire_id,
+            stack,
+        } => {
+            tracing::trace!(wire_id = wire_id.get(), "ground item pickup offered");
+            let remainder = if windows.consumption.pending.is_some() {
+                stack
+            } else {
+                inventory.deposit(stack)
+            };
+            let (reply, applied) = oneshot::channel();
+            ctx.commands
+                .send(SimCommand::GroundPickupResult {
+                    result: ferrumc_sim::GroundItemPickupResult::new(ticket, remainder),
+                    reply,
+                })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver closed while returning pickup"))?;
+            applied
+                .await
+                .map_err(|_| anyhow::anyhow!("pickup response admission was lost"))??;
+            windows.mining.changed();
+            notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+            if windows.has_open() {
+                resync_chest_window(ctx, writer, inventory, windows, debug, compression)?;
+            } else {
+                send_mandatory(
+                    writer,
+                    debug,
+                    compression,
+                    &ctx.clock,
+                    ClientboundPlayPacket::SetContainerContent(SetContainerContent::new(
+                        WINDOW_ID,
+                        inventory.state_id(),
+                        inventory.container_content_payload()?,
+                    )),
+                )?;
+            }
+            let equipment = inventory.equipment_body()?;
+            ctx.commands
+                .send(SimCommand::SetEquipment { player, equipment })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver closed after pickup"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Prepares the complete exact postimage at the original consume duration, then
+/// pins it until the owner's matching result. No item shrinks on a refused food.
+pub(super) async fn advance_consumption(
+    ctx: &ConnContext,
+    player: PlayerId,
+    inventory: &PlayerInventory,
+    windows: &mut WindowState,
+) -> anyhow::Result<()> {
+    if windows.consumption.pending.is_some() {
+        return Ok(());
+    }
+    let Some(using) = windows.consumption.using.as_ref() else {
+        return Ok(());
+    };
+    if ctx.clock.now().get() < using.due {
+        return Ok(());
+    }
+    let Some(using) = windows.consumption.using.take() else {
+        return Ok(());
+    };
+    let Some(stack) = inventory.slot(using.slot) else {
+        return Ok(());
+    };
+    if ferrumc_items::encode_persisted_stack(stack)? != using.before {
+        return Ok(());
+    }
+    let Some(prepared) = inventory.prepare_consumption(using.slot, using.food)? else {
+        return Ok(());
+    };
+    let token = windows.consumption.token()?;
+    tracing::debug!(%player, token, "food inventory pinned until owner receipt");
+    windows.consumption.pending = Some(crate::consumption::PendingFood {
+        token,
+        inventory: prepared,
+    });
+    if let Err(error) = send_sim_command_accepted(
+        ctx,
+        SimCommand::GameplayInput {
+            player,
+            input: GameInput::FoodConsumed {
+                player,
+                food: using.food,
+                token,
+            },
+            acceptance: None,
+        },
+    )
+    .await
+    {
+        windows.consumption.pending = None;
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Invalidates tick work when the selected slot or exact held FCIS bytes change.
+async fn notify_mining_tool_changed(
+    ctx: &ConnContext,
+    player: PlayerId,
+    inventory: &PlayerInventory,
+    windows: &WindowState,
+) -> anyhow::Result<()> {
+    let tool = MiningTool::new(
+        inventory.held().item().map(ferrumc_items::ItemId::id),
+        windows.on_ground(),
+        false,
+    )
+    .ok_or_else(|| anyhow::anyhow!("invalid authoritative held item"))?;
+    send_sim_command_accepted(
+        ctx,
+        SimCommand::GameplayInput {
+            player,
+            input: GameInput::MiningToolChanged { player, tool },
+            acceptance: None,
+        },
+    )
+    .await
 }
 
 /// Delivers a plugin Deny message (if any) to the acting player as a system chat.
@@ -770,6 +1545,21 @@ async fn reject_block_edit(
         },
     )
     .await
+}
+
+/// Connection-owned actions that can remove, replace or wear a delayed tool.
+/// Selection alone preserves the stack and may still cancel active mining.
+fn can_change_mining_beforeimage(packet: &ServerboundPlayPacket) -> bool {
+    match packet {
+        ServerboundPlayPacket::WindowClick(_)
+        | ServerboundPlayPacket::SetCreativeSlot(_)
+        | ServerboundPlayPacket::UseItemOn(_)
+        | ServerboundPlayPacket::UseItem(_)
+        | ServerboundPlayPacket::InteractEntity(_)
+        | ServerboundPlayPacket::ChatCommand(_) => true,
+        ServerboundPlayPacket::PlayerAction(p) => matches!(p.status(), 3 | 4 | 6),
+        _ => false,
+    }
 }
 
 /// Routes the [`WorldIntent`]s a plugin emitted from a block decision (or an
@@ -1091,6 +1881,13 @@ async fn handle_command(
                 )),
             );
             inventory.set_game_mode(mode);
+            send_mandatory(
+                writer,
+                debug,
+                compression,
+                &ctx.clock,
+                ClientboundPlayPacket::PlayerAbilities(crate::world::player_abilities(mode)),
+            )?;
         }
     }
 
@@ -1176,6 +1973,17 @@ async fn handle_use_item_on(
         return Ok(());
     };
     let sequence = packet.sequence();
+    let placing_slot = match packet.hand() {
+        0 => crate::inventory::HOTBAR_START + usize::from(inventory.selected()),
+        1 => crate::inventory::OFFHAND_SLOT,
+        _ => {
+            ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
+            return Ok(());
+        }
+    };
+    let placing_state = inventory
+        .slot(placing_slot)
+        .and_then(ItemStack::placeable_block);
     // A malformed face index yields no target: just ack so the prediction ends.
     let Some(mut position) = use_item_on_target(packet) else {
         ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
@@ -1185,7 +1993,7 @@ async fn handle_use_item_on(
     // target guarantees a `Some` face; the fallback is unreachable but fails safe.
     let clicked_face = use_item_on_face(packet).unwrap_or(Direction::Up);
 
-    if let Some(held_state) = inventory.held().placeable_block() {
+    if let Some(held_state) = placing_state {
         let (reply_tx, reply_rx) = oneshot::channel();
         ctx.commands
             .send(SimCommand::PlacementTarget {
@@ -1227,7 +2035,7 @@ async fn handle_use_item_on(
         // heals to the predicted state and leaves a ghost block (see
         // `reject_block_edit`), so route the same heal a refused place uses. A
         // non-placeable interaction predicts no block, so a plain ack ends it.
-        if let Some(held_state) = inventory.held().placeable_block() {
+        if let Some(held_state) = placing_state {
             reject_block_edit(
                 ctx,
                 player,
@@ -1268,38 +2076,88 @@ async fn handle_use_item_on(
     // world, so ask the clicked block's owning shard whether it is an openable chest
     // and, if so, snapshot its contents. A non-chest falls through to placement.
     let clicked = use_item_on_block(packet);
-    let (open_tx, open_rx) = oneshot::channel();
-    ctx.commands
-        .send(SimCommand::OpenContainer {
-            player,
-            position: clicked,
-            reply: open_tx,
-        })
-        .await
-        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
-    let chest_open = open_rx
-        .await
-        .map_err(|_| anyhow::anyhow!("simulation driver dropped the open-container reply"))?;
-    if let Some(slots) = chest_open {
-        // End the client's interaction prediction, then show the container screen.
-        ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
-        return open_chest_window(
-            ctx,
-            player,
-            writer,
-            inventory,
-            window_state,
-            clicked,
-            slots,
-            debug,
-            compression,
-        )
-        .await;
+    let secondary = window_state.secondary_use()
+        && (inventory.held().item().is_some()
+            || inventory
+                .slot(crate::inventory::OFFHAND_SLOT)
+                .is_some_and(|stack| stack.item().is_some()));
+    if !secondary {
+        if let Some(snapshot) = super::furnace::snapshot(ctx, player, clicked).await? {
+            ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
+            return super::furnace::open(
+                ctx,
+                player,
+                writer,
+                inventory,
+                window_state,
+                clicked,
+                snapshot,
+                debug,
+                compression,
+            )
+            .await;
+        }
+        if crafting_accessible(ctx, player, clicked).await? {
+            ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
+            if window_state.has_open() {
+                close_open_container(
+                    ctx,
+                    player,
+                    writer,
+                    inventory,
+                    window_state,
+                    debug,
+                    compression,
+                )
+                .await?;
+            }
+            let window_id = window_state.open_crafting(clicked);
+            send_mandatory(
+                writer,
+                debug,
+                compression,
+                &ctx.clock,
+                open_screen(
+                    window_id,
+                    crate::window::CRAFTING_TYPE,
+                    &TextComponent::text("Crafting"),
+                ),
+            )?;
+            return resync_chest_window(ctx, writer, inventory, window_state, debug, compression);
+        }
+        let (open_tx, open_rx) = oneshot::channel();
+        ctx.commands
+            .send(SimCommand::OpenContainer {
+                player,
+                position: clicked,
+                reply: open_tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+        let chest_open = open_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver dropped the open-container reply"))?;
+        if let Some(slots) = chest_open {
+            // End the client's interaction prediction, then show the container screen.
+            ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
+            return open_chest_window(
+                ctx,
+                player,
+                writer,
+                inventory,
+                window_state,
+                clicked,
+                slots,
+                debug,
+                compression,
+            )
+            .await;
+        }
     }
 
     // Empty hand or non-placeable item: nothing to place, just ack. The block-place
     // plugins are not consulted for a no-op placement (the interaction already was).
-    let Some(held_state) = inventory.held().placeable_block() else {
+    let Some(held_state) = placing_state else {
         ack_sequence(writer, debug, compression, &ctx.clock, sequence)?;
         return Ok(());
     };
@@ -1309,6 +2167,22 @@ async fn handle_use_item_on(
         &perms,
     );
 
+    let prepared = if inventory.game_mode() == GameMode::Creative {
+        None
+    } else {
+        let Some(prepared) = inventory.prepare_placement(packet.hand())? else {
+            reject_block_edit(
+                ctx,
+                player,
+                position,
+                sequence,
+                BlockStateId::new(held_state),
+            )
+            .await?;
+            return Ok(());
+        };
+        Some(prepared)
+    };
     match decision {
         ResolvedDecision::Deny { message } => {
             // Heal the actor through the single reject funnel: the sim reads the
@@ -1378,6 +2252,19 @@ async fn handle_use_item_on(
             let Some((applied_position, applied)) = applied else {
                 return Ok(());
             };
+            if let Some(prepared) = prepared {
+                inventory.commit_consumption(prepared);
+                resync_chest_window(ctx, writer, inventory, window_state, debug, compression)?;
+                ctx.commands
+                    .send(SimCommand::SetEquipment {
+                        player,
+                        equipment: inventory.equipment_body()?,
+                    })
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!("simulation driver closed after committed placement")
+                    })?;
+            }
             let after = ctx.block_events.after_block_place(
                 player,
                 applied_position,
@@ -1412,6 +2299,19 @@ async fn handle_use_item_on(
             let Some((applied_position, computed)) = computed else {
                 return Ok(());
             };
+            if let Some(prepared) = prepared {
+                inventory.commit_consumption(prepared);
+                resync_chest_window(ctx, writer, inventory, window_state, debug, compression)?;
+                ctx.commands
+                    .send(SimCommand::SetEquipment {
+                        player,
+                        equipment: inventory.equipment_body()?,
+                    })
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!("simulation driver closed after committed placement")
+                    })?;
+            }
             let after = ctx.block_events.after_block_place(
                 player,
                 applied_position,
@@ -1620,13 +2520,31 @@ async fn handle_window_click(
     // Validate both IDs before parsing or mutating either chest or player slots.
     // Even window 0 is stale while a chest is the active container screen.
     if let Some(open) = window_state.open() {
+        let previous_equipment = inventory.equipment_body()?;
         if inventory.game_mode() != GameMode::Spectator
             && packet.window_id() == open.window_id()
             && packet.state_id() == open.state_id()
         {
-            apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
+            if open.is_crafting() {
+                if crafting_accessible(ctx, player, open.position()).await? {
+                    if let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) {
+                        if let Ok(slot) = usize::try_from(slot) {
+                            inventory.table_click(slot, button, mode)?;
+                        }
+                    }
+                }
+            } else {
+                apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
+            }
         } else {
             refresh_chest_window(ctx, player, window_state).await?;
+        }
+        let equipment = inventory.equipment_body()?;
+        if previous_equipment != equipment {
+            ctx.commands
+                .send(SimCommand::SetEquipment { player, equipment })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
         }
         return resync_chest_window(ctx, writer, inventory, window_state, debug, compression);
     }
@@ -1635,7 +2553,7 @@ async fn handle_window_click(
     if changed_slot.is_none() {
         inventory.bump_state_id();
     }
-    if changed_slot.is_some_and(|index| inventory.is_equipment_slot(index)) {
+    if changed_slot.is_some() {
         let equipment = inventory.equipment_body()?;
         ctx.commands
             .send(SimCommand::SetEquipment { player, equipment })
@@ -1668,17 +2586,25 @@ async fn handle_window_click(
 fn apply_player_window_click(
     inventory: &mut PlayerInventory,
     packet: &WindowClick,
-) -> Result<Option<usize>, ferrumc_items::ItemValidationError> {
+) -> anyhow::Result<Option<usize>> {
     if packet.window_id() != WINDOW_ID || packet.state_id() != inventory.state_id() {
         return Ok(None);
     }
-    let Some((slot, button, 0)) = decode_click_prefix(packet.rest()) else {
+    let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) else {
         return Ok(None);
     };
     let Ok(index) = usize::try_from(slot) else {
         return Ok(None);
     };
-    Ok(inventory.normal_click(index, button)?.then_some(index))
+    let changed = match mode {
+        0 => inventory.normal_click(index, button)?,
+        1 if matches!(button, 0 | 1) => inventory.quick_move(index)?,
+        2 => u8::try_from(button)
+            .ok()
+            .map_or(Ok(false), |hotbar| inventory.hotbar_swap(index, hotbar))?,
+        _ => false,
+    };
+    Ok(changed.then_some(index))
 }
 
 /// Applies the SAFE subset of a click on the open chest window to the
@@ -1702,8 +2628,50 @@ async fn apply_chest_window_click(
         refresh_chest_window(ctx, player, window_state).await?;
         return Ok(());
     };
+    if (mode == 1 && matches!(button, 0 | 1)) || (mode == 2 && (0..9).contains(&button)) {
+        let Ok(slot) = usize::try_from(slot) else {
+            return Ok(());
+        };
+        if slot >= crate::window::CHEST_WINDOW_SLOTS {
+            return Ok(());
+        }
+        let Some(open) = window_state.open() else {
+            return Ok(());
+        };
+        if inventory
+            .admit_chest_inventory_candidate(
+                open.chest_slots(),
+                slot,
+                (mode == 2).then_some(button as u8),
+            )
+            .is_err()
+        {
+            return Ok(());
+        }
+        let (reply, response) = oneshot::channel();
+        ctx.commands
+            .send(SimCommand::ContainerInventoryClick {
+                player,
+                position: open.position(),
+                slot,
+                hotbar: (mode == 2).then_some(button as u8),
+                player_slots: inventory.window_slots().to_vec(),
+                expected_slots: open.chest_slots().to_vec(),
+                reply,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+        let outcome = response
+            .await
+            .map_err(|_| anyhow::anyhow!("simulation driver dropped inventory transfer reply"))?;
+        if let (Some((chest, slots)), Some(open)) = (outcome, window_state.open_mut()) {
+            inventory.set_window_slots(slots);
+            open.set_chest_slots(chest);
+        }
+        return Ok(());
+    }
     // Normal-mode left-click only; everything else resyncs.
-    if mode != 0 || button != 0 {
+    if mode != 0 || !matches!(button, 0 | 1) {
         refresh_chest_window(ctx, player, window_state).await?;
         return Ok(());
     }
@@ -1721,6 +2689,13 @@ async fn apply_chest_window_click(
             let position = open.position();
             let cursor = inventory.carried().clone();
             let expected_slots = open.chest_slots().to_vec();
+            if expected_slots.get(chest_slot).is_none_or(|stack| {
+                inventory
+                    .admit_chest_cursor_candidate(stack, button == 1)
+                    .is_err()
+            }) {
+                return Ok(());
+            }
             let (reply_tx, reply_rx) = oneshot::channel();
             ctx.commands
                 .send(SimCommand::ContainerLeftClick {
@@ -1728,6 +2703,7 @@ async fn apply_chest_window_click(
                     position,
                     slot: chest_slot,
                     cursor,
+                    right: button == 1,
                     expected_slots,
                     reply: reply_tx,
                 })
@@ -1751,7 +2727,7 @@ async fn apply_chest_window_click(
             }
             // A player-inventory slot shown in the window: a purely local conserving
             // exchange against the connection-owned inventory and cursor.
-            inventory.exchange_carried(index);
+            inventory.normal_click(index, button)?;
         }
     }
     Ok(())
@@ -1768,6 +2744,9 @@ async fn refresh_chest_window(
     let Some(open) = window_state.open() else {
         return Ok(false);
     };
+    if open.is_crafting() {
+        return crafting_accessible(ctx, player, open.position()).await;
+    }
     let (reply, response) = oneshot::channel();
     ctx.commands
         .send(SimCommand::OpenContainer {
@@ -1781,7 +2760,15 @@ async fn refresh_chest_window(
         .await
         .map_err(|_| anyhow::anyhow!("simulation driver dropped the container refresh reply"))?;
     if let (Some(snapshot), Some(open)) = (snapshot, window_state.open_mut()) {
-        let unchanged = open.chest_slots() == snapshot;
+        let unchanged = open.chest_slots().len() == snapshot.len()
+            && open
+                .chest_slots()
+                .iter()
+                .zip(&snapshot)
+                .all(|(before, after)| {
+                    before.count() == after.count()
+                        && ferrumc_items::same_stack_representation(before, after).unwrap_or(false)
+                });
         open.set_chest_slots(snapshot);
         return Ok(unchanged);
     }
@@ -1797,7 +2784,7 @@ async fn refresh_chest_window(
 /// changed-slots / cursor (`HashedSlot`) fields are deliberately NOT decoded — the
 /// server recomputes the click outcome from its own authoritative state and never
 /// trusts the client's claimed result.
-fn decode_click_prefix(rest: &[u8]) -> Option<(i16, i8, i32)> {
+pub(super) fn decode_click_prefix(rest: &[u8]) -> Option<(i16, i8, i32)> {
     let mut reader = BoundedReader::new(rest);
     let slot = reader.read_i16().ok()?;
     let button = reader.read_i8().ok()?;
@@ -1811,7 +2798,7 @@ fn decode_click_prefix(rest: &[u8]) -> Option<(i16, i8, i32)> {
 /// This is the single confirm/heal path after handled or refused clicks. Callers
 /// refresh the snapshot while the chest is accessible; an inaccessible chest
 /// retains its last mirror and cursor until the client closes the screen.
-fn resync_chest_window(
+pub(super) fn resync_chest_window(
     ctx: &ConnContext,
     writer: &mut PlayWriter,
     inventory: &PlayerInventory,
@@ -1819,16 +2806,35 @@ fn resync_chest_window(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
+    if window_state.furnace.is_some() {
+        return super::furnace::resync(
+            ctx,
+            writer,
+            inventory,
+            window_state,
+            debug,
+            compression,
+            true,
+        );
+    }
     let Some(open) = window_state.open_mut() else {
-        return Ok(());
+        return send_mandatory(
+            writer,
+            debug,
+            compression,
+            &ctx.clock,
+            ClientboundPlayPacket::SetContainerContent(SetContainerContent::new(
+                WINDOW_ID,
+                inventory.state_id(),
+                inventory.container_content_payload()?,
+            )),
+        );
     };
     open.bump_state_id();
-    let payload = match open.content_payload(inventory) {
-        Ok(payload) => payload,
-        Err(err) => {
-            tracing::warn!(%err, "failed to encode chest-window resync");
-            return Ok(());
-        }
+    let payload = if open.is_crafting() {
+        inventory.table_content_payload()?
+    } else {
+        open.content_payload(inventory)?
     };
     send_mandatory(
         writer,
@@ -1860,7 +2866,7 @@ async fn open_chest_window(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    if window_state.open().is_some() {
+    if window_state.has_open() {
         close_open_container(
             ctx,
             player,
@@ -1897,10 +2903,8 @@ async fn handle_close_container(
     debug: &mut SessionDebug,
     compression: &CompressionState,
 ) -> anyhow::Result<()> {
-    match window_state.open() {
-        Some(open) if open.window_id() == packet.window_id() => {}
-        None if packet.window_id() == WINDOW_ID => {}
-        _ => return Ok(()),
+    if window_state.current_window_id() != packet.window_id() {
+        return Ok(());
     }
     close_open_container(
         ctx,
@@ -1916,7 +2920,7 @@ async fn handle_close_container(
 
 /// Closes window metadata, attempts to return the player-owned carried stack,
 /// retains overflow, and resyncs window 0 and the broadcast equipment.
-async fn close_open_container(
+pub(super) async fn close_open_container(
     ctx: &ConnContext,
     player: PlayerId,
     writer: &mut PlayWriter,
@@ -2136,6 +3140,26 @@ fn tab_complete_reply(
         .filter(|suggestion| allowed.contains(&suggestion.as_str()))
         .collect();
     (start, length, matches)
+}
+
+/// Rechecks actual loaded table identity and reach before screen input commits.
+async fn crafting_accessible(
+    ctx: &ConnContext,
+    player: PlayerId,
+    position: BlockPos,
+) -> anyhow::Result<bool> {
+    let (reply, response) = oneshot::channel();
+    ctx.commands
+        .send(SimCommand::ProbeCrafting {
+            player,
+            position,
+            reply,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+    response
+        .await
+        .map_err(|_| anyhow::anyhow!("simulation driver dropped crafting probe"))
 }
 
 #[cfg(test)]
@@ -2675,6 +3699,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creative_mining_routes_pipelined_starts_without_unused_wear_witnesses() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut windows = WindowState::new();
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        for sequence in [17, 18] {
+            let owner = async {
+                let Some(SimCommand::GameplayInput {
+                    input:
+                        ferrumc_sim::GameInput::MiningStart {
+                            tool,
+                            sequence: actual,
+                            ..
+                        },
+                    acceptance: Some(reply),
+                    ..
+                }) = inbox.recv().await
+                else {
+                    panic!("Creative start, no cancellation/refusal")
+                };
+                assert_eq!(actual, sequence);
+                assert_eq!(tool.token(), 0);
+                reply.send(Ok(())).expect("admitted");
+            };
+            let (handled, ()) = tokio::join!(
+                handle_container_packet(
+                    &ctx,
+                    &mut inventory,
+                    &mut windows,
+                    &mut writer,
+                    ServerboundPlayPacket::PlayerAction(
+                        ferrumc_proto::generated::play::PlayerAction::new(
+                            0,
+                            BlockPosition::new(8, 63, 8),
+                            1,
+                            sequence,
+                        )
+                    ),
+                ),
+                owner
+            );
+            handled.expect("instant edit admitted");
+            assert!(!windows.mining.has_unsettled());
+        }
+        assert!(inbox.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn leave_mirror_applies_retained_then_queued_teleports_before_save_without_ack() {
         use ferrumc_session::SessionRouter;
         let (commands, _inbox) = mpsc::channel(8);
@@ -2962,6 +4035,137 @@ mod tests {
         content
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn budget_chest_growth_refuses_before_any_owner_command() {
+        use crate::inventory::budget_boundary_fixture;
+        use ferrumc_math::Vec3;
+        use ferrumc_world::CHEST_SLOTS;
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        for (button, mode) in [(0, 0), (1, 0), (0, 1), (0, 2)] {
+            let mut inventory = budget_boundary_fixture(65, true);
+            let mut chest = vec![ItemStack::empty(); CHEST_SLOTS];
+            chest[0] = ItemStack::try_new(
+                ItemId::from_name("stone").unwrap(),
+                1,
+                ComponentPatch::new(
+                    vec![ferrumc_items::ComponentValue::CustomName(
+                        ferrumc_nbt::NbtTag::String("budget growth".to_owned()),
+                    )],
+                    vec![],
+                ),
+            )
+            .unwrap();
+            let mut windows = WindowState::new();
+            windows.open_chest(BlockPos::new(8, 65, 8), chest.clone());
+            let before = crate::player_data::PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory)
+                .to_record(GameMode::Survival)
+                .unwrap();
+            let state = inventory.state_id();
+            let mut rest = 0i16.to_be_bytes().to_vec();
+            rest.push(button);
+            write_var_int(&mut rest, mode);
+            let packet = WindowClick::new(1, 1, rest);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                super::apply_chest_window_click(
+                    &ctx,
+                    PlayerId::offline("BudgetChest"),
+                    &mut inventory,
+                    &mut windows,
+                    &packet,
+                ),
+            )
+            .await
+            .expect("refusal must not await an owner mutation")
+            .unwrap();
+            assert!(
+                inbox.try_recv().is_err(),
+                "refused before world-owner mutation command"
+            );
+            assert_eq!(windows.open().unwrap().chest_slots(), chest);
+            assert_eq!(inventory.state_id(), state);
+            let after = crate::player_data::PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory)
+                .to_record(GameMode::Survival)
+                .unwrap();
+            assert_eq!(after.data(), before.data());
+            inventory.combat_snapshot().unwrap();
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn budget_furnace_growth_refuses_before_owner_mutation_command() {
+        use crate::furnace_window::FurnaceWindow;
+        use crate::inventory::budget_boundary_fixture;
+        use ferrumc_math::Vec3;
+        use ferrumc_world::FurnaceInventory;
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = budget_boundary_fixture(65, true);
+        let snapshot = FurnaceInventory::try_from_parts(
+            [
+                ItemStack::empty(),
+                ItemStack::empty(),
+                container_probe_stack(1),
+            ],
+            0,
+            0,
+            0,
+            200,
+        )
+        .unwrap();
+        let mut windows = WindowState::new();
+        windows.furnace =
+            Some(FurnaceWindow::new(1, BlockPos::new(8, 65, 8), snapshot.clone()).unwrap());
+        let before = crate::player_data::PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory)
+            .to_record(GameMode::Survival)
+            .unwrap();
+        let probe = tokio::spawn(async move {
+            match inbox.recv().await.unwrap() {
+                SimCommand::ReadVitals { reply, .. } => reply
+                    .send(Some(ferrumc_sim::PlayerVitals::new().snapshot()))
+                    .unwrap(),
+                _ => panic!("only read-only vitals lookup permitted"),
+            }
+            inbox
+        });
+        let mut rest = 2i16.to_be_bytes().to_vec();
+        rest.push(0);
+        write_var_int(&mut rest, 0);
+        let packet = WindowClick::new(1, 1, rest);
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            super::super::furnace::click(
+                &ctx,
+                PlayerId::offline("BudgetFurnace"),
+                &mut writer,
+                &mut inventory,
+                &mut windows,
+                &packet,
+                Some(Vec3::ZERO),
+                0.0,
+                0.0,
+                &mut SessionDebug::new("BudgetFurnace"),
+                &CompressionState::disabled(),
+            ),
+        )
+        .await
+        .expect("refusal must not await an owner mutation")
+        .unwrap();
+        let mut inbox = probe.await.unwrap();
+        assert!(
+            inbox.try_recv().is_err(),
+            "no FurnaceClick sent to world owner"
+        );
+        assert_eq!(windows.furnace.as_ref().unwrap().snapshot(), &snapshot);
+        let after = crate::player_data::PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory)
+            .to_record(GameMode::Survival)
+            .unwrap();
+        assert_eq!(after.data(), before.data());
+        inventory.combat_snapshot().unwrap();
+    }
+
     #[tokio::test]
     async fn player_click_rejections_resync_without_mutating_or_broadcasting() {
         let (commands, mut inbox) = mpsc::channel(1); // rejects send no simulation work
@@ -2977,10 +4181,9 @@ mod tests {
             (0, 0, 46, 0, 0),   // outside player window
             (0, 0, 9, 2, 0),    // unsupported middle button
             (0, 0, 9, 0, 1),    // shift
-            (0, 0, 9, 0, 2),    // number key
             (0, 0, 9, 0, 5),    // drag
             (0, 0, 9, 0, 6),    // double click
-            (0, 0, 0, 0, 0),    // crafting result read-only
+            (0, 0, 0, 0, 0),    // no matching recipe
             (0, 0, 5, 1, 0),    // armor insertion unsupported
         ];
         for (window, offset, slot, button, mode) in claims {
@@ -3017,12 +4220,32 @@ mod tests {
 
     #[tokio::test]
     async fn player_equipment_click_broadcasts_the_new_authoritative_stack() {
-        let (commands, mut inbox) = mpsc::channel(1); // one equipment update per click
+        let (commands, mut inbox) = mpsc::channel(1); // bounded, concurrently drained equipment and owner commands
         let ctx = handler_context(commands, PluginHost::in_memory()).await;
         let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
         let mut windows = WindowState::new();
         let mut writer = PlayWriter::with_defaults(ctx.limits);
         let state = inventory.state_id();
+        let probe = tokio::spawn(async move {
+            let mut equipment = None;
+            while let Some(command) = inbox.recv().await {
+                match command {
+                    SimCommand::SetEquipment {
+                        equipment: body, ..
+                    } => equipment = Some(body),
+                    SimCommand::GameplayInput {
+                        input: ferrumc_sim::GameInput::MiningToolChanged { .. },
+                        acceptance: Some(reply),
+                        ..
+                    } => {
+                        reply.send(Ok(())).expect("live owner admission");
+                        break;
+                    }
+                    _ => panic!("unexpected command"),
+                }
+            }
+            equipment.expect("equipment update before tool invalidation")
+        });
         handle_container_packet(
             &ctx,
             &mut inventory,
@@ -3035,13 +4258,9 @@ mod tests {
         assert!(inventory.held().item().is_none());
         assert_eq!(inventory.carried().count(), 64);
         assert_eq!(drain_container_resync(&mut writer).state_id(), state + 1);
-        match inbox.try_recv().expect("equipment update") {
-            SimCommand::SetEquipment { equipment, .. } => {
-                assert_eq!(equipment, inventory.equipment_body().expect("equipment"));
-                assert_eq!(equipment[1], 0, "main hand cleared");
-            }
-            _ => panic!("unexpected command"),
-        }
+        let equipment = probe.await.expect("bounded owner mock");
+        assert_eq!(equipment, inventory.equipment_body().expect("equipment"));
+        assert_eq!(equipment[1], 0, "main hand cleared");
     }
 
     #[tokio::test]
@@ -3181,7 +4400,7 @@ mod tests {
             )
             .await
             .expect("current click handled");
-            assert!(windows.open().is_some(), "window stays open");
+            assert!(windows.has_open(), "window stays open");
             assert_eq!(
                 inventory.slot(9).expect("main slot").count(),
                 if conflicting_view { 4 } else { 9 }
@@ -3740,7 +4959,12 @@ mod tests {
             while let Some(command) = commands_rx.recv().await {
                 command_calls_for_task.fetch_add(1, Ordering::Relaxed);
                 let (SimCommand::Event { acceptance, .. }
-                | SimCommand::TeleportPlayer { acceptance, .. }) = command
+                | SimCommand::TeleportPlayer { acceptance, .. }
+                | SimCommand::GameplayInput {
+                    input: ferrumc_sim::GameInput::FallMovement { .. },
+                    acceptance,
+                    ..
+                }) = command
                 else {
                     panic!("movement test emitted an unexpected command");
                 };
@@ -3842,7 +5066,7 @@ mod tests {
         )
         .await
         .expect("admit valid movement");
-        assert_eq!(command_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(command_calls.load(Ordering::Relaxed), 2);
         assert_eq!(move_calls.load(Ordering::Relaxed), 1);
         assert_eq!(chunk_stream.last_position(), Some(accepted));
         assert_eq!(chunk_stream.pending_position_for_test(), Some(accepted));
@@ -3874,7 +5098,7 @@ mod tests {
         )
         .await
         .expect("reject later hostile movement");
-        assert_eq!(command_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(command_calls.load(Ordering::Relaxed), 2);
         assert_eq!(move_calls.load(Ordering::Relaxed), 1);
         assert_eq!(chunk_stream.last_position(), Some(accepted));
         assert_eq!(chunk_stream.pending_position_for_test(), Some(accepted));
@@ -3899,7 +5123,7 @@ mod tests {
         }
         assert_eq!(
             command_calls.load(Ordering::Relaxed),
-            1,
+            2,
             "unsafe plugin teleports never reach the driver"
         );
 
@@ -3919,7 +5143,7 @@ mod tests {
         .expect("route a safe plugin teleport");
         assert_eq!(
             command_calls.load(Ordering::Relaxed),
-            2,
+            3,
             "the plugin teleport gate is not vacuously dropping every intent"
         );
 
@@ -3957,7 +5181,7 @@ mod tests {
         );
         assert_eq!(
             command_calls.load(Ordering::Relaxed),
-            2,
+            3,
             "a dropped centre cannot proceed into chunk ticket work"
         );
 
@@ -3986,6 +5210,12 @@ mod tests {
             while let Some(command) = commands_rx.recv().await {
                 command_calls_for_task.total.fetch_add(1, Ordering::Relaxed);
                 match command {
+                    SimCommand::ProbeFurnace { reply, .. } => {
+                        let _ = reply.send(None);
+                    }
+                    SimCommand::ProbeCrafting { reply, .. } => {
+                        let _ = reply.send(false);
+                    }
                     SimCommand::PlacementTarget {
                         adjacent, reply, ..
                     } => {
@@ -4208,7 +5438,7 @@ mod tests {
         assert_eq!(plugin_calls.interact.load(Ordering::Relaxed), 2);
         assert_eq!(plugin_calls.before_place.load(Ordering::Relaxed), 2);
         assert_eq!(plugin_calls.after_place.load(Ordering::Relaxed), 2);
-        assert_eq!(command_calls.total.load(Ordering::Relaxed), 6);
+        assert_eq!(command_calls.total.load(Ordering::Relaxed), 10);
         assert_eq!(command_calls.open_container.load(Ordering::Relaxed), 2);
         assert_eq!(command_calls.place_block.load(Ordering::Relaxed), 2);
         assert_eq!(command_calls.preview.load(Ordering::Relaxed), 2);
@@ -4422,6 +5652,501 @@ mod tests {
         let mut reader = BoundedReader::new(body);
         let id = reader.read_var_int().map_err(|_| ())?;
         ServerboundPlayPacket::decode(id, &mut reader).map_err(|_| ())
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)] // one decoded action matrix with full owner refusal and terminal-wear assertions
+    async fn unsettled_mining_refuses_attack_drop_transfer_and_mode_before_owner_mutation() {
+        use ferrumc_proto::generated::play::{ChatCommand, InteractEntity, PlayerAction};
+        let packets = [
+            ServerboundPlayPacket::InteractEntity(InteractEntity::new(
+                130,
+                1,
+                ferrumc_codec::BoundedBytes::new(vec![0]).expect("attack"),
+            )),
+            ServerboundPlayPacket::PlayerAction(PlayerAction::new(
+                3,
+                BlockPosition::new(0, 0, 0),
+                0,
+                0,
+            )),
+            ServerboundPlayPacket::PlayerAction(PlayerAction::new(
+                4,
+                BlockPosition::new(0, 0, 0),
+                0,
+                0,
+            )),
+            ServerboundPlayPacket::PlayerAction(PlayerAction::new(
+                6,
+                BlockPosition::new(0, 0, 0),
+                0,
+                0,
+            )),
+            container_probe_click(0, 1, 36),
+            container_probe_click(1, 1, 54),
+            container_probe_click(2, 1, 30),
+            ServerboundPlayPacket::ChatCommand(ChatCommand::new(
+                BoundedString::new("gamemode creative".to_owned()).expect("command"),
+            )),
+        ];
+        for packet in packets {
+            let (commands, mut inbox) = mpsc::channel(1);
+            let ctx = handler_context(commands, PluginHost::in_memory()).await;
+            let mut inventory = PlayerInventory::from_persisted(
+                GameMode::Survival,
+                0,
+                std::array::from_fn(|_| ItemStack::empty()),
+                ItemStack::empty(),
+            );
+            inventory.set_creative_slot(
+                36,
+                ItemStack::try_new(
+                    ItemId::from_name("golden_shovel").expect("tool"),
+                    1,
+                    ComponentPatch::empty(),
+                )
+                .expect("one tool"),
+            );
+            let mut windows = WindowState::new();
+            if matches!(&packet, ServerboundPlayPacket::WindowClick(p) if p.window_id() == 1) {
+                windows.open_chest(
+                    BlockPos::new(8, 64, 8),
+                    vec![ItemStack::empty(); ferrumc_world::CHEST_SLOTS],
+                );
+            }
+            if matches!(&packet, ServerboundPlayPacket::WindowClick(p) if p.window_id() == 2) {
+                windows.furnace = Some(
+                    crate::furnace_window::FurnaceWindow::new(
+                        2,
+                        BlockPos::new(8, 64, 8),
+                        ferrumc_world::FurnaceInventory::new(),
+                    )
+                    .expect("furnace mirror"),
+                );
+            }
+            let token = windows.mining.start(&inventory).expect("pending break");
+            windows.mining.changed(); // The committed effect may already be queued.
+            let before = inventory.container_content_payload().expect("before");
+            let mut writer = PlayWriter::with_defaults(ctx.limits);
+            let owner = async {
+                let Some(SimCommand::GameplayInput {
+                    input: ferrumc_sim::GameInput::MiningToolChanged { .. },
+                    acceptance: Some(reply),
+                    ..
+                }) = inbox.recv().await
+                else {
+                    panic!("only cancellation is admitted")
+                };
+                reply.send(Ok(())).expect("cancel admitted");
+            };
+            let (handled, ()) = tokio::join!(
+                handle_container_packet(&ctx, &mut inventory, &mut windows, &mut writer, packet),
+                owner,
+            );
+            handled.expect("temporary refusal does not disconnect");
+            assert!(
+                inbox.try_recv().is_err(),
+                "no attack/drop/container/mode owner mutation"
+            );
+            assert_eq!(
+                inventory.container_content_payload().expect("after"),
+                before
+            );
+            assert_eq!(inventory.game_mode(), GameMode::Survival);
+            assert!(windows.mining.has_unsettled());
+            assert!(
+                writer
+                    .drain_batch(&CompressionState::disabled())
+                    .expect("resync")
+                    .frame_count()
+                    > 0
+            );
+            let witness = windows
+                .mining
+                .release(token)
+                .expect("terminal committed witness retained");
+            assert!(inventory.damage_witness(&witness, 1).expect("mining wear"));
+            assert_eq!(
+                ferrumc_items::durability(inventory.held())
+                    .expect("valid")
+                    .expect("tool")
+                    .damage(),
+                1
+            );
+            assert!(!windows.mining.has_unsettled());
+        }
+    }
+
+    #[tokio::test]
+    async fn unsettled_mining_air_use_acks_and_invalid_placement_keeps_no_op_policy() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut windows = WindowState::new();
+        let token = windows.mining.start(&inventory).expect("pending");
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            ServerboundPlayPacket::UseItemOn(UseItemOn::new(
+                0,
+                BlockPosition::new(8, 63, 8),
+                1,
+                f32::NAN,
+                0.5,
+                0.5,
+                false,
+                false,
+                18,
+            )),
+        )
+        .await
+        .expect("invalid cursor ignored");
+        assert!(inbox.try_recv().is_err());
+        assert_eq!(windows.mining.active(), token);
+        assert_eq!(
+            writer
+                .drain_batch(&CompressionState::disabled())
+                .expect("empty")
+                .frame_count(),
+            0
+        );
+        let owner = async {
+            let Some(SimCommand::GameplayInput {
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("cancel only")
+            };
+            reply.send(Ok(())).expect("cancel");
+        };
+        let (handled, ()) = tokio::join!(
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::UseItem(ferrumc_proto::generated::play::UseItem::new(
+                    0, 19, 0.0, 0.0
+                )),
+            ),
+            owner
+        );
+        handled.expect("air use refused");
+        assert!(inbox.try_recv().is_err());
+        let batch = writer
+            .drain_batch(&CompressionState::disabled())
+            .expect("ACK and full resync");
+        assert_eq!(batch.frame_count(), 2);
+        let mut framed = BoundedReader::new(batch.bytes());
+        let length = usize::try_from(framed.read_var_int().expect("length")).expect("positive");
+        let mut body = BoundedReader::new(framed.read_bytes(length).expect("frame"));
+        let id = body.read_var_int().expect("id");
+        let ClientboundPlayPacket::AcknowledgeBlockChange(ack) =
+            ClientboundPlayPacket::decode(id, &mut body).expect("ACK")
+        else {
+            panic!("ACK first")
+        };
+        assert_eq!(ack.sequence(), 19);
+        assert!(windows.mining.release(token).is_some());
+    }
+
+    #[tokio::test]
+    async fn unsettled_mining_place_heals_resolved_replaceable_target_before_ack() {
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Creative);
+        let mut windows = WindowState::new();
+        let token = windows.mining.start(&inventory).expect("pending");
+        let state = inventory.held().placeable_block().expect("block");
+        let clicked = BlockPos::new(8, 63, 8);
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let owner = async {
+            let Some(SimCommand::GameplayInput {
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("cancel")
+            };
+            reply.send(Ok(())).expect("cancel");
+            let Some(SimCommand::PlacementTarget {
+                clicked: actual,
+                adjacent,
+                held_state,
+                reply,
+            }) = inbox.recv().await
+            else {
+                panic!("readonly target")
+            };
+            assert_eq!(actual, clicked);
+            assert_eq!(adjacent, BlockPos::new(8, 64, 8));
+            assert_eq!(held_state.as_u32(), state);
+            reply.send(clicked).expect("replaceable clicked target");
+            let Some(SimCommand::RejectBlockEdit {
+                position,
+                sequence,
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("authoritative reject")
+            };
+            assert_eq!(position, clicked);
+            assert_eq!(sequence, 19);
+            reply.send(Ok(())).expect("reject");
+        };
+        let (handled, ()) = tokio::join!(
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::UseItemOn(UseItemOn::new(
+                    0,
+                    BlockPosition::new(8, 63, 8),
+                    1,
+                    0.5,
+                    0.5,
+                    0.5,
+                    false,
+                    false,
+                    19
+                )),
+            ),
+            owner
+        );
+        handled.expect("healed refusal");
+        assert!(inbox.try_recv().is_err());
+        assert!(windows.mining.release(token).is_some());
+    }
+
+    #[tokio::test]
+    async fn unsettled_mining_start_cancels_live_work_and_routes_authoritative_rejection() {
+        for selection_changed in [false, true] {
+            let (commands, mut inbox) = mpsc::channel(1);
+            let ctx = handler_context(commands, PluginHost::in_memory()).await;
+            let mut inventory = PlayerInventory::from_persisted(
+                GameMode::Survival,
+                0,
+                std::array::from_fn(|_| ItemStack::empty()),
+                ItemStack::empty(),
+            );
+            let mut windows = WindowState::new();
+            let token = windows.mining.start(&inventory).expect("old witness");
+            if selection_changed {
+                windows.mining.changed();
+            }
+            let before = inventory.container_content_payload().expect("before");
+            let mut writer = PlayWriter::with_defaults(ctx.limits);
+            let driver = async {
+                let Some(SimCommand::GameplayInput {
+                    input: ferrumc_sim::GameInput::MiningToolChanged { .. },
+                    acceptance: Some(reply),
+                    ..
+                }) = inbox.recv().await
+                else {
+                    panic!("cancel, never a second owner start")
+                };
+                reply.send(Ok(())).expect("cancel admitted");
+                let Some(SimCommand::RejectBlockEdit {
+                    position,
+                    sequence,
+                    requested_state,
+                    acceptance: Some(reply),
+                    ..
+                }) = inbox.recv().await
+                else {
+                    panic!("authoritative rejection and ACK")
+                };
+                assert_eq!(position, BlockPos::new(9, 63, 8));
+                assert_eq!(sequence, 17);
+                assert_eq!(requested_state, ferrumc_sim::BlockStateId::AIR);
+                reply.send(Ok(())).expect("reject admitted");
+                assert!(inbox.try_recv().is_err());
+            };
+            let handler = handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::PlayerAction(
+                    ferrumc_proto::generated::play::PlayerAction::new(
+                        0,
+                        ferrumc_proto::types::BlockPosition::new(9, 63, 8),
+                        1,
+                        17,
+                    ),
+                ),
+            );
+            let (result, ()) = tokio::join!(handler, driver);
+            result.expect("busy mining does not disconnect");
+            assert_eq!(
+                inventory.container_content_payload().expect("after"),
+                before
+            );
+            assert!(windows.mining.has_unsettled());
+            assert_eq!(windows.mining.active(), 0);
+            assert!(windows.mining.release(token).is_some());
+            assert!(!windows.mining.has_unsettled());
+        }
+    }
+
+    #[tokio::test]
+    async fn food_ack_preserves_deferred_mining_wear_and_container_close() {
+        Box::pin(exercise_deferred_mining_wear_and_container_close(true)).await;
+    }
+
+    #[tokio::test]
+    async fn refused_food_preserves_deferred_mining_wear_and_container_close() {
+        Box::pin(exercise_deferred_mining_wear_and_container_close(false)).await;
+    }
+
+    #[allow(clippy::too_many_lines)] // exercises ordered food ACK, wear, GUI close and full resynchronization
+    async fn exercise_deferred_mining_wear_and_container_close(accepted: bool) {
+        let (commands, mut inbox) = mpsc::channel(1); // mock owner drains each bounded command
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let spy = tokio::spawn(async move {
+            while let Some(command) = inbox.recv().await {
+                match command {
+                    SimCommand::GameplayInput {
+                        acceptance: Some(reply),
+                        ..
+                    } => {
+                        reply.send(Ok(())).expect("admitted");
+                    }
+                    SimCommand::SetEquipment { .. } => {}
+                    _ => panic!("unexpected pinned-food command"),
+                }
+            }
+        });
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        let apple = ItemStack::try_new(
+            ItemId::from_name("apple").expect("apple"),
+            2,
+            ComponentPatch::empty(),
+        )
+        .expect("food");
+        inventory.set_creative_slot(36, apple);
+        inventory.set_creative_slot(
+            37,
+            ItemStack::try_new(
+                ItemId::from_name("wooden_pickaxe").expect("tool"),
+                1,
+                ComponentPatch::empty(),
+            )
+            .expect("tool stack"),
+        );
+        inventory.set_selected(1);
+        let mut windows = WindowState::new();
+        let tool_token = windows.mining.start(&inventory).expect("wear witness");
+        inventory.set_selected(0);
+        inventory.set_carried(container_probe_stack(5));
+        inventory.set_creative_slot(1, container_probe_stack(4));
+        let food = ferrumc_items::food_properties(inventory.held())
+            .expect("food rule")
+            .expect("apple food");
+        let prepared = inventory
+            .prepare_consumption(36, food)
+            .expect("preflight")
+            .expect("snapshot");
+        windows.consumption.pending = Some(crate::consumption::PendingFood {
+            token: 1,
+            inventory: prepared,
+        });
+        let before = inventory.container_content_payload().expect("before");
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        handle_container_packet(
+            &ctx,
+            &mut inventory,
+            &mut windows,
+            &mut writer,
+            ServerboundPlayPacket::CloseContainer(CloseContainer::new(0)),
+        )
+        .await
+        .expect("defer close");
+        assert_eq!(
+            inventory.container_content_payload().expect("pinned"),
+            before
+        );
+        assert_eq!(windows.consumption.deferred_close, Some(0));
+        let mut debug = SessionDebug::new("food-pin");
+        let compression = CompressionState::disabled();
+        super::handle_gameplay_effect(
+            &ctx,
+            PlayerId::offline("ContainerProbe"),
+            130,
+            &mut writer,
+            &mut inventory,
+            &mut windows,
+            crate::gameplay::GameplayEffect::BlockBroken {
+                position: BlockPos::new(9, 64, 8),
+                sequence: 1,
+                held_item: Some(ItemId::from_name("wooden_pickaxe").expect("tool").id()),
+                experience: 0,
+                tool_damage: 1,
+                tool_token,
+            },
+            &mut debug,
+            &compression,
+        )
+        .await
+        .expect("defer wear");
+        assert_eq!(
+            inventory
+                .container_content_payload()
+                .expect("wear still pinned"),
+            before
+        );
+        assert_eq!(windows.consumption.deferred_breaks.len(), 1);
+        // A late finish can produce an uncommitted release after this token's
+        // positive break receipt was already buffered behind the food snapshot.
+        super::handle_gameplay_effect(
+            &ctx,
+            PlayerId::offline("ContainerProbe"),
+            130,
+            &mut writer,
+            &mut inventory,
+            &mut windows,
+            crate::gameplay::GameplayEffect::MiningReleased { token: tool_token },
+            &mut debug,
+            &compression,
+        )
+        .await
+        .expect("late release cannot retire committed deferred wear");
+        super::handle_gameplay_effect(
+            &ctx,
+            PlayerId::offline("ContainerProbe"),
+            130,
+            &mut writer,
+            &mut inventory,
+            &mut windows,
+            crate::gameplay::GameplayEffect::FoodResolved { token: 1, accepted },
+            &mut debug,
+            &compression,
+        )
+        .await
+        .expect("exact food commit then wear and close");
+        assert_eq!(inventory.held().count(), if accepted { 1 } else { 2 });
+        assert!(inventory.carried().item().is_none());
+        assert!(inventory.slot(1).expect("craft input").item().is_none());
+        assert_eq!(inventory.slot(9).expect("returned items").count(), 9);
+        assert!(windows.consumption.deferred_breaks.is_empty());
+        assert!(windows.consumption.deferred_close.is_none());
+        let tool = inventory.slot(37).expect("original pickaxe");
+        assert_eq!(
+            ferrumc_items::durability(tool)
+                .expect("valid durability")
+                .expect("damageable tool")
+                .damage(),
+            1,
+            "accepted wear survives food postimage exactly once"
+        );
+        drop(ctx);
+        spy.await.expect("bounded owner stopped");
     }
 
     #[test]

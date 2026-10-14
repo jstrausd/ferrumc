@@ -27,7 +27,7 @@ use common::{login_to_play, TestClient};
 const GUARD: Duration = Duration::from_secs(10);
 
 /// Current app-owned player payload schema.
-const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(3);
+const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(5);
 const JSON_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
 
 /// Raw player table used only to preserve and inspect an undecodable backend row.
@@ -337,7 +337,7 @@ fn malformed_schema_three_state_and_item_frames_preserve_original_bytes() {
         let temp = temp_world();
         let mut payload = valid_binary_payload();
         payload[offset..offset + replacement.len()].copy_from_slice(&replacement);
-        let original = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload)
+        let original = PlayerRecord::new(SchemaVersion::new(3), GameMode::Survival, payload)
             .expect("bounded malformed record");
         assert_typed_record_rejected_unchanged(&runtime, temp.path(), name, &original);
     }
@@ -373,5 +373,5 @@ fn confirmed_missing_player_still_admits_and_saves() {
     );
     let committed = load_player(&runtime, &database_path(temp.path()), player);
     assert_eq!(committed.schema_version(), PLAYER_SCHEMA_VERSION);
-    assert_eq!(committed.game_mode(), GameMode::Creative);
+    assert_eq!(committed.game_mode(), GameMode::Survival);
 }

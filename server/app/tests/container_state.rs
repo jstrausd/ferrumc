@@ -144,6 +144,7 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let glass = ItemId::from_name("glass").expect("glass item").id();
     let chest_item = ItemId::from_name("chest").expect("chest item").id();
     let mut actor = login_to_play(addr, "ChestActor").await?;
+    common::make_creative(&mut actor).await?;
     let mut viewer = login_to_play(addr, "ChestViewer").await?;
     // Drain the join's inventory before later resync assertions.
     anyhow::ensure!(

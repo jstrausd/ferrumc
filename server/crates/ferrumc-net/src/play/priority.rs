@@ -155,11 +155,16 @@ impl OutboundPriority {
             // must reliably apply; dropping one desyncs its inventory view, so
             // they ride the State class (not droppable World traffic).
             | ClientboundPlayPacket::SetContainerContent(_)
+            | ClientboundPlayPacket::SetContainerProperty(_)
             | ClientboundPlayPacket::SetContainerSlot(_)
             | ClientboundPlayPacket::ClientboundSetHeldItem(_)
             // Player Abilities is join-handshake state (flight + instabuild flags);
             // the client must reliably apply it, so it rides State.
             | ClientboundPlayPacket::PlayerAbilities(_)
+            | ClientboundPlayPacket::UpdateHealth(_)
+            | ClientboundPlayPacket::SetExperience(_)
+            | ClientboundPlayPacket::Respawn(_)
+            | ClientboundPlayPacket::CombatDeath(_)
             // Scoreboard, team, and boss-bar packets carry persistent on-screen
             // UI: a dropped update leaves the sidebar/tab-color/health bar stale
             // until the next one, so they ride State (ahead of bulk world), not
@@ -178,6 +183,7 @@ impl OutboundPriority {
             | ClientboundPlayPacket::SetDefaultSpawnPosition(_) => Self::State,
             ClientboundPlayPacket::BlockUpdate(_)
             | ClientboundPlayPacket::ChunkDataAndLight(_)
+            | ClientboundPlayPacket::UpdateLight(_)
             | ClientboundPlayPacket::UnloadChunk(_)
             // Inline block-entity data (sign text, banner patterns, …) is bulk
             // world content alongside block updates and chunk data.
@@ -203,6 +209,8 @@ impl OutboundPriority {
             | ClientboundPlayPacket::SetActionBarText(_)
             | ClientboundPlayPacket::SetTitleAnimationTimes(_)
             | ClientboundPlayPacket::Particle(_)
+            | ClientboundPlayPacket::EntityEvent(_)
+            | ClientboundPlayPacket::BlockDestruction(_)
             // Update Time animates the sky (sun/moon position): purely visual and
             // self-healing, since a dropped update is superseded by the next
             // periodic broadcast a second later, so it rides droppable Cosmetic.
@@ -293,12 +301,18 @@ impl Criticality {
             // leaves the client's view of its inventory desynced until the next
             // full container resync, so they are mandatory, not droppable.
             | ClientboundPlayPacket::SetContainerContent(_)
+            | ClientboundPlayPacket::SetContainerProperty(_)
             | ClientboundPlayPacket::SetContainerSlot(_)
             | ClientboundPlayPacket::ClientboundSetHeldItem(_)
             // Player Abilities carries the creative flight/instabuild flags the
             // client needs on join; dropping it leaves the client without them.
             | ClientboundPlayPacket::PlayerAbilities(_)
-            | ClientboundPlayPacket::SetDefaultSpawnPosition(_) => Self::Mandatory,
+            | ClientboundPlayPacket::UpdateHealth(_)
+            | ClientboundPlayPacket::SetExperience(_)
+            | ClientboundPlayPacket::Respawn(_)
+            | ClientboundPlayPacket::CombatDeath(_)
+            | ClientboundPlayPacket::SetDefaultSpawnPosition(_)
+            | ClientboundPlayPacket::UpdateLight(_) => Self::Mandatory,
             ClientboundPlayPacket::BlockUpdate(_)
             | ClientboundPlayPacket::ChunkDataAndLight(_)
             | ClientboundPlayPacket::UnloadChunk(_)
@@ -324,6 +338,8 @@ impl Criticality {
             | ClientboundPlayPacket::SetActionBarText(_)
             | ClientboundPlayPacket::SetTitleAnimationTimes(_)
             | ClientboundPlayPacket::Particle(_)
+            | ClientboundPlayPacket::EntityEvent(_)
+            | ClientboundPlayPacket::BlockDestruction(_)
             // A dropped Update Time is healed by the next periodic broadcast.
             | ClientboundPlayPacket::UpdateTime(_)
             | ClientboundPlayPacket::SoundEffect(_)

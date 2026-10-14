@@ -29,6 +29,10 @@ pub enum MutationCause {
     Command,
     /// A plugin submission via a command sink.
     Plugin,
+    /// Actual opted-in ordinary water tick writes.
+    Fluid,
+    /// Actual selected ordinary-furnace lit-state transitions.
+    Furnace,
     /// A test or replay harness.
     Test,
 }
@@ -97,8 +101,14 @@ impl PendingMutation {
 /// crate names these reasons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RejectionReason {
+    /// Bounded furnace registry or block-entity map refused placement.
+    FurnaceCapacity,
     /// The acting player is not present in the shard.
     ActorAbsent,
+    /// The legacy health owner has committed death.
+    ActorDead,
+    /// Complete bounded fluid-neighborhood scheduling was refused.
+    FluidScheduling,
     /// The target block is beyond the actor's reach.
     OutOfReach,
     /// The target chunk is not resident in this shard.

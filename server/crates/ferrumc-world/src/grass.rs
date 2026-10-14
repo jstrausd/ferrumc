@@ -310,10 +310,52 @@ impl ProductionGates {
     }
 }
 
-#[derive(Default)]
+// Two independent preview targets need at most 50 RAW columns. The byte
+// ceiling also bounds a future larger baseline; oversized results stay usable.
+const RAW_CACHE_COLUMNS: usize = 64;
+const RAW_CACHE_BYTES: usize = 32 * 1024 * 1024;
 struct Cache {
     raw: VecDeque<(ChunkPos, Arc<Chunk>)>,
     biomes: VecDeque<(ChunkPos, Arc<[BiomeResourceId]>)>,
+}
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            raw: VecDeque::with_capacity(RAW_CACHE_COLUMNS),
+            biomes: VecDeque::new(),
+        }
+    }
+}
+impl Cache {
+    fn raw_native_bytes(&self) -> usize {
+        std::mem::size_of::<Mutex<Self>>()
+            + std::mem::size_of::<ProductionGates>()
+            + self.raw.capacity() * std::mem::size_of::<(ChunkPos, Arc<Chunk>)>()
+            + self
+                .raw
+                .iter()
+                .map(|(_, chunk)| chunk.raw_baseline_native_bytes().unwrap_or(RAW_CACHE_BYTES))
+                .sum::<usize>()
+    }
+    fn retain_raw(&mut self, pos: ChunkPos, chunk: &Arc<Chunk>) {
+        let Some(bytes) = chunk.raw_baseline_native_bytes() else {
+            return;
+        };
+        let metadata = std::mem::size_of::<Mutex<Self>>()
+            + std::mem::size_of::<ProductionGates>()
+            + self.raw.capacity() * std::mem::size_of::<(ChunkPos, Arc<Chunk>)>();
+        if metadata + bytes > RAW_CACHE_BYTES {
+            return;
+        }
+        while self.raw.len() >= RAW_CACHE_COLUMNS
+            || self.raw_native_bytes() + bytes > RAW_CACHE_BYTES
+        {
+            if self.raw.pop_front().is_none() {
+                return;
+            }
+        }
+        self.raw.push_back((pos, Arc::clone(chunk)));
+    }
 }
 pub(crate) struct GrassPreview {
     catalog: Catalog,
@@ -387,10 +429,7 @@ impl GrassPreview {
         {
             return Ok(existing);
         }
-        if cache.raw.len() == 32 {
-            cache.raw.pop_front();
-        }
-        cache.raw.push_back((pos, Arc::clone(&chunk)));
+        cache.retain_raw(pos, &chunk);
         Ok(chunk)
     }
     pub(crate) fn biome(
@@ -613,6 +652,54 @@ impl Region for Projected<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn raw_cache_native_cap_covers_worst_direct_baselines_and_fifo() {
+        let mut baseline = Chunk::new(ChunkPos::ORIGIN);
+        for y in -64..320 {
+            for x in 0..16 {
+                for z in 0..16 {
+                    baseline
+                        .set_block(
+                            BlockPos::new(x, y, z),
+                            BlockStateId::new(((y + 64) * 256 + x * 16 + z + 1) as u32),
+                        )
+                        .unwrap();
+                }
+            }
+        }
+        baseline
+            .install_generated_biomes(
+                vec![ferrumc_registry::biome::BiomeResourceId::from_name("plains").unwrap(); 1536]
+                    .into_boxed_slice(),
+            )
+            .unwrap();
+        let per_chunk = baseline.raw_baseline_native_bytes().unwrap();
+        assert!(per_chunk <= 512 * 1024);
+        let mut cache = Cache::default();
+        for x in 0..=i32::try_from(RAW_CACHE_COLUMNS).unwrap() {
+            cache.retain_raw(ChunkPos::new(x, 0), &Arc::new(baseline.clone()));
+        }
+        assert_eq!(cache.raw.len(), RAW_CACHE_COLUMNS);
+        assert_eq!(cache.raw.capacity(), RAW_CACHE_COLUMNS);
+        assert_eq!(cache.raw.front().unwrap().0, ChunkPos::new(1, 0));
+        assert_eq!(cache.raw.back().unwrap().0, ChunkPos::new(64, 0));
+        assert!(cache.raw_native_bytes() <= RAW_CACHE_BYTES);
+        println!("RAW_NATIVE worst_per_chunk={per_chunk} full64={} cap={RAW_CACHE_BYTES}; excludes allocator overhead and active worker leases", cache.raw_native_bytes());
+        let mut entity_chunk = Chunk::new(ChunkPos::ORIGIN);
+        entity_chunk
+            .set_block_entity(
+                BlockPos::new(0, 0, 0),
+                crate::BlockEntity::Sign(crate::Sign::new(crate::SignKind::Sign)),
+            )
+            .unwrap();
+        let before: Vec<_> = cache.raw.iter().map(|(pos, _)| *pos).collect();
+        cache.retain_raw(ChunkPos::ORIGIN, &Arc::new(entity_chunk));
+        assert_eq!(
+            before,
+            cache.raw.iter().map(|(pos, _)| *pos).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn production_gates_serialize_same_key_and_allow_distinct_stripes() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1014,7 +1101,7 @@ mod tests {
             crate::GenerationIdentity::natural_overworld(WorldSeed::new(0))
         );
         let cache = generator.grass_preview().unwrap().cache.lock().unwrap();
-        assert!(cache.raw.len() <= 32);
+        assert!(cache.raw.len() <= RAW_CACHE_COLUMNS);
         assert!(cache.biomes.len() <= 64);
     }
 }

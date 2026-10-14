@@ -27,11 +27,16 @@
 mod common;
 
 use std::net::SocketAddr;
+use std::num::NonZeroU8;
 use std::time::Duration;
 
 use tokio::time::timeout;
 
-use ferrumc_proto::generated::play::{ClientboundPlayPacket, PlayerAction, UseItemOn};
+use ferrumc_codec::BoundedString;
+use ferrumc_items::{ComponentPatch, ItemId, ItemStack};
+use ferrumc_proto::generated::play::{
+    ChatCommand, ClientboundPlayPacket, PlayerAction, SetCreativeSlot, UseItemOn,
+};
 use ferrumc_proto::types::BlockPosition;
 
 use ferrumc_app::AppConfig;
@@ -196,6 +201,32 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut viewer = login_to_play(addr, "Viewer").await?;
     let mut actor = login_to_play(addr, "Actor").await?;
 
+    // Fresh joins are empty Survival. This scenario specifically verifies the
+    // instant Creative edit funnel, so select that mode and supply its block.
+    actor
+        .send_frame(&encode(|buf| {
+            ChatCommand::new(BoundedString::new("gamemode creative".to_owned()).unwrap())
+                .encode(buf)
+        }))
+        .await?;
+    loop {
+        if let ClientboundPlayPacket::GameEvent(event) = actor.next_play().await? {
+            if event.reason() == 3 && event.value().to_bits() == 1.0_f32.to_bits() {
+                break;
+            }
+        }
+    }
+    let mut slot = Vec::new();
+    ItemStack::new(
+        ItemId::from_name("stone").expect("registered stone"),
+        NonZeroU8::MIN,
+        ComponentPatch::empty(),
+    )
+    .encode_slot(&mut slot)?;
+    actor
+        .send_frame(&encode(|buf| SetCreativeSlot::new(36, slot).encode(buf)))
+        .await?;
+
     // Rejected break by a PRESENT actor: (100, 63, 8) is in an unloaded chunk and
     // far out of reach (radius-1 spawn keeps only chunks within one of spawn
     // resident). Residency is checked after the actor, so this is a ChunkNotLoaded
@@ -233,10 +264,13 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn break_and_place_broadcast_block_updates_and_reject_out_of_reach() {
-    // Ephemeral port; radius-1 spawn keeps the resident area small so an
+    // Ephemeral port; radius-1 spawn and view avoid unrelated full-view work.
+    // The resident area stays small so an
     // out-of-reach block is also genuinely unloaded.
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses");
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1\nops = [\"Actor\"]",
+    )
+    .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
 

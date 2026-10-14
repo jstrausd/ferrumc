@@ -61,7 +61,7 @@ const STONE_STATE: u32 = 1;
 /// is exact.
 fn persistent_config(world_dir: &Path, spawn_chunk_radius: u8, view_distance: i32) -> AppConfig {
     AppConfig::from_toml_str(&format!(
-        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = {spawn_chunk_radius}\nview_distance = {view_distance}"
+        "bind = \"127.0.0.1:0\"\nops = [\"Builder\", \"Streamer\"]\nspawn_chunk_radius = {spawn_chunk_radius}\nview_distance = {view_distance}"
     ))
     .expect("config parses")
     .with_world_dir(Some(world_dir.to_path_buf()))
@@ -150,6 +150,8 @@ async fn spawn_block_flow(addr: SocketAddr) -> anyhow::Result<()> {
     //    the top of the grass at (9, 63, 8), well within reach of spawn), and waits
     //    for the ack ending the prediction; the later snapshot proves the write.
     let mut builder = login_to_play(addr, "Builder").await?;
+    common::make_creative(&mut builder).await?;
+    common::supply_creative_slot(&mut builder, 36, 1, 64).await?;
     send_place_on_top(&mut builder, (9, 63, 8), 1).await?;
     expect_ack(&mut builder, 1).await?;
 
@@ -194,6 +196,8 @@ async fn streamed_block_flow(addr: SocketAddr) -> anyhow::Result<()> {
     //    streaming, but with no Spawn ticket — so it unloads when the builder
     //    leaves.
     let mut builder = login_to_play(addr, "Streamer").await?;
+    common::make_creative(&mut builder).await?;
+    common::supply_creative_slot(&mut builder, 36, 1, 64).await?;
     send_position(&mut builder, 12.0, 64.0, 8.0).await?;
     send_place_on_top(&mut builder, (9, 63, 8), 1).await?;
     expect_ack(&mut builder, 1).await?;

@@ -1,4 +1,6 @@
-//! Bounded schema-3 player envelope, independent of Minecraft network framing.
+//! Bounded schema-5 player envelope, independent of Minecraft network framing.
+//! Existing item frames remain byte-identical; a fixed twenty-one-byte vitals
+//! suffix records all nine fields. Explicit schemas three/four omit that suffix.
 use std::error::Error;
 use std::fmt;
 
@@ -7,15 +9,18 @@ use ferrumc_items::{
     decode_persisted_stack, encode_persisted_stack, ItemPersistenceError, ItemStack,
     MAX_PERSISTED_STACK_BYTES,
 };
+use ferrumc_sim::{PlayerVitals, VitalsError, VitalsSnapshot};
 use ferrumc_storage::MAX_PLAYER_DATA_LEN;
 
 use super::{is_valid_player_position, PlayerData};
 use crate::inventory::SLOT_COUNT;
 
 const MAGIC: &[u8; 4] = b"FCPS";
-const VERSION: u16 = 3;
+const VERSION: u16 = 5;
 const HEADER_BYTES: usize = 4 + 2 + 3 * 8 + 2 * 4 + 1 + 2;
 const FRAME_BYTES: usize = 4;
+/// Four f32 scalars and five u8 hunger/timer/phase scalars, with no lengths.
+pub(super) const VITALS_BYTES: usize = 4 * 4 + 5;
 
 /// A specific malformed player envelope or one nested item-storage failure.
 #[derive(Debug)]
@@ -26,9 +31,11 @@ pub(crate) enum PlayerPayloadError {
     Codec(CodecError),
     /// One nested authoritative stack failed strict storage validation.
     Item(ItemPersistenceError),
+    /// Vitals scalars or timers failed authoritative Sim snapshot admission.
+    InvalidVitals(VitalsError),
     /// The envelope signature did not identify player storage.
     InvalidMagic,
-    /// The inner envelope version disagreed with the schema-3 contract.
+    /// The inner envelope version disagreed with its explicit outer schema.
     UnsupportedVersion(u16),
     /// The envelope did not contain exactly the fixed player-window layout.
     WrongSlotCount(u16),
@@ -55,6 +62,7 @@ impl fmt::Display for PlayerPayloadError {
             Self::Json(error) => write!(f, "legacy player JSON: {error}"),
             Self::Codec(error) => write!(f, "player envelope field: {error}"),
             Self::Item(error) => write!(f, "player inventory item: {error}"),
+            Self::InvalidVitals(error) => write!(f, "player vitals: {error}"),
             Self::InvalidMagic => write!(f, "invalid player persistence signature"),
             Self::UnsupportedVersion(version) => {
                 write!(f, "unsupported player payload version {version}")
@@ -83,6 +91,7 @@ impl Error for PlayerPayloadError {
             Self::Json(source) => Some(source),
             Self::Codec(source) => Some(source),
             Self::Item(source) => Some(source),
+            Self::InvalidVitals(source) => Some(source),
             _ => None,
         }
     }
@@ -110,6 +119,7 @@ fn validate_state(data: &PlayerData) -> Result<(), PlayerPayloadError> {
     if data.selected_slot >= 9 {
         return Err(PlayerPayloadError::InvalidSelected(data.selected_slot));
     }
+    PlayerVitals::from_snapshot(data.vitals).map_err(PlayerPayloadError::InvalidVitals)?;
     Ok(())
 }
 
@@ -131,9 +141,14 @@ pub(super) fn encode(data: &PlayerData) -> Result<Vec<u8>, PlayerPayloadError> {
     out.push(data.selected_slot);
     // The fixed array is the authoritative shape; no caller-controlled count.
     out.extend_from_slice(&46_u16.to_be_bytes());
-    for stack in data.slots.iter().chain(std::iter::once(&data.carried)) {
+    for stack in data
+        .slots
+        .iter()
+        .chain(std::iter::once(&data.carried))
+        .chain(data.table_inputs.iter())
+    {
         let encoded = encode_persisted_stack(stack)?;
-        let next = out.len() + FRAME_BYTES + encoded.len();
+        let next = out.len() + FRAME_BYTES + encoded.len() + VITALS_BYTES;
         if next > MAX_PLAYER_DATA_LEN {
             return Err(PlayerPayloadError::RecordTooLarge {
                 len: next,
@@ -146,6 +161,19 @@ pub(super) fn encode(data: &PlayerData) -> Result<Vec<u8>, PlayerPayloadError> {
         out.extend_from_slice(&size.to_be_bytes());
         out.extend_from_slice(&encoded);
     }
+    out.reserve_exact(VITALS_BYTES);
+    let vitals = data.vitals();
+    out.extend_from_slice(&vitals.health().to_bits().to_be_bytes());
+    out.push(vitals.food());
+    out.extend_from_slice(&vitals.saturation().to_bits().to_be_bytes());
+    out.extend_from_slice(&vitals.exhaustion().to_bits().to_be_bytes());
+    out.extend_from_slice(&[
+        vitals.food_tick_timer(),
+        vitals.invulnerable_ticks(),
+        vitals.hurt_ticks(),
+    ]);
+    out.extend_from_slice(&vitals.last_hurt().to_bits().to_be_bytes());
+    out.push(vitals.peaceful_phase());
     Ok(out)
 }
 
@@ -159,10 +187,15 @@ fn read_stack(reader: &mut BoundedReader<'_>) -> Result<ItemStack, PlayerPayload
     Ok(decode_persisted_stack(reader.read_bytes(size)?)?)
 }
 
-/// Decodes exactly the bounded schema-3 envelope and all 47 item frames.
+/// Decode schema five with 56 exact item frames and nine validated vitals fields.
+/// Explicit schema four retains 56 frames and schema three retains 47; both
+/// restore fresh vitals, with empty table inputs only in schema three.
 /// Fixed inventory storage is initialized without untrusted list allocation;
 /// every nested frame is checked before its item decoder can copy components.
-pub(super) fn decode(bytes: &[u8]) -> Result<PlayerData, PlayerPayloadError> {
+pub(super) fn decode(
+    bytes: &[u8],
+    expected_version: u16,
+) -> Result<PlayerData, PlayerPayloadError> {
     if bytes.len() > MAX_PLAYER_DATA_LEN {
         return Err(PlayerPayloadError::RecordTooLarge {
             len: bytes.len(),
@@ -174,7 +207,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<PlayerData, PlayerPayloadError> {
         return Err(PlayerPayloadError::InvalidMagic);
     }
     let version = reader.read_u16()?;
-    if version != VERSION {
+    if !matches!(version, 3 | 4 | VERSION) || version != expected_version {
         return Err(PlayerPayloadError::UnsupportedVersion(version));
     }
     let mut data = PlayerData {
@@ -186,6 +219,8 @@ pub(super) fn decode(bytes: &[u8]) -> Result<PlayerData, PlayerPayloadError> {
         selected_slot: reader.read_u8()?,
         slots: Box::new(std::array::from_fn(|_| ItemStack::empty())),
         carried: ItemStack::empty(),
+        table_inputs: Box::new(std::array::from_fn(|_| ItemStack::empty())),
+        vitals: PlayerVitals::new().snapshot(),
     };
     validate_state(&data)?;
     let count = reader.read_u16()?;
@@ -196,6 +231,29 @@ pub(super) fn decode(bytes: &[u8]) -> Result<PlayerData, PlayerPayloadError> {
         *slot = read_stack(&mut reader)?;
     }
     data.carried = read_stack(&mut reader)?;
+    if version >= 4 {
+        for stack in &mut *data.table_inputs {
+            *stack = read_stack(&mut reader)?;
+        }
+    }
+    if version == VERSION {
+        let health = reader.read_f32()?;
+        let food = reader.read_u8()?;
+        let saturation = reader.read_f32()?;
+        let exhaustion = reader.read_f32()?;
+        let food_timer = reader.read_u8()?;
+        let invulnerable = reader.read_u8()?;
+        let hurt = reader.read_u8()?;
+        let last_hurt = reader.read_f32()?;
+        let phase = reader.read_u8()?;
+        let snapshot = VitalsSnapshot::new(health, food, saturation, exhaustion)
+            .and_then(|snapshot| {
+                snapshot.with_timers(food_timer, invulnerable, hurt, last_hurt, phase)
+            })
+            .map_err(PlayerPayloadError::InvalidVitals)?;
+        data.set_vitals(snapshot)
+            .map_err(PlayerPayloadError::InvalidVitals)?;
+    }
     reader.finish()?;
     Ok(data)
 }

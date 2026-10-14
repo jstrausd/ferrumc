@@ -10,7 +10,7 @@ use crate::density::{ClimateQuartPos, NoiseChunkSession};
 use crate::WorldSeed;
 use ferrumc_math::{BlockPos, ChunkPos};
 use ferrumc_registry::worldgen::NoiseSettingsResourceId;
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 
 /// Checked complete section-aligned biome height accessor, distinct from noise height.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +130,30 @@ impl ChunkBiomeSamples {
         let x = usize::try_from((pos.x() & 15) >> 2).ok()?;
         let z = usize::try_from((pos.z() & 15) >> 2).ok()?;
         self.values.get((y * 4 + x) * 4 + z).copied()
+    }
+}
+
+// A sealed successful private composition transition. Its tree lease prevents a
+// foreign tree with the same preset from supplying a different tie history.
+pub(crate) struct NaturalBiomeTransition {
+    tree: Arc<BiomeTree>,
+    initial: Option<u16>,
+    final_leaf: Option<u16>,
+    work: usize,
+    samples: Arc<ChunkBiomeSamples>,
+}
+impl NaturalBiomeTransition {
+    pub(crate) fn key(&self) -> (ChunkPos, Option<u16>) {
+        (self.samples.chunk, self.initial)
+    }
+    pub(crate) fn samples(&self) -> Arc<ChunkBiomeSamples> {
+        Arc::clone(&self.samples)
+    }
+    // The record itself is already charged in the cache's deque capacity.
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        size_of::<ChunkBiomeSamples>()
+            + size_of_val(self.samples.values.as_ref())
+            + 2 * size_of::<usize>()
     }
 }
 
@@ -303,6 +327,60 @@ impl BiomeSourceSession {
                 Err(error)
             }
         }
+    }
+    pub(crate) fn natural_transition_key(&self, pos: ChunkPos) -> Option<(ChunkPos, Option<u16>)> {
+        #[cfg(test)]
+        if self.trace.is_some() {
+            return None;
+        }
+        if !self.poisoned && matches!(self.source, Source::MultiNoise(_)) {
+            Some((pos, self.last))
+        } else {
+            None
+        }
+    }
+    pub(crate) fn sample_natural_transition(
+        &mut self,
+        climate: &NaturalClimateSamples,
+    ) -> Result<NaturalBiomeTransition, BiomeError> {
+        let initial = self.last;
+        let before = self.work.used();
+        let samples = Arc::new(self.sample_natural_climate(climate)?);
+        let Source::MultiNoise(tree) = &self.source else {
+            return Err(fail(BiomeErrorKind::InvalidTree));
+        };
+        Ok(NaturalBiomeTransition {
+            tree: Arc::clone(tree),
+            initial,
+            final_leaf: self.last,
+            work: self.work.used() - before,
+            samples,
+        })
+    }
+    pub(crate) fn replay_natural_transition(
+        &mut self,
+        climate: &NaturalClimateSamples,
+        saved: &NaturalBiomeTransition,
+    ) -> Option<Arc<ChunkBiomeSamples>> {
+        if self.natural_transition_key(climate.chunk)? != saved.key() {
+            return None;
+        }
+        let Source::MultiNoise(tree) = &self.source else {
+            return None;
+        };
+        let samples = &saved.samples;
+        if !Arc::ptr_eq(tree, &saved.tree)
+            || samples.seed != climate.seed
+            || samples.resource != climate.resource
+            || samples.chunk != climate.chunk
+            || samples.geometry != climate.geometry
+            || samples.source != self.identity()
+            || !self.work.try_charge_public_group(saved.work)
+        {
+            return None;
+        }
+        self.last = saved.final_leaf;
+        Some(Arc::clone(samples))
     }
     // Keep the original charge/selection/staging transaction in one visible traversal.
     #[allow(clippy::too_many_lines)]
@@ -513,11 +591,11 @@ impl NaturalClimateSamples {
     }
 }
 
-#[cfg(test)]
 impl NaturalClimateSamples {
     pub(crate) fn native_bytes(&self) -> usize {
         std::mem::size_of::<Self>() + std::mem::size_of_val(self.values.as_ref())
     }
+    #[cfg(test)]
     pub(crate) fn targets(&self) -> &[BiomeClimateTarget] {
         &self.values
     }
@@ -596,5 +674,179 @@ mod natural_replay_tests {
             assert_eq!(actual.last_selection(), expected.last_selection());
             assert_eq!(actual.is_poisoned(), expected.is_poisoned());
         }
+    }
+}
+
+#[cfg(test)]
+mod natural_transition_tests {
+    use super::*;
+    use crate::biome_selection::{
+        BiomeBuildBudget, MAX_BIOME_BUILD_WORK, MAX_BIOME_SELECTION_WORK,
+    };
+    use crate::density::{NoiseChunkWorkBudget, RouterTemplate, MAX_NOISE_CHUNK_WORK};
+
+    fn setup() -> (Arc<BiomeTree>, NaturalClimateSamples, NaturalClimateSamples) {
+        let resource = NoiseSettingsResourceId::from_name("minecraft:overworld").unwrap();
+        let router = RouterTemplate::compile_builtin(resource)
+            .unwrap()
+            .bind_seed(WorldSeed::new(17))
+            .unwrap();
+        let tree = Arc::new(
+            BiomeTree::from_builtin(
+                BiomeParametersResourceId::from_name("minecraft:overworld").unwrap(),
+                BiomeBuildBudget::new(MAX_BIOME_BUILD_WORK).unwrap(),
+            )
+            .unwrap(),
+        );
+        let climate = |pos| {
+            NaturalClimateSamples::sample(
+                &mut router
+                    .fresh_paper_noise_chunk(
+                        pos,
+                        NoiseChunkWorkBudget::new(MAX_NOISE_CHUNK_WORK).unwrap(),
+                    )
+                    .unwrap(),
+                BiomeQuartGeometry::new(-64, 384).unwrap(),
+            )
+            .unwrap()
+        };
+        (
+            tree,
+            climate(ChunkPos::new(-1, -1)),
+            climate(ChunkPos::ORIGIN),
+        )
+    }
+    fn source(tree: &Arc<BiomeTree>, allowance: u32) -> BiomeSourceSession {
+        BiomeSourceSession::from_multinoise(BiomeSelectionSession::new(
+            Arc::clone(tree),
+            BiomeWorkBudget::new(allowance).unwrap(),
+        ))
+    }
+    fn compare(actual: &BiomeSourceSession, expected: &BiomeSourceSession) {
+        assert_eq!(actual.work_used(), expected.work_used());
+        assert_eq!(actual.last, expected.last);
+        assert_eq!(actual.last_selection(), expected.last_selection());
+        assert_eq!(actual.is_poisoned(), expected.is_poisoned());
+    }
+    #[test]
+    fn transition_exact_allowance_history_and_first_refusal() {
+        let (tree, prefix, climate) = setup();
+        for warm in [false, true] {
+            let mut capture = source(&tree, MAX_BIOME_SELECTION_WORK);
+            if warm {
+                capture.sample_natural_climate(&prefix).unwrap();
+            }
+            let prefix_work = capture.work_used();
+            let saved = capture.sample_natural_transition(&climate).unwrap();
+            let required = u32::try_from(prefix_work + saved.work).unwrap();
+            for allowance in [required - 1, required, required + 1] {
+                let mut actual = source(&tree, allowance);
+                let mut expected = source(&tree, allowance);
+                if warm {
+                    actual.sample_natural_climate(&prefix).unwrap();
+                    expected.sample_natural_climate(&prefix).unwrap();
+                }
+                let before = actual.work_used();
+                let initial = actual.last;
+                let hit = actual.replay_natural_transition(&climate, &saved);
+                assert_eq!(hit.is_some(), allowance >= required);
+                if hit.is_none() {
+                    assert_eq!(actual.work_used(), before);
+                    assert_eq!(actual.last, initial);
+                    assert!(!actual.is_poisoned());
+                }
+                let result =
+                    hit.map_or_else(|| actual.sample_natural_climate(&climate).map(Arc::new), Ok);
+                let original = expected.sample_natural_climate(&climate);
+                assert_eq!(
+                    result
+                        .as_ref()
+                        .map(|v| v.values())
+                        .map_err(BiomeError::kind),
+                    original
+                        .as_ref()
+                        .map(ChunkBiomeSamples::values)
+                        .map_err(BiomeError::kind)
+                );
+                if let (Ok(a), Ok(e)) = (&result, &original) {
+                    assert_eq!(a.initial_selection(), e.initial_selection());
+                    assert_eq!(a.final_selection(), e.final_selection());
+                    assert_eq!(a.seed(), e.seed());
+                    assert_eq!(a.source(), e.source());
+                    assert_eq!(a.chunk_pos(), e.chunk_pos());
+                    assert_eq!(a.geometry(), e.geometry());
+                }
+                compare(&actual, &expected);
+                if result.is_err() {
+                    assert!(actual.replay_natural_transition(&climate, &saved).is_none());
+                    assert_eq!(
+                        actual.sample_natural_climate(&climate).unwrap_err().kind(),
+                        &BiomeErrorKind::Poisoned
+                    );
+                    compare(&actual, &expected);
+                }
+            }
+        }
+    }
+    #[test]
+    fn transition_rejects_foreign_context_history_trace_and_poison() {
+        let (tree, prefix, climate) = setup();
+        let saved = source(&tree, MAX_BIOME_SELECTION_WORK)
+            .sample_natural_transition(&climate)
+            .unwrap();
+        let (foreign, _, _) = setup();
+        let mut different_tree = source(&foreign, MAX_BIOME_SELECTION_WORK);
+        assert!(different_tree
+            .replay_natural_transition(&climate, &saved)
+            .is_none());
+        assert_eq!(different_tree.work_used(), 0);
+        let mut warm = source(&tree, MAX_BIOME_SELECTION_WORK);
+        warm.sample_natural_climate(&prefix).unwrap();
+        assert!(warm.last.is_some());
+        let before = warm.work_used();
+        let last = warm.last;
+        assert!(warm.replay_natural_transition(&climate, &saved).is_none());
+        assert_eq!(warm.work_used(), before);
+        assert_eq!(warm.last, last);
+        for mismatch in 0..4 {
+            let mut altered = NaturalClimateSamples {
+                seed: climate.seed,
+                resource: climate.resource,
+                chunk: climate.chunk,
+                geometry: climate.geometry,
+                values: climate.values.clone(),
+            };
+            match mismatch {
+                0 => altered.seed = WorldSeed::new(-17),
+                1 => {
+                    altered.resource =
+                        NoiseSettingsResourceId::from_name("minecraft:nether").unwrap();
+                }
+                2 => altered.chunk = ChunkPos::new(1, 0),
+                _ => altered.geometry = BiomeQuartGeometry::new(-64, 400).unwrap(),
+            }
+            let mut actual = source(&tree, MAX_BIOME_SELECTION_WORK);
+            assert!(actual.replay_natural_transition(&altered, &saved).is_none());
+            assert_eq!(actual.work_used(), 0);
+            assert_eq!(actual.last, None);
+        }
+        let mut fixed = BiomeSourceSession::fixed(
+            saved.samples.values[0],
+            BiomeWorkBudget::new(MAX_BIOME_SELECTION_WORK).unwrap(),
+        );
+        assert!(fixed.replay_natural_transition(&climate, &saved).is_none());
+        assert_eq!(fixed.work_used(), 0);
+        let mut traced = source(&tree, MAX_BIOME_SELECTION_WORK);
+        traced.enable_trace();
+        assert!(traced.replay_natural_transition(&climate, &saved).is_none());
+        assert_eq!(traced.work_used(), 0);
+        traced.sample_natural_climate(&climate).unwrap();
+        assert_eq!(traced.take_trace().len(), 1536);
+        let mut poisoned = source(&tree, 1);
+        assert!(poisoned.sample_natural_climate(&climate).is_err());
+        assert!(poisoned
+            .replay_natural_transition(&climate, &saved)
+            .is_none());
+        assert_eq!(poisoned.work_used(), 1);
     }
 }

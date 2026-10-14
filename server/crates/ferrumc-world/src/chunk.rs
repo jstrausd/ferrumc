@@ -160,6 +160,24 @@ impl Chunk {
         }
     }
 
+    // Only immutable raw producer baselines have this closed native census.
+    // A future producer with entities/light is usable but deliberately uncached.
+    pub(crate) fn raw_baseline_native_bytes(&self) -> Option<usize> {
+        if !self.block_entities.is_empty() || self.light.is_some() {
+            return None;
+        }
+        Some(
+            std::mem::size_of::<Self>()
+                + self.biomes.as_deref().map_or(0, std::mem::size_of_val)
+                + self
+                    .sections
+                    .iter()
+                    .map(|section| section.block_states().allocation_bytes())
+                    .sum::<usize>()
+                + 2 * std::mem::size_of::<usize>(),
+        )
+    }
+
     /// Returns stored natural biomes in ascending-quart-Y/X/Z order.
     ///
     /// Flat chunks have no stored biome array and encode as plains.

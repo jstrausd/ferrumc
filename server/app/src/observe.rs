@@ -109,6 +109,13 @@ fn outbound_id(packet: &OutboundPacket) -> i32 {
 /// A stable `&'static str` name for a clientbound play packet.
 pub(crate) fn clientbound_play_name(packet: &ClientboundPlayPacket) -> &'static str {
     match packet {
+        ClientboundPlayPacket::SetExperience(_) => "set_experience",
+        ClientboundPlayPacket::UpdateHealth(_) => "update_health",
+        ClientboundPlayPacket::Respawn(_) => "respawn",
+        ClientboundPlayPacket::CombatDeath(_) => "combat_death",
+        ClientboundPlayPacket::UpdateLight(_) => "update_light",
+        ClientboundPlayPacket::EntityEvent(_) => "entity_event",
+        ClientboundPlayPacket::BlockDestruction(_) => "block_destruction",
         ClientboundPlayPacket::SpawnEntity(_) => "spawn_entity",
         ClientboundPlayPacket::AcknowledgeBlockChange(_) => "acknowledge_block_change",
         ClientboundPlayPacket::BlockUpdate(_) => "block_update",
@@ -138,6 +145,7 @@ pub(crate) fn clientbound_play_name(packet: &ClientboundPlayPacket) -> &'static 
         ClientboundPlayPacket::TabCompleteResponse(_) => "tab_complete_response",
         ClientboundPlayPacket::SetContainerContent(_) => "set_container_content",
         ClientboundPlayPacket::SetContainerSlot(_) => "set_container_slot",
+        ClientboundPlayPacket::SetContainerProperty(_) => "set_container_property",
         ClientboundPlayPacket::ClientboundSetHeldItem(_) => "clientbound_set_held_item",
         ClientboundPlayPacket::PlayerAbilities(_) => "player_abilities",
         ClientboundPlayPacket::SetEquipment(_) => "set_equipment",
@@ -163,6 +171,11 @@ pub(crate) fn clientbound_play_name(packet: &ClientboundPlayPacket) -> &'static 
 /// A stable `&'static str` name for a serverbound play packet.
 fn serverbound_play_name(packet: &ServerboundPlayPacket) -> &'static str {
     match packet {
+        ServerboundPlayPacket::UseItem(_) => "use_item",
+        ServerboundPlayPacket::InteractEntity(_) => "interact_entity",
+        ServerboundPlayPacket::SetPlayerOnGround(_) => "set_player_on_ground",
+        ServerboundPlayPacket::PlayerInput(_) => "player_input",
+        ServerboundPlayPacket::ClientStatus(_) => "client_status",
         ServerboundPlayPacket::ConfirmTeleportation(_) => "confirm_teleportation",
         ServerboundPlayPacket::ChatCommand(_) => "chat_command",
         ServerboundPlayPacket::ServerboundKeepAlive(_) => "serverbound_keep_alive",

@@ -18,11 +18,13 @@ mod cold;
 mod driver;
 mod fill;
 mod material;
+mod plan;
 mod state;
 
 // GEN-05.10 derives its closed state alphabet from the material producer.
 pub(crate) use material::CarverAquifer;
 pub(crate) use material::{material_alphabet, MATERIAL_ALPHABET_STATES};
+pub(crate) use plan::NaturalNoisePlan;
 use state::{ChunkState, Lifecycle};
 
 /// Largest aggregate allowance for construction and all queries until reset.

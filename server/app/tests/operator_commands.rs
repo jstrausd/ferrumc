@@ -146,13 +146,13 @@ async fn gamemode(client: &mut TestClient, mode: &str, id: f32) -> anyhow::Resul
     Ok(())
 }
 
-async fn restored_mode(client: &mut TestClient) -> anyhow::Result<()> {
+async fn restored_mode(client: &mut TestClient, expected: f32) -> anyhow::Result<()> {
     loop {
         if let ClientboundPlayPacket::GameEvent(event) = client.next_play().await? {
             if event.reason() == 3 {
                 ensure!(
-                    event.value().to_bits() == 1.0_f32.to_bits(),
-                    "restored creative game mode"
+                    event.value().to_bits() == expected.to_bits(),
+                    "restored game mode {expected}"
                 );
                 return Ok(());
             }
@@ -211,8 +211,8 @@ async fn after_restart(server: &RunningServer) -> anyhow::Result<()> {
     graph(&mut admin, false).await?;
     graph(&mut member, false).await?;
     graph(&mut keeper, true).await?;
-    restored_mode(&mut admin).await?;
-    restored_mode(&mut member).await?;
+    restored_mode(&mut admin, 0.0).await?;
+    restored_mode(&mut member, 1.0).await?;
     command(&mut admin, "op Admin", "permission denied").await?;
     ensure!(
         server
@@ -238,7 +238,7 @@ async fn after_restart(server: &RunningServer) -> anyhow::Result<()> {
 async fn live_operator_commands_revoke_permissions_and_persist_across_restart() {
     let temp = tempfile::tempdir().expect("world directory");
     let config = AppConfig::from_toml_str(
-        "bind='127.0.0.1:0'\nspawn_chunk_radius=1\nbuiltin_plugins=false\nops=['Admin']",
+        "bind='127.0.0.1:0'\nspawn_chunk_radius=1\nview_distance=1\nbuiltin_plugins=false\nops=['Admin']",
     )
     .expect("config")
     .with_world_dir(Some(temp.path().to_path_buf()))

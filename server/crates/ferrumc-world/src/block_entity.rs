@@ -25,6 +25,113 @@ pub const SIGN_LINES: usize = 4;
 /// container region is exactly these 27 slots.
 pub const CHEST_SLOTS: usize = 27;
 
+/// Ordinary furnace slots: input zero, fuel one and result two.
+pub const FURNACE_SLOTS: usize = 3;
+
+/// Furnace admission errors, shared with the pure Items tick planner.
+pub type FurnaceDataError = ferrumc_items::SmeltingError;
+
+/// Sealed three-slot furnace data with checked complete replacement.
+/// No tick, screen, events, XP, chunk residency or storage handle lives here.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FurnaceInventory {
+    slots: [ItemStack; FURNACE_SLOTS],
+    burn_remaining: u16,
+    burn_duration: u16,
+    cook_progress: u16,
+    cook_total: u16,
+}
+
+impl Default for FurnaceInventory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FurnaceInventory {
+    /// Create an empty, unlit furnace with ordinary cooking total two hundred.
+    pub fn new() -> Self {
+        Self {
+            slots: std::array::from_fn(|_| ItemStack::empty()),
+            burn_remaining: 0,
+            burn_duration: 0,
+            cook_progress: 0,
+            cook_total: 200,
+        }
+    }
+
+    /// Validate all slots, the complete sixteen-KiB entity budget and every
+    /// timer before publishing a native furnace. Refusal never clamps an item.
+    pub fn try_from_parts(
+        slots: [ItemStack; FURNACE_SLOTS],
+        burn_remaining: u16,
+        burn_duration: u16,
+        cook_progress: u16,
+        cook_total: u16,
+    ) -> Result<Self, FurnaceDataError> {
+        ferrumc_items::validate_furnace_parts(
+            &slots,
+            burn_remaining,
+            burn_duration,
+            cook_progress,
+            cook_total,
+        )?;
+        Ok(Self {
+            slots,
+            burn_remaining,
+            burn_duration,
+            cook_progress,
+            cook_total,
+        })
+    }
+
+    /// Admit a full mutation proposal atomically; failure preserves this owner.
+    /// Caller supplies exclusive tick/revision authority and input-change resets.
+    pub fn try_replace(
+        &mut self,
+        slots: [ItemStack; FURNACE_SLOTS],
+        burn_remaining: u16,
+        burn_duration: u16,
+        cook_progress: u16,
+        cook_total: u16,
+    ) -> Result<(), FurnaceDataError> {
+        let replacement = Self::try_from_parts(
+            slots,
+            burn_remaining,
+            burn_duration,
+            cook_progress,
+            cook_total,
+        )?;
+        *self = replacement;
+        Ok(())
+    }
+
+    /// Complete input/fuel/result slots in protocol order; no mutable escape.
+    pub fn slots(&self) -> &[ItemStack; FURNACE_SLOTS] {
+        &self.slots
+    }
+    /// Borrow a slot, refusing an index outside the fixed three-slot shape.
+    pub fn slot(&self, index: usize) -> Option<&ItemStack> {
+        self.slots.get(index)
+    }
+    /// Remaining burning ticks, bounded by the last fuel duration.
+    pub const fn burn_remaining(&self) -> u16 {
+        self.burn_remaining
+    }
+    /// Last fuel duration (at most signed-short maximum).
+    pub const fn burn_duration(&self) -> u16 {
+        self.burn_duration
+    }
+    /// Current cooking progress, strictly below its total.
+    pub const fn cook_progress(&self) -> u16 {
+        self.cook_progress
+    }
+    /// Current cooking total, one through signed-short maximum.
+    pub const fn cook_total(&self) -> u16 {
+        self.cook_total
+    }
+}
+
 /// Which sign block-entity kind a sign block is. Selects the protocol
 /// block-entity-type id the client expects in a `BlockEntityData` packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,6 +389,8 @@ pub enum BlockEntity {
     Sign(Sign),
     /// A chest with a [`CHEST_SLOTS`]-slot item container.
     Chest(ChestInventory),
+    /// An ordinary furnace with checked item slots and burn/cook timers.
+    Furnace(FurnaceInventory),
 }
 
 /// Classifies a block-state id as the [`SignKind`] of the sign block it belongs
@@ -318,6 +427,15 @@ pub fn is_chest_state(state_id: u32) -> bool {
         Some("chest" | "trapped_chest")
     )
 }
+
+/// Classify only the ordinary `minecraft:furnace` family, including lit states.
+/// Blast furnaces and smokers have separate timing and are outside this model.
+pub fn is_furnace_state(state_id: u32) -> bool {
+    state_id_to_block_name(state_id) == Some("furnace")
+}
+
+#[cfg(test)]
+mod furnace_tests;
 
 #[cfg(test)]
 mod tests {

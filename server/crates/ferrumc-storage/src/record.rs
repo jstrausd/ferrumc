@@ -815,6 +815,10 @@ pub enum MutationLogCause {
     Command,
     /// A plugin submission via a command sink.
     Plugin,
+    /// Ordinary water physics tick.
+    Fluid,
+    /// Ordinary furnace lit-state transition.
+    Furnace,
     /// A test or replay harness.
     Test,
 }
@@ -827,6 +831,8 @@ impl MutationLogCause {
             MutationLogCause::Command => 1,
             MutationLogCause::Plugin => 2,
             MutationLogCause::Test => 3,
+            MutationLogCause::Fluid => 4,
+            MutationLogCause::Furnace => 5,
         }
     }
 
@@ -839,6 +845,8 @@ impl MutationLogCause {
             1 => Some(MutationLogCause::Command),
             2 => Some(MutationLogCause::Plugin),
             3 => Some(MutationLogCause::Test),
+            4 => Some(MutationLogCause::Fluid),
+            5 => Some(MutationLogCause::Furnace),
             _ => None,
         }
     }

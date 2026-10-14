@@ -199,6 +199,11 @@ impl SimShard {
         limits: PlayerOwnershipLimits,
     ) -> Result<(), PlayerOwnershipError> {
         if self.player_ownership.is_some()
+            || self.ground_items.is_some()
+            || self.survival.is_some()
+            || self.water.is_some()
+            || self.furnaces.is_some()
+            || self.mobs.is_some()
             || !self.players.is_empty()
             || !self.inbox.is_empty()
             || !self.pending_region_work.is_empty()
@@ -1884,6 +1889,7 @@ impl SimShard {
                 pitch: snapshot.look[1],
                 game_mode: snapshot.game_mode,
                 owned: Some(owned),
+                survival: None,
             },
         );
     }

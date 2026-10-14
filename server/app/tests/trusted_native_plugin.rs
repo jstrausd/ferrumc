@@ -38,8 +38,8 @@ async fn dynamic_block_rules_rewrites_glass_on_the_production_socket_path() {
         .to_str()
         .expect("repository plugin scratch path is UTF-8");
     let config = AppConfig::from_toml_str(&format!(
-        "bind = \"127.0.0.1:0\"\n\
-         spawn_chunk_radius = 1\n\
+        "bind = \"127.0.0.1:0\"\nops = [\"NativeBuilder\"]\n\
+         spawn_chunk_radius = 1\nview_distance = 1\n\
          builtin_plugins = false\n\
          plugins_dir = {plugins_path:?}\n"
     ))
@@ -69,8 +69,11 @@ async fn dynamic_block_rules_rewrites_glass_on_the_production_socket_path() {
 async fn place_glass_and_observe_rewrite(address: std::net::SocketAddr) -> anyhow::Result<()> {
     let mut viewer = login_to_play(address, "NativeViewer").await?;
     let mut builder = login_to_play(address, "NativeBuilder").await?;
+    common::make_creative(&mut builder).await?;
 
-    // Starter-kit hotbar index 3 is glass. The production handler resolves that
+    common::supply_creative_slot(&mut builder, 39, 195, 64).await?;
+
+    // Explicitly supplied hotbar index 3 is glass. The production handler resolves that
     // held item to glass state 562 before consulting the plugin host.
     builder
         .send_frame(&encode(|buf| ServerboundSetHeldItem::new(3).encode(buf)))

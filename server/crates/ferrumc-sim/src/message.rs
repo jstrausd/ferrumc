@@ -54,6 +54,100 @@ pub enum GameInput {
         /// Identity of the leaving player.
         player: PlayerId,
     },
+    /// Restores checked legacy player health/hunger and every saved timer.
+    RestoreVitals {
+        /// Actual joining legacy actor.
+        player: PlayerId,
+        /// Complete validated state, never a partial HUD projection.
+        snapshot: crate::VitalsSnapshot,
+    },
+    /// Applies one pinned App consumption plan; commit inventory only after its result.
+    FoodConsumed {
+        /// Eating actor.
+        player: PlayerId,
+        /// Trusted resolved food properties.
+        food: ferrumc_items::FoodProperties,
+        /// Positive increasing App token; a replay never grants food again.
+        token: u64,
+    },
+    /// Applies trusted source/armor facts to the actual player health owner.
+    PlayerDamage {
+        /// Victim.
+        player: PlayerId,
+        /// Checked finite source policy and ordinary armor.
+        request: crate::DamageRequest,
+    },
+    /// Attacks a player within ordinary three-block contact reach.
+    PlayerAttack {
+        /// Living attacker.
+        player: PlayerId,
+        /// Present target, resolved from the actual wire-id registration.
+        target: PlayerId,
+        /// Trusted held-tool/armor source facts, never client damage numbers.
+        request: crate::DamageRequest,
+    },
+    /// Ordinary strength-scaled attack with a committed-damage receipt.
+    PlayerAttackTracked {
+        /// Genuine living attacker, whose elapsed strength is owner state.
+        player: PlayerId,
+        /// Present target resolved from its genuine player wire registration.
+        target: PlayerId,
+        /// Trusted unscaled held damage and current victim armor policy.
+        request: crate::DamageRequest,
+        /// Trusted effective ordinary attack-speed attribute, finite 0.1..=1024.
+        attack_speed: f32,
+        /// Positive increasing exact App weapon/armor witness token.
+        token: u64,
+    },
+    /// Attacks a genuine canonical mob using actual elapsed player strength.
+    PlayerMobAttackTracked {
+        /// Living genuine attacker holding the exact App weapon witness.
+        player: PlayerId,
+        /// Actual nonplayer wire registration, never a guessed numeric ID.
+        target: ferrumc_core::EntityId,
+        /// Trusted ordinary unscaled weapon damage.
+        damage: f32,
+        /// Trusted finite ordinary attack-speed attribute.
+        attack_speed: f32,
+        /// Positive increasing exact App witness token, shared with tracked player combat.
+        token: u64,
+    },
+    /// Motion facts admitted alongside the actual movement input.
+    FallMovement {
+        /// Living actor.
+        player: PlayerId,
+        /// Exact finite admitted packet position.
+        position: Vec3,
+        /// Actual protocol ground flag, also checked against coarse block support.
+        on_ground: bool,
+        /// Actual current `PlayerInput` sprint flag.
+        sprinting: bool,
+    },
+    /// Requests dead-player respawn at the App-selected safe spawn.
+    Respawn {
+        /// Dead actor.
+        player: PlayerId,
+        /// Trusted safe spawn coordinate.
+        position: Vec3,
+    },
+    /// Applies an exact pinned App bucket inventory plan against current water.
+    BucketUse {
+        /// Present living actor.
+        player: PlayerId,
+        /// Trusted server-selected source or pour target.
+        position: BlockPos,
+        /// Client action sequence for block acknowledgement.
+        sequence: i32,
+        /// Empty-bucket source pickup when true, water-bucket pour when false.
+        fill: bool,
+        /// Positive increasing exact App inventory-plan witness.
+        token: u64,
+    },
+    /// Explicitly wakes a resident natural/loaded water cell without force loading.
+    WaterSchedule {
+        /// Exact resident water-containing coordinate.
+        position: BlockPos,
+    },
     /// A player broke (destroyed) the block at `position`.
     ///
     /// Decoded upstream from a serverbound `PlayerAction` "start destroying
@@ -69,6 +163,44 @@ pub enum GameInput {
         /// The block-action sequence the client stamped on the originating
         /// `PlayerAction`, echoed back in an `AcknowledgeBlockChange` on accept.
         sequence: i32,
+    },
+    /// Starts ordinary Survival mining with the application's authoritative tool.
+    MiningStart {
+        /// Actor whose mode and reach are checked at the boundary.
+        player: PlayerId,
+        /// Absolute target cell.
+        position: BlockPos,
+        /// Client prediction sequence.
+        sequence: i32,
+        /// Held item and environment facts, never client-authored slot bytes.
+        tool: crate::MiningTool,
+    },
+    /// Finishes a started mining action, or schedules its remaining tick work.
+    MiningFinish {
+        /// Mining actor.
+        player: PlayerId,
+        /// Target must match the active block and its unchanged preimage.
+        position: BlockPos,
+        /// Client prediction sequence.
+        sequence: i32,
+        /// Current authoritative tool; changed tools cancel the old action.
+        tool: crate::MiningTool,
+    },
+    /// Cancels mining without changing any block or producing drops.
+    MiningAbort {
+        /// Actor whose mining work is cancelled.
+        player: PlayerId,
+        /// Client's target, also cleared when it differs from active work.
+        position: BlockPos,
+        /// Prediction sequence to acknowledge.
+        sequence: i32,
+    },
+    /// Invalidates active mining after any exact held-slot or selection mutation.
+    MiningToolChanged {
+        /// Actor whose tool or environment changed.
+        player: PlayerId,
+        /// Authoritative current context.
+        tool: crate::MiningTool,
     },
     /// A player placed a block at `position`.
     ///
@@ -263,6 +395,120 @@ pub enum GameInput {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum GameOutput {
+    /// Always resolves a tracked mob hit, accepted only after actual health commit.
+    MobAttackResolved {
+        /// Genuine attacker holding the weapon witness.
+        player: PlayerId,
+        /// Actual canonical target wire registration.
+        target: ferrumc_core::EntityId,
+        /// Original App witness token, also returned on refusal.
+        token: u64,
+        /// Positive committed health damage; all death drops were reserved first.
+        accepted: bool,
+        /// Actual controller health damage, zero on refusal.
+        damage: f32,
+        /// Actual credited player-kill experience after reserved death, otherwise zero.
+        experience: u8,
+    },
+    /// Actual AI melee damaged player health using the current trusted armor profile.
+    MobPlayerHurt {
+        /// Genuine victim.
+        player: PlayerId,
+        /// Genuine committed hostile-mob wire registration.
+        attacker: ferrumc_core::EntityId,
+        /// Actual positive health damage.
+        damage: f32,
+        /// Incoming incremental damage before ordinary armor, for pinned wear.
+        raw_damage: f32,
+    },
+    /// Resolves one exact combat witness from actual committed player health.
+    PlayerAttackResolved {
+        /// Attacker holding the App witness.
+        player: PlayerId,
+        /// Target whose health was actually checked.
+        target: PlayerId,
+        /// Original positive App witness token, also returned on refusal.
+        token: u64,
+        /// True only when actual health decreased by positive damage.
+        accepted: bool,
+        /// Actual committed health damage, zero on refusal.
+        damage: f32,
+        /// Strength-scaled incoming damage after hurt immunity, before armor;
+        /// zero on refusal. App uses the pinned armor witness for item wear.
+        raw_damage: f32,
+    },
+    /// A loaded ordinary-furnace tick or discovery retained its complete data.
+    FurnaceTickDeferred {
+        /// Resident position whose tick could not commit.
+        position: BlockPos,
+        /// Classified owner/planner admission refusal.
+        reason: crate::FurnaceError,
+    },
+    /// Terminal bucket world result; only Some permits the pinned inventory commit.
+    BucketUseResolved {
+        /// Original bucket actor.
+        player: PlayerId,
+        /// Original target.
+        position: BlockPos,
+        /// Original block acknowledgement sequence.
+        sequence: i32,
+        /// Original pickup/pour direction.
+        fill: bool,
+        /// Exact positive App plan token.
+        token: u64,
+        /// Actual committed block postimage; None preserves prepared inventory.
+        state: Option<BlockStateId>,
+    },
+    /// A water tick or explicit schedule retained/refused work before world mutation.
+    WaterTickDeferred {
+        /// Original due cell, retained for retry when applicable.
+        position: BlockPos,
+        /// Classified bounded refusal; unsupported rules never guess a replacement.
+        reason: crate::WaterError,
+    },
+    /// Terminal uncommitted mining witness; App retires the exact held snapshot.
+    MiningReleased {
+        /// Original mining actor.
+        player: PlayerId,
+        /// Positive immutable App witness; zero-context callers emit no release.
+        tool_token: u64,
+    },
+    /// Actual current owner health/hunger; Session publishes `UpdateHealth`.
+    PlayerVitalsChanged {
+        /// Actor whose vitals changed.
+        player: PlayerId,
+        /// Complete owner state; packet consumers use its visible fields.
+        snapshot: crate::VitalsSnapshot,
+    },
+    /// Single living-to-dead edge; App owns death-screen and inventory policy.
+    PlayerDied {
+        /// Dead actor.
+        player: PlayerId,
+    },
+    /// Effective damage after cooldown and ordinary armor.
+    PlayerHurt {
+        /// Victim.
+        player: PlayerId,
+        /// Actual health loss, excluding overkill.
+        amount: f32,
+    },
+    /// Result of the exact pinned App inventory-consumption plan.
+    FoodConsumptionResolved {
+        /// Original actor.
+        player: PlayerId,
+        /// Original monotonic request token.
+        token: u64,
+        /// Whether the owner applied food; only true permits inventory commit.
+        accepted: bool,
+    },
+    /// Owner accepted a dead-player respawn and reset health/hunger/timers.
+    PlayerRespawned {
+        /// Revived actor.
+        player: PlayerId,
+        /// Actual new owner position.
+        position: Vec3,
+    },
+
     /// A player became present in the shard.
     PlayerSpawned {
         /// Identity of the spawned player.
@@ -325,6 +571,48 @@ pub enum GameOutput {
         sequence: i32,
         /// What caused the mutation (carries the acting player for the ack).
         cause: MutationCause,
+    },
+    /// Completes the prediction sequence of a mining start/abort/early finish.
+    BlockActionAcknowledged {
+        /// Recipient of the mandatory acknowledgement.
+        player: PlayerId,
+        /// Original client prediction sequence.
+        sequence: i32,
+    },
+    /// Changes the block-destruction overlay, with `-1` clearing it.
+    MiningProgress {
+        /// Actor whose actual session wire identity names the overlay.
+        player: PlayerId,
+        /// Absolute target cell.
+        position: BlockPos,
+        /// Crack stage `0..=9`, or `-1` to remove it.
+        stage: i8,
+    },
+    /// An actual Survival break committed through the block-edit funnel.
+    ///
+    /// App owns the drop-spawn, tool-wear, experience and after-event consumers.
+    /// The complete stacks include former chest contents without stripping
+    /// components. These are move-owned outputs, not inventory grants or durable
+    /// commit acknowledgements; native ownership never emits this legacy output.
+    SurvivalBlockBroken {
+        /// Actor who completed mining.
+        player: PlayerId,
+        /// Changed primary cell.
+        position: BlockPos,
+        /// Sequence of the completed start or finish action.
+        sequence: i32,
+        /// Exact block preimage used to derive drops.
+        previous_state: BlockStateId,
+        /// Registry held-item snapshot to guard the application's wear.
+        held_item: Option<i32>,
+        /// Immutable application witness for exact held-stack wear.
+        tool_token: u64,
+        /// Complete stacks to admit through the existing concrete entity owner.
+        drops: Vec<ferrumc_items::ItemStack>,
+        /// Sampled ordinary ore experience, before any plugin adjustment.
+        experience: u32,
+        /// Ordinary tool damage, zero for bare hands and zero-hardness blocks.
+        tool_damage: u8,
     },
     /// A player's block edit was rejected; the actor's predicted change must heal
     /// to the authoritative state.

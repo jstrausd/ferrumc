@@ -97,7 +97,7 @@ impl GenerationDimension {
 /// Complete supported identity of a reproducible generated chunk baseline.
 ///
 /// Supports Minecraft 1.21.8 / Overworld, with distinct flat revision 1 and
-/// natural terrain preview revisions 1, 2 and 3. Decode rejects other metadata
+/// natural terrain preview revisions 1, 2, 3 and 4. Decode rejects other metadata
 /// explicitly. Seeds are retained even when an algorithm is seed-independent.
 ///
 /// This is a value contract. It does not persist the identity or guard the
@@ -157,6 +157,16 @@ impl GenerationIdentity {
     pub const fn natural_overworld_with_trees(seed: WorldSeed) -> Self {
         let mut identity = Self::natural_overworld(seed);
         identity.generator_revision = 3;
+        identity
+    }
+    /// Selects revision 4: trees/grass and an isolated-source placed ore subset.
+    ///
+    /// Existing identities never select this revision implicitly. Full FEATURES,
+    /// structures and Vanilla seed parity remain outside this Survival preview.
+    #[must_use]
+    pub const fn natural_overworld_survival(seed: WorldSeed) -> Self {
+        let mut identity = Self::natural_overworld(seed);
+        identity.generator_revision = 4;
         identity
     }
     /// Returns the Minecraft release whose rules this baseline uses.
@@ -255,7 +265,7 @@ impl GenerationIdentity {
         let revision = u32::from_be_bytes([bytes[14], bytes[15], bytes[16], bytes[17]]);
         if revision != supported_revision
             && !(generator_kind == GeneratorKind::FerrumcNaturalPreview
-                && matches!(revision, 2 | 3))
+                && matches!(revision, 2..=4))
         {
             return Err(GenerationError::UnsupportedGeneratorRevision {
                 kind: generator_kind,
@@ -272,6 +282,9 @@ impl GenerationIdentity {
         }
         Ok(match generator_kind {
             GeneratorKind::FerrumcFlat => Self::flat_overworld(WorldSeed::new(seed)),
+            GeneratorKind::FerrumcNaturalPreview if revision == 4 => {
+                Self::natural_overworld_survival(WorldSeed::new(seed))
+            }
             GeneratorKind::FerrumcNaturalPreview if revision == 3 => {
                 Self::natural_overworld_with_trees(WorldSeed::new(seed))
             }

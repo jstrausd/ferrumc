@@ -28,6 +28,9 @@
 //!   auto-corner `shape` (`inner_left`/`inner_right`/`outer_left`/`outer_right`)
 //!   derived from neighbouring stairs.
 //! - Torches — floor vs wall (wall variant `facing` = the clicked face).
+//! - Banners and skulls/heads — top-face standing vs side-face wall variants;
+//!   standing rotation follows original 16-segment yaw (banners add 180 degrees).
+//! - Decorated pots — horizontal facing follows the player's look direction.
 //! - Fences — cardinal connectivity via the [`NeighborQuery`].
 //! - Walls — `north`/`south`/`east`/`west` connection height (`none`/`low`/`tall`)
 //!   plus the `up` post, derived from neighbours like fences.
@@ -63,8 +66,10 @@
 //! - Beds — `facing` from yaw; placed as the `foot` with the `head` added one cell
 //!   along the facing direction.
 //!
-//! Out of scope (placed as the default/simple state): rails, banners, and
-//! redstone wiring.
+//! Out of scope (placed as the default/simple state): rails and redstone wiring.
+//! Banner/skull attachment resolves the normal clicked top/side projection;
+//! nearest-look/support fallback, ceiling placement and skull redstone inputs
+//! are not represented by this context and remain host responsibilities.
 //!
 //! ## Waterlogging input
 //!
@@ -78,6 +83,7 @@
 //! latter correctly never waterlogs.
 
 mod collision;
+mod standing_wall;
 
 pub use collision::{placement_intersects_body, standing_player_body};
 
@@ -172,6 +178,10 @@ pub enum PlacementRule {
     /// A wall torch: `facing` is the clicked face (the block name switches to the
     /// wall variant).
     TorchWall,
+    /// A banner or skull/head: top-face standing rotation or side-face wall
+    /// variant facing the clicked side. Support/look-order fallback is not
+    /// represented by the placement context.
+    StandingAndWall,
     /// A fence: cardinal connectivity resolved via the [`NeighborQuery`].
     FenceLike,
     /// A trapdoor: `facing` (the clicked side, or the player's yaw for a
@@ -278,6 +288,8 @@ enum Class {
     Slab,
     Stair,
     Torch,
+    StandingAndWall,
+    DecoratedPot,
     Fence,
     Trapdoor,
     FenceGate,
@@ -342,6 +354,10 @@ fn wall_torch_variant(name: &str) -> Option<&'static str> {
 fn classify(name: &str) -> Class {
     if wall_torch_variant(name).is_some() {
         Class::Torch
+    } else if standing_wall::variants(name).is_some() {
+        Class::StandingAndWall
+    } else if name == "decorated_pot" {
+        Class::DecoratedPot
     } else if name.ends_with("_trapdoor") {
         Class::Trapdoor
     } else if name.ends_with("_fence_gate") {
@@ -978,7 +994,7 @@ pub fn compute_wall_connection_state(
 /// Resolves a glass pane's or iron bars' cardinal connectivity into a concrete
 /// state id.
 ///
-/// Each cardinal neighbour [`pane_connects`] accepts sets that direction's boolean
+/// Each cardinal neighbour `pane_connects` accepts sets that direction's boolean
 /// `true`; unset directions and `waterlogged` inherit the (all-false) default.
 /// Returns `None` only if `pane_name` is not a registry block.
 #[must_use]
@@ -1051,6 +1067,8 @@ pub fn compute_placement(
         Class::Slab => place_slab(name, fallback, ctx),
         Class::Stair => place_stair(name, fallback, ctx, neighbors),
         Class::Torch => place_torch(name, fallback, ctx),
+        Class::StandingAndWall => standing_wall::place(name, fallback, ctx),
+        Class::DecoratedPot => place_decorated_pot(name, fallback, ctx),
         Class::Fence => (
             compute_fence_connection_state(name, ctx.position, neighbors).unwrap_or(fallback),
             PlacementRule::FenceLike,
@@ -1191,6 +1209,17 @@ fn place_horizontal_facing(
     let facing = yaw_to_cardinal(ctx.player_yaw).opposite();
     let mut props = BTreeMap::new();
     props.insert("facing", facing_string(facing));
+    (
+        encode(name, &props, fallback),
+        PlacementRule::HorizontalFacing,
+    )
+}
+
+/// Unlike the furnace family, the pot faces the player's horizontal direction.
+/// Fresh defaults reset cracked/waterlogged before the common waterlogging step.
+fn place_decorated_pot(name: &str, fallback: u32, ctx: &PlacementContext) -> (u32, PlacementRule) {
+    let mut props = BTreeMap::new();
+    props.insert("facing", facing_string(yaw_to_cardinal(ctx.player_yaw)));
     (
         encode(name, &props, fallback),
         PlacementRule::HorizontalFacing,

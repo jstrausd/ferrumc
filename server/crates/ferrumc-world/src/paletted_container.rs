@@ -161,6 +161,18 @@ impl<const CAPACITY: usize> PalettedContainer<CAPACITY> {
         }
     }
 
+    // Charge actual vector capacities, including retained unused palette slots.
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        match &self.repr {
+            Repr::Single(_) => 0,
+            Repr::Indirect { palette, indices } => {
+                palette.capacity() * std::mem::size_of::<BlockStateId>()
+                    + indices.allocation_bytes()
+            }
+            Repr::Direct(data) => data.allocation_bytes(),
+        }
+    }
+
     /// Returns which internal representation is currently in use.
     #[must_use]
     pub const fn kind(&self) -> ContainerKind {

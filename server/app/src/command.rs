@@ -224,6 +224,11 @@ pub fn build_command_tree_with_limits(region_volume_cap: u64) -> CommandTree {
     tree.register(tp_command());
     tree.register(weather_command());
     tree.register(time_command());
+    tree.register(greedy_command(
+        "mobspawn",
+        crate::mob_command::USAGE,
+        |args| crate::mob_command::parse(args).map(|_| "Requested natural mob spawn".to_owned()),
+    ));
 
     // `/title`, `/subtitle`, `/actionbar` take greedy free text; the clientbound
     // title/action-bar packets are applied on success by `presentation_packets`.
@@ -1287,6 +1292,14 @@ pub(crate) fn region_commands(command: &str, player: PlayerId) -> Vec<SimCommand
                 target,
                 mode,
                 acceptance: None,
+            }],
+            None => Vec::new(),
+        },
+        "mobspawn" => match crate::mob_command::parse(args) {
+            Some((kind, position)) => vec![SimCommand::SpawnMob {
+                player,
+                kind,
+                position,
             }],
             None => Vec::new(),
         },

@@ -13,6 +13,9 @@ The launcher selects the newer executable from `local-natural/ferrumc` and
 `FERRUMC_SERVER_BIN` overrides this selection. It prints the selected path
 before starting. From the repository root:
 
+New configurations select revision4 Survival terrain with grass, trees and ores.
+Existing configurations and stored generation identities are retained.
+
 ```sh
 ./scripts/run-natural-preview.sh
 ```
@@ -20,9 +23,9 @@ before starting. From the repository root:
 Connect a **Minecraft Java 1.21.8** client to **localhost:25566**, or this host's
 address from another machine. Minecraft and the enabled web dashboard bind to
 `0.0.0.0`; the launcher enforces this for existing configs too. Stop with
-Ctrl-C to flush world/player changes before restarting. If the delivered
-process is already running, connect directly; a second process cannot open
-the same world database. Its log is `local-natural/server.log`.
+ Ctrl-C to flush world/player changes before restarting. A second process cannot
+open the same world database. The launcher runs in the foreground; its output
+appears in your terminal.
 
 The launcher creates `local-natural/config.toml` only if absent and keeps
 the save in `local-natural/world/`. It does not replace an existing server
@@ -53,6 +56,32 @@ actual executable. The launcher uses existing binaries and never builds source.
 Do not append `--bind`: both listeners already bind to `0.0.0.0`. Select a
 different Minecraft port with `FERRUMC_NATURAL_PORT`.
 
+## Survival terrain preview
+
+Use a fresh directory for revision4, which includes terrain, biomes, surfaces,
+caves, short grass, bounded oak/birch trees and placed ores:
+
+```sh
+cargo build --manifest-path server/Cargo.toml --release --locked -p ferrumc-app
+FERRUMC_SERVER_BIN="$PWD/server/target/release/ferrumc" \
+FERRUMC_NATURAL_DIR="$PWD/local-natural/survival-preview" \
+FERRUMC_NATURAL_PRESET=ferrumc_natural_survival_preview \
+./scripts/run-natural-preview.sh
+```
+
+Fresh players start in Survival with an empty inventory. The native preview
+implements timed mining, owned drops/pickup, basic crafting and chest transfers,
+furnaces, hunger/health/respawn, tracked melee wear, water flow/buckets and adult
+sheep/cow/pig/chicken/zombie gameplay. Its separate `entity-runtime.redb`
+sidecar retains canonical item/mob identities and mob health on graceful stop.
+Use Ctrl-C and wait for the process to exit before reopening the same save.
+Entity, player and block writes are separate; this is not crash-atomic pickup
+or death persistence. Complete mob AI, all item actions, lava physics, structures,
+Redstone, complete Vanilla/Paper behavior and the full Java-plugin API remain unfinished.
+
+The same stored preset must be retained on restart. Setting the environment
+variable for an existing config does not change that config or its world identity.
+
 ## Configuration and persistence
 
 Set all top-level settings before the `[world]` table:
@@ -65,7 +94,7 @@ chunk_stream_interval_ms = 50
 
 [world]
 seed = 0
-preset = "ferrumc_natural_preview"
+preset = "ferrumc_natural_survival_preview"
 ```
 
 A stored generation identity remains authoritative. Omitting seed/preset on
@@ -146,18 +175,23 @@ offset bamboo/dripstone/moving-piston shapes remain unsupported and fail closed.
 
 ## Preview limits
 
-- No complete placed-feature ore population or structures. Material-stage ore
-  veins remain present. An explicit optional `ferrumc_natural_grass_preview`
+- The Survival preset adds a bounded ordinary ore subset; complete feature
+  chronology and structures remain unfinished. Older revisions keep their
+  original ore population. Material-stage ore veins remain present. An optional `ferrumc_natural_grass_preview`
   preset adds original isolated plains/forest short-grass features (revision 2).
   This is a subset, not complete vegetation or full feature chronology.
 - The optional `ferrumc_natural_tree_preview` adds undecorated configured oak
   and birch shapes. It omits fancy oak, fallen trees, bee nests, leaf litter and
   other tree species. Its isolated-source placement policy is versioned and
   does not reproduce the complete original FEATURES stage.
-- Overworld only. Complete Survival, mobs, Nether, End and the dragon remain
-  separate work.
-- Lighting is direct vertical skylight; lateral propagation and emitted block
-  light are incomplete. Heightmaps use the current highest-non-air model.
+- Overworld only. The adult sheep/cow/pig/chicken/zombie subset has simplified
+  movement and melee; complete mob goals, Nether, End and the dragon remain open.
+- Resident computed skylight and emitted block light propagate after edits.
+  Heightmaps use the current highest-non-air model; complete original lighting
+  scheduling and all translucent block behaviors are not accepted.
+- Supported block-entity families receive default render descriptors after
+  joining. Custom banner patterns, skull profiles, pot decorations and shulker
+  contents require separate behavior; default descriptors do not implement it.
 - Initial spawn loading and exploration still take generation time. Background
   admission and caching reduce tick blocking and repeated work; no unmeasured
   global TPS/RSS improvement or complete Paper loader parity is claimed.

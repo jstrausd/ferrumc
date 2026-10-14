@@ -13,7 +13,7 @@ mod json;
 mod seeded;
 
 // GEN-05.8 stored lookup reuses the single accepted chunk-domain predicate.
-pub(crate) use chunk::admit_chunk;
+pub(crate) use chunk::{admit_chunk, NaturalNoisePlan};
 // GEN-05.10 column driver: the closed GEN-05.4 material alphabet.
 pub(crate) use chunk::{material_alphabet, MATERIAL_ALPHABET_STATES};
 pub(crate) use chunk::{CarverAquifer, NoiseChunkCoreError};

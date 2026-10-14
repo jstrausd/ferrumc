@@ -56,6 +56,8 @@ pub struct TestClient {
     frames: mpsc::Receiver<Vec<u8>>,
     /// Canonical UUID observed in Login Success once login has completed.
     login_uuid: Option<Uuid>,
+    /// Actual initial game mode observed in `JoinGame` before its frame is consumed.
+    join_game_mode: Option<u8>,
     /// Join frames read to confirm the initial teleport, replayed to assertions.
     buffered: VecDeque<Vec<u8>>,
     /// Security fixtures opt out of the real client's automatic acknowledgements.
@@ -75,6 +77,7 @@ impl TestClient {
             writer,
             frames,
             login_uuid: None,
+            join_game_mode: None,
             buffered: VecDeque::new(),
             auto_confirm: false,
             already_confirmed_join: None,
@@ -173,6 +176,12 @@ impl TestClient {
             }
         }
         Ok(())
+    }
+
+    /// Returns the actual mode carried by the consumed initial `JoinGame`.
+    #[allow(dead_code)] // Most lifecycle fixtures assert later mode events instead.
+    pub fn join_game_mode(&self) -> Option<u8> {
+        self.join_game_mode
     }
 
     /// Returns the UUID carried by Login Success after [`login_to_play`].
@@ -337,13 +346,89 @@ pub async fn login_to_play_unconfirmed(addr: SocketAddr, name: &str) -> anyhow::
         .send_frame(&encode(|buf| AckFinishConfiguration.encode(buf)))
         .await?;
     loop {
-        if matches!(
-            client.next_play().await?,
-            ClientboundPlayPacket::JoinGame(_)
-        ) {
+        if let ClientboundPlayPacket::JoinGame(join) = client.next_play().await? {
+            client.join_game_mode = Some(join.world_state().gamemode());
             break;
         }
     }
 
     Ok(client)
+}
+
+/// Reads a setup response while retaining unrelated join/appearance frames.
+/// Setup commands do not teleport; retained syncs are confirmed by `next_play`.
+#[allow(dead_code)] // This helper is shared by independently compiled fixture targets.
+async fn setup_response(
+    client: &mut TestClient,
+    matches: impl Fn(&ClientboundPlayPacket) -> bool,
+) -> anyhow::Result<ClientboundPlayPacket> {
+    let mut retained = VecDeque::new();
+    loop {
+        let body = client.next_frame().await?;
+        let mut reader = BoundedReader::new(&body);
+        let id = reader.read_var_int()?;
+        let packet = ClientboundPlayPacket::decode(id, &mut reader)?;
+        if matches(&packet) {
+            while let Some(body) = retained.pop_back() {
+                client.buffered.push_front(body);
+            }
+            return Ok(packet);
+        }
+        anyhow::ensure!(
+            retained.len() < FRAME_CHANNEL_CAPACITY,
+            "setup response frame bound exceeded"
+        );
+        retained.push_back(body);
+    }
+}
+
+/// Explicitly switches an operator fixture actor to Creative and checks its ACK.
+#[allow(dead_code)] // Other fixture targets keep fresh players in Survival.
+pub async fn make_creative(client: &mut TestClient) -> anyhow::Result<()> {
+    client
+        .send_frame(&encode(|out| {
+            ferrumc_proto::generated::play::ChatCommand::new(BoundedString::new(
+                "gamemode creative".to_owned(),
+            )?)
+            .encode(out)
+        }))
+        .await?;
+    setup_response(client, |packet| {
+        matches!(packet, ClientboundPlayPacket::GameEvent(event)
+        if event.reason() == 3 && event.value().to_bits() == 1.0_f32.to_bits())
+    })
+    .await?;
+    Ok(())
+}
+
+/// Supplies one explicit component-free fixture slot and checks its exact echo.
+#[allow(dead_code)] // Only mechanics requiring supplied items call this setup.
+pub async fn supply_creative_slot(
+    client: &mut TestClient,
+    slot: i16,
+    item: i32,
+    count: i32,
+) -> anyhow::Result<()> {
+    let mut bytes = Vec::new();
+    for value in [count, item, 0, 0] {
+        write_var_int(&mut bytes, value);
+    }
+    client
+        .send_frame(&encode(|out| {
+            ferrumc_proto::generated::play::SetCreativeSlot::new(slot, bytes.clone()).encode(out)
+        }))
+        .await?;
+    let packet = setup_response(client, |packet| {
+        matches!(packet, ClientboundPlayPacket::SetContainerSlot(echo)
+        if echo.window_id() == 0 && echo.slot() == slot)
+    })
+    .await?;
+    let ClientboundPlayPacket::SetContainerSlot(echo) = packet else {
+        unreachable!("matching setup response");
+    };
+    anyhow::ensure!(
+        echo.item() == bytes.as_slice(),
+        "fixture slot was not supplied exactly"
+    );
+    Ok(())
 }

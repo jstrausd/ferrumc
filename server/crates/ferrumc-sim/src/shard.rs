@@ -1,25 +1,31 @@
 //! A single simulation shard: bounded inbox in, outputs out, at tick
 //! boundaries.
 
+mod furnace;
+mod ground_items;
+mod mining;
+mod mobs;
 mod player_ownership;
+mod survival;
+mod water;
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroUsize;
 
 use ferrumc_core::{DimensionId, GameMode, PlayerId, WorldId};
-use ferrumc_items::{encode_persisted_stack, left_click_exchange, ItemStack};
+use ferrumc_items::{encode_persisted_stack, exchange_slot, plan_chest_inventory_click, ItemStack};
 use ferrumc_math::{BlockPos, Cuboid, Direction, ShardPos, Vec3};
 use ferrumc_placement::{
-    compute_placement, fence_connects_to, is_short_grass_replaceable, is_water_source,
-    placement_intersects_body, standing_player_body, update_fence_connection_state, NeighborQuery,
-    PlacementContext, PlacementResult,
+    compute_placement, fence_connects_to, is_short_grass_replaceable, placement_intersects_body,
+    standing_player_body, update_fence_connection_state, NeighborQuery, PlacementContext,
+    PlacementResult,
 };
 use ferrumc_registry::block_state::{block_metadata, state_id_to_block_name};
 use ferrumc_registry::connection::{fence_family, is_connection_exception};
 use ferrumc_world::{
     is_chest_state, sign_kind_for_state, try_encode_block_entity, BlockEntity, BlockStateId,
-    ChestInventory, Sign, SIGN_LINES,
+    ChestInventory, FurnaceInventory, Sign, SIGN_LINES,
 };
 
 use crate::cross_shard::{CrossShardIntent, CrossShardPayload};
@@ -203,6 +209,15 @@ pub(crate) struct PlayerState {
     /// enforce mode-specific rules (creative no-decrement, break speed, flight).
     pub(crate) game_mode: GameMode,
     pub(crate) owned: Option<crate::player::OwnedPlayerInventory>,
+    pub(crate) survival: Option<crate::survival::SurvivalPlayer>,
+}
+
+impl PlayerState {
+    pub(super) fn is_alive(&self) -> bool {
+        self.survival
+            .as_ref()
+            .is_none_or(|state| !state.vitals.is_dead())
+    }
 }
 
 /// A movement coalesced within one tick: the latest valid position and/or
@@ -322,6 +337,14 @@ pub struct SimShard {
     /// identity and the completed tick before bounded canonical admission.
     cross_shard_outbox: Vec<CrossShardIntent>,
     placement_completions: bool,
+    mining_work: BTreeMap<PlayerId, mining::MiningWork>,
+    mining_random: u64,
+    ground_items: Option<crate::ground_items::GroundItems>,
+    survival: Option<crate::survival::SurvivalRuntime>,
+    water: Option<crate::water_runtime::WaterRuntime>,
+    furnaces: Option<crate::furnace_runtime::FurnaceRuntime>,
+    mobs: Option<crate::mob_runtime::MobRuntime>,
+    mob_light_revision: u64,
 }
 
 impl SimShard {
@@ -413,6 +436,14 @@ impl SimShard {
             pending_region_work: VecDeque::new(),
             cross_shard_outbox: Vec::new(),
             placement_completions: false,
+            mining_work: BTreeMap::new(),
+            mining_random: 0x4d59_5df4_d0f3_3173,
+            ground_items: None,
+            survival: None,
+            water: None,
+            furnaces: None,
+            mobs: None,
+            mob_light_revision: 0,
         }
     }
 
@@ -541,6 +572,9 @@ impl SimShard {
         &mut self,
         work: impl FnOnce(&mut EntityTickContext<'_>) -> R,
     ) -> Result<(R, Vec<GameOutput>), EntityStoreError> {
+        if self.ground_items.is_some() || self.mobs.is_some() {
+            return Err(EntityStoreError::GroundRuntimeRequired);
+        }
         if self.player_ownership.is_some() {
             return Err(EntityStoreError::OwnershipRequired);
         }
@@ -587,6 +621,8 @@ impl SimShard {
     pub(crate) fn is_tick_quiescent(&self) -> bool {
         self.inbox.is_empty()
             && self.pending_region_work.is_empty()
+            && self.mining_work.is_empty()
+            && self.ground_items_quiescent()
             && self.cross_shard_outbox.is_empty()
             && self.ownership_quiescent()
     }
@@ -632,6 +668,8 @@ impl SimShard {
                 MutationCause::Command => record.push(1),
                 MutationCause::Plugin => record.push(2),
                 MutationCause::Test => record.push(3),
+                MutationCause::Fluid => record.push(4),
+                MutationCause::Furnace => record.push(5),
             }
             let position = mutation.position();
             record.extend_from_slice(&position.x().to_be_bytes());
@@ -830,6 +868,24 @@ impl SimShard {
         &mut self,
         boundary_inputs: Vec<CrossShardPayload>,
     ) -> Vec<GameOutput> {
+        if let Some(ground) = &self.ground_items {
+            assert!(
+                ground.authority.is_some(),
+                "ground snapshot has no tick authority"
+            );
+            assert!(
+                ground.owner.world() == self.chunks.world()
+                    && ground.owner.dimension() == self.chunks.dimension(),
+                "ground owner scope changed before input drain"
+            );
+        }
+        assert!(
+            self.survival.as_ref().is_none_or(|runtime| runtime.live),
+            "Survival snapshot has no tick authority"
+        );
+        self.begin_mob_tick();
+        self.check_furnace_owner();
+        self.begin_water_tick();
         let mut outputs = Vec::new();
         // Coalesce movement: keep only the latest *valid* position and rotation
         // per player (each component merged independently).
@@ -864,9 +920,22 @@ impl SimShard {
                 }
                 continue;
             }
+            // In the selected gameplay consumer, earlier motion must be actual
+            // before contact, fall, damage, block reach or food/death actions.
+            if self.survival.is_some() && !matches!(&input, GameInput::PlayerMove { .. }) {
+                self.apply_pending_moves(std::mem::take(&mut pending_moves), &mut outputs);
+            }
             let tracked_exact = matches!(&input, GameInput::SetBlockExactTracked { .. });
             match input {
                 GameInput::PlayerJoin { player, position } => {
+                    let uuid = ferrumc_core::EntityUuid::from_bytes(*player.as_uuid().as_bytes());
+                    if self
+                        .mobs
+                        .as_ref()
+                        .is_some_and(|runtime| runtime.uuid_used(uuid))
+                    {
+                        continue;
+                    }
                     // A duplicate join for an already-present player is ignored:
                     // the first join wins and re-joining produces no output,
                     // keeping the result deterministic regardless of retries.
@@ -877,11 +946,81 @@ impl SimShard {
                             pitch: 0.0,
                             game_mode: GameMode::default(),
                             owned: None,
+                            survival: self
+                                .survival
+                                .as_ref()
+                                .map(|_| crate::survival::SurvivalPlayer::new(position)),
                         });
                         outputs.push(GameOutput::PlayerSpawned { player, position });
                     }
                 }
+                GameInput::BucketUse {
+                    player,
+                    position,
+                    sequence,
+                    fill,
+                    token,
+                } => {
+                    self.bucket_use(player, position, sequence, fill, token, &mut outputs);
+                }
+                GameInput::WaterSchedule { position } => {
+                    self.schedule_water(position, &mut outputs);
+                }
+                GameInput::RestoreVitals { player, snapshot } => {
+                    self.restore_vitals(player, snapshot, &mut outputs);
+                }
+                GameInput::FoodConsumed {
+                    player,
+                    food,
+                    token,
+                } => self.consume_food(player, food, token, &mut outputs),
+                GameInput::PlayerDamage { player, request } => {
+                    self.damage_player(player, request, &mut outputs);
+                }
+                GameInput::PlayerAttack {
+                    player,
+                    target,
+                    request,
+                } => self.attack_player(player, target, request, &mut outputs),
+                GameInput::PlayerAttackTracked {
+                    player,
+                    target,
+                    request,
+                    attack_speed,
+                    token,
+                } => {
+                    self.attack_player_tracked(
+                        player,
+                        target,
+                        request,
+                        attack_speed,
+                        token,
+                        &mut outputs,
+                    );
+                }
+                GameInput::PlayerMobAttackTracked {
+                    player,
+                    target,
+                    damage,
+                    attack_speed,
+                    token,
+                } => {
+                    self.attack_mob(player, target, damage, attack_speed, token, &mut outputs);
+                }
+                GameInput::FallMovement {
+                    player,
+                    position,
+                    on_ground,
+                    sprinting,
+                } => self.fall_movement(player, position, on_ground, sprinting, &mut outputs),
+                GameInput::Respawn { player, position } => {
+                    if self.respawn_player(player, position, &mut outputs) {
+                        pending_moves.remove(&player);
+                        corrections.remove(&player);
+                    }
+                }
                 GameInput::SetGameMode { player, mode } => {
+                    self.cancel_mining(&mut outputs, player);
                     // Mutate the authoritative mode in place; a mode change for an
                     // absent player is a silent no-op and emits nothing.
                     if let Some(state) = self.players.get_mut(&player) {
@@ -896,7 +1035,7 @@ impl SimShard {
                 } => {
                     // Movement for an unknown player is ignored rather than
                     // implicitly spawning one; there is also nothing to correct.
-                    if !self.players.contains_key(&player) {
+                    if !self.players.get(&player).is_some_and(PlayerState::is_alive) {
                         continue;
                     }
                     // A position is accepted only if finite and in range.
@@ -939,6 +1078,7 @@ impl SimShard {
                     // Drop the player's undo history so it cannot leak past their
                     // session (it is keyed by player and bounded only per-player).
                     self.undo_history.remove(&player);
+                    self.cancel_mining(&mut outputs, player);
                     if self.players.remove(&player).is_some() {
                         outputs.push(GameOutput::PlayerDespawned { player });
                     }
@@ -948,19 +1088,46 @@ impl SimShard {
                     position,
                     sequence,
                 } => {
-                    // Break -> air. Applied in FIFO order during the drain so the
-                    // output keeps the inbox ordering.
-                    let cause = MutationCause::PlayerCreative { player };
-                    let previous = self.authoritative_state(position);
-                    let result = self.apply_block_edit(cause, position, BlockStateId::AIR);
-                    if let Some(output) =
-                        block_change_output(cause, sequence, position, BlockStateId::AIR, result)
-                    {
-                        outputs.push(output);
-                    }
-                    if matches!(result, MutationResult::Applied { .. }) && !previous.is_air() {
-                        self.update_fence_neighbors(&mut outputs, position);
-                    }
+                    self.start_mining(
+                        &mut outputs,
+                        player,
+                        position,
+                        sequence,
+                        crate::MiningTool::empty(),
+                    );
+                }
+                GameInput::MiningStart {
+                    player,
+                    position,
+                    sequence,
+                    tool,
+                } => {
+                    self.start_mining(&mut outputs, player, position, sequence, tool);
+                }
+                GameInput::MiningFinish {
+                    player,
+                    position,
+                    sequence,
+                    tool,
+                } => {
+                    self.finish_mining(&mut outputs, player, position, sequence, tool);
+                }
+                GameInput::MiningAbort {
+                    player,
+                    position,
+                    sequence,
+                } => {
+                    self.cancel_mining(&mut outputs, player);
+                    outputs.push(GameOutput::MiningProgress {
+                        player,
+                        position,
+                        stage: -1,
+                    });
+                    outputs.push(GameOutput::BlockActionAcknowledged { player, sequence });
+                }
+                GameInput::MiningToolChanged { player, tool } => {
+                    self.update_attack_item(player, tool.held_item());
+                    self.update_mining_tool(&mut outputs, player, tool);
                 }
                 GameInput::BlockPlace {
                     player,
@@ -1121,6 +1288,37 @@ impl SimShard {
         // order. Every player here was present at coalesce time and cannot have
         // left (a leave clears the entry), so the lookup always succeeds. Every
         // entry carries at least one component, so each yields a PlayerMoved.
+        self.apply_pending_moves(pending_moves, &mut outputs);
+
+        // Snap clients back for rejected moves with no superseding valid move.
+        for player in corrections {
+            if let Some(state) = self.players.get(&player) {
+                outputs.push(GameOutput::PlayerPositionCorrected {
+                    player,
+                    position: state.position,
+                });
+            }
+        }
+
+        // Apply a budgeted slice of any in-flight region edits/undos. Runs after
+        // the inbox drain so an edit enqueued this tick begins applying this tick,
+        // while a large fill spreads its remaining cells over later ticks.
+        self.drive_region_work(&mut outputs);
+        self.drive_mining(&mut outputs);
+        self.drive_water(&mut outputs);
+        self.drive_furnaces(&mut outputs);
+        self.drive_mobs(&mut outputs);
+        self.drive_survival(&mut outputs);
+        self.drive_ground_items();
+
+        outputs
+    }
+
+    fn apply_pending_moves(
+        &mut self,
+        pending_moves: BTreeMap<PlayerId, PendingMove>,
+        outputs: &mut Vec<GameOutput>,
+    ) {
         for (player, merged) in pending_moves {
             if let Some(state) = self.players.get_mut(&player) {
                 let position_changed = merged.position.is_some();
@@ -1142,23 +1340,6 @@ impl SimShard {
                 });
             }
         }
-
-        // Snap clients back for rejected moves with no superseding valid move.
-        for player in corrections {
-            if let Some(state) = self.players.get(&player) {
-                outputs.push(GameOutput::PlayerPositionCorrected {
-                    player,
-                    position: state.position,
-                });
-            }
-        }
-
-        // Apply a budgeted slice of any in-flight region edits/undos. Runs after
-        // the inbox drain so an edit enqueued this tick begins applying this tick,
-        // while a large fill spreads its remaining cells over later ticks.
-        self.drive_region_work(&mut outputs);
-
-        outputs
     }
 
     /// Validates and applies a single block edit at the tick boundary — the one
@@ -1187,11 +1368,32 @@ impl SimShard {
         position: BlockPos,
         requested_state: BlockStateId,
     ) -> MutationResult {
+        self.apply_block_edit_prepared(cause, position, requested_state, false)
+    }
+
+    #[allow(clippy::too_many_lines)] // One preflight/commit funnel retains explicit mutation order.
+    fn apply_block_edit_prepared(
+        &mut self,
+        cause: MutationCause,
+        position: BlockPos,
+        requested_state: BlockStateId,
+        water_prepared: bool,
+    ) -> MutationResult {
         // Only a player edit has an actor; other causes (command/plugin/test) are
         // authoritative and skip the actor/reach checks. Resolve the actor first so
         // an edit by an absent player is rejected before anything else.
         let actor = match cause {
             MutationCause::PlayerCreative { player } => {
+                if self
+                    .players
+                    .get(&player)
+                    .is_some_and(|actor| !actor.is_alive())
+                {
+                    return MutationResult::Rejected {
+                        reason: RejectionReason::ActorDead,
+                        authoritative_state: self.authoritative_state(position),
+                    };
+                }
                 let Some(actor_position) = self.players.get(&player).map(|state| state.position)
                 else {
                     return MutationResult::Rejected {
@@ -1229,6 +1431,26 @@ impl SimShard {
             }
         }
 
+        if !self.preflight_furnace_block(position, requested_state) {
+            return MutationResult::Rejected {
+                reason: RejectionReason::FurnaceCapacity,
+                authoritative_state: self.authoritative_state(position),
+            };
+        }
+        if !water_prepared
+            && matches!(
+                cause,
+                MutationCause::PlayerCreative { .. } | MutationCause::Fluid
+            )
+            && self
+                .prepare_water_changes(&[(position, requested_state)])
+                .is_err()
+        {
+            return MutationResult::Rejected {
+                reason: RejectionReason::FluidScheduling,
+                authoritative_state: self.authoritative_state(position),
+            };
+        }
         let Some(chunk) = self.chunks.get_mut(position.to_chunk_pos()) else {
             // Unreachable: residency was confirmed above. Fail closed rather than
             // panic if the invariant ever changes.
@@ -1273,6 +1495,20 @@ impl SimShard {
                                     BlockEntity::Chest(ChestInventory::new()),
                                 );
                             }
+                        } else if ferrumc_world::is_furnace_state(requested_state.as_u32()) {
+                            if !matches!(
+                                chunk.block_entity(position),
+                                Some(BlockEntity::Furnace(_))
+                            ) {
+                                let result = chunk.set_block_entity(
+                                    position,
+                                    BlockEntity::Furnace(FurnaceInventory::new()),
+                                );
+                                assert!(
+                                    result.is_ok(),
+                                    "prevalidated furnace entity insertion refused"
+                                );
+                            }
                         } else {
                             chunk.remove_block_entity(position);
                         }
@@ -1298,6 +1534,13 @@ impl SimShard {
                         ));
                     }
                 }
+                if old_state != requested_state {
+                    self.mob_light_revision = self
+                        .mob_light_revision
+                        .checked_add(1)
+                        .unwrap_or_else(|| panic!("mob light revision overflow"));
+                }
+                self.reconcile_furnace_registration(position, requested_state);
                 MutationResult::Applied {
                     new_state: requested_state,
                 }
@@ -1375,11 +1618,34 @@ impl SimShard {
             return None;
         }
 
+        let water_prepared = self.water.is_some();
+        if water_prepared {
+            let actor_valid = self.players.get(&player).is_some_and(|actor| {
+                actor.is_alive()
+                    && actor.game_mode != GameMode::Spectator
+                    && within_reach(actor.position, primary_pos)
+            });
+            let mut changes = vec![(primary_pos, primary_state)];
+            if let Some(result) = computed {
+                changes.extend(
+                    result
+                        .extra_blocks
+                        .iter()
+                        .map(|&(pos, state)| (pos, BlockStateId::new(state))),
+                );
+            }
+            if !actor_valid || self.prepare_water_changes(&changes).is_err() {
+                self.reject_body_placement(outputs, player, position, sequence, held, computed);
+                return None;
+            }
+        }
+
         // Apply the primary cell first. If it is refused (absent actor, unloaded
         // chunk, out of reach, y-out-of-bounds) nothing else is written, so a
         // rejected door never lands its upper half.
         let previous_primary = self.authoritative_state(primary_pos);
-        let result = self.apply_block_edit(cause, primary_pos, primary_state);
+        let result =
+            self.apply_block_edit_prepared(cause, primary_pos, primary_state, water_prepared);
         let MutationResult::Applied { .. } = result else {
             if let Some(output) =
                 block_change_output(cause, sequence, position, primary_state, result)
@@ -1415,7 +1681,12 @@ impl SimShard {
             for &(epos, estate) in &r.extra_blocks {
                 let estate = BlockStateId::new(estate);
                 let previous_extra = self.authoritative_state(epos);
-                let eresult = self.apply_block_edit(MutationCause::Command, epos, estate);
+                let eresult = self.apply_block_edit_prepared(
+                    MutationCause::Command,
+                    epos,
+                    estate,
+                    water_prepared,
+                );
                 if let Some(output) =
                     block_change_output(MutationCause::Command, sequence, epos, estate, eresult)
                 {
@@ -1446,7 +1717,7 @@ impl SimShard {
         let Some(actor) = self.players.get(&player) else {
             return true;
         };
-        if actor.game_mode == GameMode::Spectator {
+        if !actor.is_alive() || actor.game_mode == GameMode::Spectator {
             return true;
         }
         let blocked = |position, state| {
@@ -1544,13 +1815,12 @@ impl SimShard {
     }
 
     /// Returns `true` if `position` is a resident, in-range cell a placement may
-    /// occupy: air, a water source, or short grass replaceable by the held block.
+    /// occupy: air, any water/lava level, or replaceable short grass.
     ///
-    /// A non-resident chunk or an out-of-range `y` returns `false` (the placement
-    /// cannot safely land there). A water source counts as replaceable so a
-    /// waterloggable block can be placed into it. Short grass follows the pinned
-    /// original replaceable registration and refuses its own held item. Other
-    /// occupied cells (including flowing water) retain the existing refusal.
+    /// A non-resident chunk or an out-of-range `y` fails closed. Original liquid
+    /// blocks are replaceable at every level; source-only waterlogging remains
+    /// the placement planner's separate rule. Short grass follows the pinned
+    /// original replaceable registration and refuses its own held item.
     fn is_placement_clear(&self, position: BlockPos, held: BlockStateId) -> bool {
         let Some(chunk) = self.chunks.get(position.to_chunk_pos()) else {
             return false;
@@ -1559,7 +1829,10 @@ impl SimShard {
             return false;
         };
         state.is_air()
-            || is_water_source(state.as_u32())
+            || matches!(
+                state_id_to_block_name(state.as_u32()),
+                Some("water" | "lava")
+            )
             || is_short_grass_replaceable(state.as_u32(), held.as_u32())
     }
 
@@ -1858,7 +2131,7 @@ impl SimShard {
     /// `cursor`, returning the post-click cursor and the chest's full updated
     /// snapshot.
     ///
-    /// The exchange is [`left_click_exchange`], which is item-count conserving in
+    /// The exchange is [`exchange_slot`], which is item-count conserving in
     /// every branch (pickup / place / merge / swap), so this can never duplicate
     /// or destroy an item. It is applied atomically against the world's
     /// authoritative chest while the driver holds the shard, so two players
@@ -1878,12 +2151,44 @@ impl SimShard {
         player: PlayerId,
         position: BlockPos,
         slot: usize,
+        cursor: ItemStack,
+    ) -> Option<(ItemStack, Vec<ItemStack>)> {
+        self.container_click(player, position, slot, cursor, false)
+    }
+
+    /// Atomically applies an ordinary left/right chest slot exchange, with
+    /// checked effective stack limits and complete persisted candidate preflight.
+    /// Right-click picks up half a stack or deposits one; cursor and all component
+    /// bytes remain intact on refusal. Native ownership cannot use this API.
+    pub fn container_click(
+        &mut self,
+        player: PlayerId,
+        position: BlockPos,
+        slot: usize,
         mut cursor: ItemStack,
+        right: bool,
     ) -> Option<(ItemStack, Vec<ItemStack>)> {
         if self.player_ownership.is_some() {
             return Some((cursor, Vec::new()));
         }
-        let actor = self.players.get(&player).map(|state| state.position)?;
+        let actor_state = self.players.get(&player)?;
+        if !actor_state.is_alive() || actor_state.game_mode == GameMode::Spectator {
+            return Some((
+                cursor,
+                self.chunks
+                    .get(position.to_chunk_pos())
+                    .and_then(|chunk| {
+                        let entity @ BlockEntity::Chest(chest) = chunk.block_entity(position)?
+                        else {
+                            return None;
+                        };
+                        try_encode_block_entity(entity, &mut Vec::new()).ok()?;
+                        Some(chest.snapshot())
+                    })
+                    .unwrap_or_default(),
+            ));
+        }
+        let actor = actor_state.position;
         if !self.chunks.is_loaded(position.to_chunk_pos()) {
             return None;
         }
@@ -1912,7 +2217,9 @@ impl SimShard {
         let BlockEntity::Chest(candidate_chest) = &mut candidate else {
             return None;
         };
-        left_click_exchange(candidate_chest.slot_mut(slot)?, &mut cursor);
+        if exchange_slot(candidate_chest.slot_mut(slot)?, &mut cursor, right).is_err() {
+            return Some((original_cursor, chest.snapshot()));
+        }
         if encode_persisted_stack(&cursor).is_err()
             || try_encode_block_entity(&candidate, &mut Vec::new()).is_err()
         {
@@ -1930,6 +2237,111 @@ impl SimShard {
         // without mutating, so we only reach this on an applied change.
         chunk.mark_persist_dirty(position);
         Some((cursor, snapshot))
+    }
+
+    /// Atomically applies a chest shift-click or hotbar swap against all 36
+    /// caller-owned player slots in main-inventory then hotbar window order.
+    ///
+    /// Returns `(chest_after, player_after)`. The cursor is unaffected. Refusal
+    /// leaves the authoritative chest and dirty masks unchanged; the caller
+    /// retains its player inventory. Native player ownership cannot use this
+    /// legacy API. The driver must hold exclusive shard access through its
+    /// expected-snapshot comparison and this call without yielding.
+    pub fn container_inventory_click(
+        &mut self,
+        player: PlayerId,
+        position: BlockPos,
+        slot: usize,
+        hotbar: Option<u8>,
+        player_slots: Vec<ItemStack>,
+    ) -> Option<(Vec<ItemStack>, Vec<ItemStack>)> {
+        self.container_inventory_click_inner(player, position, slot, hotbar, player_slots, None)
+    }
+
+    /// Applies the same atomic transfer while checking the exact lossless
+    /// expected chest snapshot inside the owner operation.
+    ///
+    /// A stale snapshot returns the actual chest and unchanged player slots.
+    /// Malformed inputs, unreachable chests and invalid persisted candidates
+    /// return `None`, with no authoritative mutation.
+    pub fn container_inventory_click_checked(
+        &mut self,
+        player: PlayerId,
+        position: BlockPos,
+        slot: usize,
+        hotbar: Option<u8>,
+        player_slots: Vec<ItemStack>,
+        expected_slots: &[ItemStack],
+    ) -> Option<(Vec<ItemStack>, Vec<ItemStack>)> {
+        self.container_inventory_click_inner(
+            player,
+            position,
+            slot,
+            hotbar,
+            player_slots,
+            Some(expected_slots),
+        )
+    }
+
+    fn container_inventory_click_inner(
+        &mut self,
+        player: PlayerId,
+        position: BlockPos,
+        slot: usize,
+        hotbar: Option<u8>,
+        player_slots: Vec<ItemStack>,
+        expected_slots: Option<&[ItemStack]>,
+    ) -> Option<(Vec<ItemStack>, Vec<ItemStack>)> {
+        if self.player_ownership.is_some() || player_slots.len() != 36 {
+            return None;
+        }
+        let actor = self.players.get(&player)?;
+        if !actor.is_alive()
+            || actor.game_mode == GameMode::Spectator
+            || !within_reach(actor.position, position)
+        {
+            return None;
+        }
+        let chunk = self.chunks.get_mut(position.to_chunk_pos())?;
+        if !is_chest_state(chunk.get_block(position)?.as_u32()) {
+            return None;
+        }
+        let entity @ BlockEntity::Chest(chest) = chunk.block_entity(position)? else {
+            return None;
+        };
+        // Validate imported/current component data before cloning any slots.
+        let mut before = Vec::new();
+        try_encode_block_entity(entity, &mut before).ok()?;
+        if let Some(expected) = expected_slots {
+            if expected.len() != ferrumc_world::CHEST_SLOTS {
+                return None;
+            }
+            let mut matches = true;
+            for (actual, expected) in chest.slots().iter().zip(expected) {
+                matches &= encode_persisted_stack(actual).ok()?
+                    == encode_persisted_stack(expected).ok()?;
+            }
+            if !matches {
+                return Some((chest.snapshot(), player_slots));
+            }
+        }
+        let (chest_after, player_after) =
+            plan_chest_inventory_click(chest.slots(), &player_slots, slot, hotbar).ok()?;
+        if chest_after.len() != ferrumc_world::CHEST_SLOTS || player_after.len() != 36 {
+            return None;
+        }
+        let mut candidate_chest = ChestInventory::new();
+        for (index, stack) in chest_after.iter().enumerate() {
+            *candidate_chest.slot_mut(index)? = stack.clone();
+        }
+        let candidate = BlockEntity::Chest(candidate_chest);
+        let mut after = Vec::new();
+        try_encode_block_entity(&candidate, &mut after).ok()?;
+        if before != after {
+            *chunk.block_entity_mut(position)? = candidate;
+            chunk.mark_persist_dirty(position);
+        }
+        Some((chest_after, player_after))
     }
 
     /// Refines a player placement's held state into the final block-state using
@@ -2213,8 +2625,13 @@ mod tests {
     use crate::ownership::ShardId;
     use crate::ticket::{ChunkTicket, TicketReason};
 
+    mod death_tests;
     mod fence_rules_tests;
+    mod furnace_tests;
+    mod mob_tests;
     mod placement_collision_tests;
+    mod survival_tests;
+    mod water_tests;
 
     fn player(name: &str) -> PlayerId {
         PlayerId::offline(name)
@@ -2767,6 +3184,7 @@ mod tests {
         })
         .expect("room");
         let _ = s.run_tick();
+        set_creative(&mut s, p);
         // The generated surface block starts non-air, and the chunk is clean.
         assert_ne!(block_at(&s, target), Some(BlockStateId::AIR));
         assert!(!s
@@ -2941,6 +3359,7 @@ mod tests {
         })
         .expect("room");
         let _ = s.run_tick();
+        set_creative(&mut s, p);
         s.enqueue(GameInput::BlockBreak {
             player: p,
             position: target,
@@ -3148,6 +3567,7 @@ mod tests {
         })
         .expect("room");
         let _ = s.run_tick();
+        set_creative(&mut s, p);
 
         s.enqueue(GameInput::BlockBreak {
             player: p,
@@ -3185,6 +3605,16 @@ mod tests {
         .expect("room");
         let _ = s.run_tick();
         s
+    }
+
+    /// Selects instant Creative edits for legacy mutation-funnel fixtures.
+    fn set_creative(s: &mut SimShard, p: PlayerId) {
+        s.enqueue(GameInput::SetGameMode {
+            player: p,
+            mode: GameMode::Creative,
+        })
+        .expect("room for fixture mode");
+        let _ = s.run_tick();
     }
 
     /// Enqueues one place of `held` at `target` with the given placement inputs and
@@ -3386,6 +3816,7 @@ mod tests {
     async fn fence_refreshes_after_solid_placement_and_break_and_records_both_edits() {
         let p = player("fence-solid");
         let mut s = shard_with_player(p).await;
+        set_creative(&mut s, p);
         let fence = BlockPos::new(8, 65, 8);
         let neighbor = fence.offset(Direction::East);
         let _ = place_block(&mut s, p, fence, OAK_FENCE, Direction::Up, 0.5, 0.0, 1);
@@ -3430,6 +3861,7 @@ mod tests {
     async fn fence_refresh_preserves_water_and_unrelated_connections_for_other_fence_types() {
         let p = player("wet-fence");
         let mut s = shard_with_player(p).await;
+        set_creative(&mut s, p);
         let fence = BlockPos::new(8, 65, 8);
         // Existing wet oak fence with north=true; only its east neighbor changes.
         set_world_block(&mut s, fence, 6017);
@@ -3452,6 +3884,7 @@ mod tests {
     async fn fence_refresh_is_fifo_for_place_and_break_in_one_tick() {
         let p = player("fence-fifo");
         let mut s = shard_with_player(p).await;
+        set_creative(&mut s, p);
         let fence = BlockPos::new(8, 65, 8);
         set_world_block(&mut s, fence, OAK_FENCE);
         let neighbor = fence.offset(Direction::East);
@@ -3492,6 +3925,7 @@ mod tests {
     async fn fence_refresh_skips_rejected_exact_and_unchanged_writes() {
         let p = player("fence-refusal");
         let mut s = shard_with_player(p).await;
+        set_creative(&mut s, p);
         let fence = BlockPos::new(8, 65, 8);
         let neighbor = fence.offset(Direction::East);
         // A no-op break must not initiate physics even if a stored bit is stale.
@@ -3642,6 +4076,7 @@ mod tests {
             })
             .expect("room");
             s.run_tick();
+            set_creative(&mut s, p);
             set_world_block(&mut s, neighbor, OAK_FENCE);
             let outputs = place_block(&mut s, p, center, 1, Direction::Up, 0.5, 0.0, 1);
             assert_eq!(
@@ -4034,6 +4469,7 @@ mod tests {
     async fn breaking_a_sign_removes_its_block_entity() {
         let p = player("breaker");
         let mut s = shard_with_player(p).await;
+        set_creative(&mut s, p);
         let target = BlockPos::new(8, 65, 8);
         let _ = place_block(&mut s, p, target, oak_sign(), Direction::Up, 1.0, 0.0, 1);
         assert_eq!(
@@ -4455,6 +4891,903 @@ mod tests {
         // The chest is untouched.
         let snapshot = s.container_open(p, chest).expect("chest opens");
         assert!(snapshot.iter().all(|slot| slot.item().is_none()));
+    }
+
+    fn enable_ground_runtime(s: &mut SimShard, count: usize) {
+        let slots = NonZeroUsize::new(count).expect("slots");
+        s.initialize_entities_with_item_budget(
+            slots,
+            NonZeroUsize::new(1024 * 1024).expect("bytes"),
+        )
+        .expect("entities");
+        s.enable_ground_items(
+            crate::GroundItemLimits::new(slots, NonZeroUsize::new(1024 * 1024).expect("bytes"))
+                .expect("limits"),
+        )
+        .expect("enable");
+    }
+
+    fn ground_identity(id: u8) -> crate::GroundItemIdentity {
+        crate::GroundItemIdentity::new(
+            ferrumc_core::EntityUuid::from_bytes([id; 16]),
+            ferrumc_core::EntityId::new(i32::from(id) + 10),
+        )
+        .expect("identity")
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_mined_drop_survives_empty_identity_pool_and_spawns_canonically() {
+        let p = player("ground_miner");
+        let mut s = shard_with_player(p).await;
+        enable_ground_runtime(&mut s, 8);
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(&mut s, p, position, 1, Direction::Up, 1.0, 0.0, 1);
+        let tool = mining_tool("wooden_pickaxe");
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 2,
+            tool,
+        })
+        .expect("start");
+        let _ = s.run_tick();
+        for _ in 0..22 {
+            let _ = s.run_tick();
+        }
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 3,
+            tool,
+        })
+        .expect("finish");
+        assert!(s.run_tick().iter().any(|output| matches!(output, GameOutput::SurvivalBlockBroken { drops, .. } if drops.is_empty())));
+        assert!(s.authoritative_state(position).is_air());
+        assert_eq!(s.ground_items.as_ref().expect("runtime").pending.len(), 1);
+        assert!(s.entities().expect("owner").is_empty());
+        s.refill_ground_item_identities(vec![ground_identity(1)])
+            .expect("refill");
+        let _ = s.run_tick();
+        let events = s.take_ground_item_events(256).expect("events");
+        assert!(events.iter().any(|event| matches!(event, crate::GroundItemEvent::Spawn { snapshot } if snapshot.item_state().stack() == &stack("cobblestone", 1))));
+        let handle = s
+            .entities()
+            .expect("owner")
+            .handle_for_uuid(ground_identity(1).uuid())
+            .expect("live");
+        assert_eq!(
+            s.entities()
+                .expect("owner")
+                .item_state(&handle)
+                .expect("payload")
+                .stack(),
+            &stack("cobblestone", 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_full_pending_queue_refuses_break_before_world_mutation() {
+        let p = player("full_ground_miner");
+        let mut s = shard_with_player(p).await;
+        enable_ground_runtime(&mut s, 1);
+        s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+            Vec3::new(8.5, 65.5, 8.5),
+            stack("stone", 1),
+            10,
+            None,
+            None,
+        ))
+        .expect("queued");
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(&mut s, p, position, 1, Direction::Up, 1.0, 0.0, 1);
+        let tool = mining_tool("diamond_pickaxe");
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 2,
+            tool,
+        })
+        .expect("start");
+        let _ = s.run_tick();
+        for _ in 0..6 {
+            let _ = s.run_tick();
+        }
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 3,
+            tool,
+        })
+        .expect("finish");
+        assert!(s
+            .run_tick()
+            .iter()
+            .any(|output| matches!(output, GameOutput::BlockChangeRejected { sequence: 3, .. })));
+        assert_eq!(s.authoritative_state(position).as_u32(), 1);
+        assert_eq!(s.ground_items.as_ref().expect("runtime").pending.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_pickup_is_move_owned_and_partial_remainder_is_lossless() {
+        let p = player("ground_receiver");
+        let mut s = shard_with_player(p).await;
+        enable_ground_runtime(&mut s, 8);
+        s.refill_ground_item_identities(vec![ground_identity(2)])
+            .expect("refill");
+        let original = stack("diamond", 5);
+        s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+            Vec3::new(6.0, 64.1, 8.0),
+            original.clone(),
+            0,
+            None,
+            None,
+        ))
+        .expect("queued");
+        let _ = s.run_tick();
+        let offer = s
+            .take_ground_item_events(256)
+            .expect("events")
+            .into_iter()
+            .find_map(|event| {
+                if let crate::GroundItemEvent::PickupOffer {
+                    ticket,
+                    player,
+                    stack,
+                    ..
+                } = event
+                {
+                    assert_eq!(player, p);
+                    Some((ticket, stack))
+                } else {
+                    None
+                }
+            })
+            .expect("owned offer");
+        assert_eq!(offer.1, original);
+        assert!(s.entities().expect("owner").is_empty());
+        let bad = crate::GroundItemPickupResult::new(offer.0, stack("stone", 3));
+        let refused = s
+            .enqueue_ground_item_pickup_result(bad)
+            .expect_err("component/item substitution rejected");
+        assert!(matches!(
+            refused.reason(),
+            crate::GroundItemError::InvalidRemainder
+        ));
+        let (_, bad) = refused.into_parts();
+        let (ticket, unchanged) = bad.into_parts();
+        assert_eq!(unchanged, stack("stone", 3));
+        s.enqueue_ground_item_pickup_result(crate::GroundItemPickupResult::new(
+            ticket,
+            stack("diamond", 3),
+        ))
+        .expect("valid remainder");
+        let _ = s.run_tick();
+        let events = s.take_ground_item_events(256).expect("events");
+        assert!(events.iter().any(|event| matches!(event, crate::GroundItemEvent::PickupAccepted { count: 2, player, .. } if *player == p)));
+        let collected = events
+            .iter()
+            .position(|event| matches!(event, crate::GroundItemEvent::PickupAccepted { .. }))
+            .expect("collect");
+        let changed = events
+            .iter()
+            .position(|event| matches!(event, crate::GroundItemEvent::StackChanged { .. }))
+            .expect("remaining metadata");
+        assert!(
+            collected < changed,
+            "client must collect against its original entity stack"
+        );
+        let handle = s
+            .entities()
+            .expect("owner")
+            .handle_for_uuid(ground_identity(2).uuid())
+            .expect("restored");
+        assert_eq!(
+            s.entities()
+                .expect("owner")
+                .item_state(&handle)
+                .expect("payload")
+                .stack(),
+            &stack("diamond", 3)
+        );
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_full_pickup_releases_identity_and_reserved_bytes_once() {
+        let p = player("full_receiver");
+        let mut s = shard_with_player(p).await;
+        enable_ground_runtime(&mut s, 1);
+        s.refill_ground_item_identities(vec![ground_identity(3)])
+            .expect("refill");
+        s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+            Vec3::new(6.0, 64.1, 8.0),
+            stack("diamond", 5),
+            0,
+            None,
+            None,
+        ))
+        .expect("queued");
+        let _ = s.run_tick();
+        let ticket = s
+            .take_ground_item_events(256)
+            .expect("events")
+            .into_iter()
+            .find_map(|event| {
+                if let crate::GroundItemEvent::PickupOffer { ticket, .. } = event {
+                    Some(ticket)
+                } else {
+                    None
+                }
+            })
+            .expect("offer");
+        s.enqueue_ground_item_pickup_result(crate::GroundItemPickupResult::new(
+            ticket,
+            ItemStack::empty(),
+        ))
+        .expect("all deposited");
+        let _ = s.run_tick();
+        let events = s.take_ground_item_events(256).expect("events");
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    crate::GroundItemEvent::PickupAccepted { count: 5, .. }
+                ))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, crate::GroundItemEvent::Remove { .. }))
+                .count(),
+            1
+        );
+        let collected = events
+            .iter()
+            .position(|event| matches!(event, crate::GroundItemEvent::PickupAccepted { .. }))
+            .expect("collect");
+        let removed = events
+            .iter()
+            .position(|event| matches!(event, crate::GroundItemEvent::Remove { .. }))
+            .expect("remove");
+        assert!(
+            collected < removed,
+            "collector must still know the entity identity"
+        );
+        assert_eq!(s.ground_items.as_ref().expect("runtime").item_bytes, 0);
+        assert!(s.ground_items_quiescent());
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_rejects_aliases_and_snapshot_or_generic_writers() {
+        let p = player("exclusive_ground");
+        let mut s = shard_with_player(p).await;
+        enable_ground_runtime(&mut s, 2);
+        assert!(s
+            .refill_ground_item_identities(vec![ground_identity(4), ground_identity(4)])
+            .is_err());
+        assert_eq!(s.ground_item_identity_room().expect("room"), 128);
+        assert!(matches!(
+            s.run_tick_with_entity_work(|_| ()),
+            Err(crate::EntityStoreError::GroundRuntimeRequired)
+        ));
+        let mut snapshot = s.clone();
+        assert!(matches!(
+            snapshot
+                .refill_ground_item_identities(vec![ground_identity(5)])
+                .expect_err("snapshot")
+                .reason(),
+            crate::GroundItemError::SnapshotOnly
+        ));
+        assert!(s
+            .enqueue_ground_item_drop(crate::GroundItemDrop::new(
+                Vec3::new(f64::NAN, 64.0, 0.0),
+                stack("stone", 1),
+                0,
+                None,
+                None
+            ))
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_metadata_refusal_retains_whole_drop_before_admission() {
+        let mut s = shard_with_loaded_chunk(ChunkPos::new(0, 0)).await;
+        enable_ground_runtime(&mut s, 8);
+        let original = stack("air", 1);
+        let refusal = s
+            .enqueue_ground_item_drop(crate::GroundItemDrop::new(
+                Vec3::new(8.0, 65.0, 8.0),
+                original.clone(),
+                10,
+                None,
+                None,
+            ))
+            .expect_err("unsupported present air");
+        assert!(matches!(
+            refusal.reason(),
+            crate::GroundItemError::Metadata(_)
+        ));
+        assert_eq!(refusal.into_parts().1.into_parts().1, original);
+        assert_eq!(s.ground_items.as_ref().expect("runtime").item_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_counters_advance_with_full_publication_outbox() {
+        let mut s = shard_with_loaded_chunk(ChunkPos::new(0, 0)).await;
+        enable_ground_runtime(&mut s, 40);
+        s.refill_ground_item_identities((40..80).map(ground_identity).collect())
+            .expect("identities");
+        for _ in 0..40 {
+            s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+                Vec3::new(8.0, 65.0, 8.0),
+                stack("diamond", 1),
+                100,
+                None,
+                None,
+            ))
+            .expect("drop");
+        }
+        for _ in 0..10 {
+            let _ = s.run_tick();
+        }
+        assert!(s.ground_items.as_ref().expect("runtime").events.len() >= 255);
+        let snapshots = s.ground_item_snapshots(None, 32).expect("snapshots");
+        assert!(snapshots
+            .iter()
+            .all(|item| item.item_state().properties().counters().age() == 10));
+        assert!(snapshots.iter().all(|item| item
+            .item_state()
+            .properties()
+            .counters()
+            .pickup_delay()
+            == 90));
+    }
+
+    async fn ground_load(s: &mut SimShard, position: Vec3) {
+        let chunk =
+            BlockPos::new(position.x.floor() as i32, 0, position.z.floor() as i32).to_chunk_pos();
+        s.loaded_chunks_mut()
+            .acquire(
+                &InMemoryStore::new(),
+                &FlatWorldGenerator::new(),
+                chunk,
+                ChunkTicket::of(TicketReason::Player),
+            )
+            .await
+            .expect("ground residency");
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_negative_boundary_far_regions_capture_and_restore() {
+        let mut s = shard();
+        enable_ground_runtime(&mut s, 8);
+        let positions = [
+            Vec3::new(-1.0, 65.0, 0.0),
+            Vec3::new(128.0, 65.0, 0.0),
+            Vec3::new(4096.0, 65.0, -4096.0),
+        ];
+        for (index, position) in positions.into_iter().enumerate() {
+            ground_load(&mut s, position).await;
+            s.refill_ground_item_identities(vec![ground_identity(index as u8 + 20)])
+                .expect("identity");
+            s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+                position,
+                stack("diamond", 5),
+                10,
+                None,
+                None,
+            ))
+            .expect("regional queue");
+        }
+        assert!(s.capture_ground_item_records().is_err());
+        let _ = s.run_tick();
+        let snapshots = s.ground_item_snapshots(None, 32).expect("snapshots");
+        assert_eq!(snapshots.len(), 3);
+        for snapshot in snapshots {
+            let base = snapshot.base();
+            assert_eq!(
+                base.owner(),
+                crate::ShardPartitioner::for_chunk(
+                    s.chunks.world(),
+                    s.chunks.dimension(),
+                    base.chunk()
+                )
+            );
+            assert_eq!(snapshot.item_state().stack(), &stack("diamond", 5));
+        }
+        let records = s.capture_ground_item_records().expect("native records");
+        assert_eq!(records.len(), 3);
+        let mut restored = shard();
+        enable_ground_runtime(&mut restored, 8);
+        for (index, (key, record)) in records.into_iter().enumerate() {
+            let proposal = crate::decode_item_entity(key, &record).expect("checked native");
+            restored
+                .enqueue_ground_item_restore(crate::GroundItemRestore::new(
+                    proposal,
+                    ferrumc_core::EntityId::new(
+                        i32::try_from(index).expect("bounded test index") + 100,
+                    ),
+                ))
+                .expect("restore queue");
+        }
+        let _ = restored.run_tick();
+        assert!(restored
+            .ground_item_snapshots(None, 32)
+            .expect("snapshots")
+            .is_empty());
+        assert!(restored.capture_ground_item_records().is_err());
+        for position in positions {
+            ground_load(&mut restored, position).await;
+        }
+        let _ = restored.run_tick();
+        assert_eq!(
+            restored
+                .capture_ground_item_records()
+                .expect("captured")
+                .len(),
+            3
+        );
+        assert!(restored
+            .ground_item_snapshots(None, 32)
+            .expect("snapshots")
+            .iter()
+            .all(|snapshot| snapshot.item_state().stack() == &stack("diamond", 5)));
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_migration_keeps_uuid_wire_and_payload() {
+        let mut s = shard();
+        enable_ground_runtime(&mut s, 8);
+        for x in [127.9, 128.2] {
+            ground_load(&mut s, Vec3::new(x, 65.0, 0.0)).await;
+        }
+        let identity = ground_identity(25);
+        s.refill_ground_item_identities(vec![identity])
+            .expect("identity");
+        s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+            Vec3::new(127.9, 65.0, 0.0),
+            stack("diamond", 5),
+            10,
+            None,
+            None,
+        ))
+        .expect("drop");
+        let _ = s.run_tick();
+        let handle = s.ground_items.as_ref().expect("runtime").active[&identity.uuid()].clone();
+        let entities = s.entities.as_mut().expect("owner");
+        let old = entities.item_state(&handle).expect("payload").properties();
+        let properties = crate::ItemEntityProperties::try_new(
+            Vec3::new(0.3, 0.0, 0.0),
+            old.bob_offset(),
+            old.counters(),
+            old.owner_target(),
+            old.thrower(),
+        )
+        .expect("properties");
+        EntityTickContext::new(entities, &s.chunks)
+            .set_item_properties(&handle, properties)
+            .expect("motion");
+        let _ = s.take_ground_item_events(256).expect("events");
+        let _ = s.run_tick();
+        let snapshot = s
+            .ground_item_snapshots(None, 32)
+            .expect("snapshots")
+            .pop()
+            .expect("item");
+        assert_eq!(snapshot.base().uuid(), identity.uuid());
+        assert_eq!(snapshot.base().wire_id(), identity.wire_id());
+        assert_ne!(snapshot.base().owner(), handle.owner());
+        assert!(snapshot.base().transform().position().x >= 128.0);
+        assert_eq!(snapshot.item_state().stack(), &stack("diamond", 5));
+        assert!(s.entities().expect("primary").is_empty());
+        assert_eq!(s.capture_ground_item_records().expect("capture").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn ground_runtime_returned_pickup_survives_unload_until_resident() {
+        let p = player("unloaded_receiver");
+        let mut s = shard_with_player(p).await;
+        enable_ground_runtime(&mut s, 8);
+        s.refill_ground_item_identities(vec![ground_identity(26)])
+            .expect("identity");
+        s.enqueue_ground_item_drop(crate::GroundItemDrop::new(
+            Vec3::new(6.0, 64.1, 8.0),
+            stack("diamond", 5),
+            0,
+            None,
+            None,
+        ))
+        .expect("drop");
+        let _ = s.run_tick();
+        let (ticket, owned) = s
+            .take_ground_item_events(256)
+            .expect("events")
+            .into_iter()
+            .find_map(|event| match event {
+                crate::GroundItemEvent::PickupOffer { ticket, stack, .. } => Some((ticket, stack)),
+                _ => None,
+            })
+            .expect("offer");
+        assert!(s.capture_ground_item_records().is_err());
+        assert!(s
+            .loaded_chunks_mut()
+            .release(ChunkPos::new(0, 0), ChunkTicket::of(TicketReason::Player))
+            .is_unloaded());
+        s.enqueue_ground_item_pickup_result(crate::GroundItemPickupResult::new(ticket, owned))
+            .expect("returned");
+        let _ = s.run_tick();
+        assert!(s.capture_ground_item_records().is_err());
+        assert_eq!(s.ground_items.as_ref().expect("runtime").responses.len(), 1);
+        ground_load(&mut s, Vec3::new(6.0, 64.1, 8.0)).await;
+        let _ = s.run_tick();
+        assert_eq!(
+            s.ground_item_snapshots(None, 32).expect("snapshots")[0]
+                .item_state()
+                .stack(),
+            &stack("diamond", 5)
+        );
+        assert_eq!(s.capture_ground_item_records().expect("capture").len(), 1);
+    }
+
+    fn mining_tool(name: &str) -> crate::MiningTool {
+        crate::MiningTool::new(
+            Some(ferrumc_items::ItemId::from_name(name).expect("tool").id()),
+            true,
+            false,
+        )
+        .expect("context")
+    }
+
+    #[tokio::test]
+    async fn survival_mining_stone_waits_for_finish_and_yields_cobblestone() {
+        let p = player("miner");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(&mut s, p, position, 1, Direction::Up, 1.0, 0.0, 1);
+        let tool = mining_tool("wooden_pickaxe");
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 2,
+            tool,
+        })
+        .expect("start");
+        assert!(s.run_tick().iter().any(|output| matches!(
+            output,
+            GameOutput::BlockActionAcknowledged { sequence: 2, .. }
+        )));
+        for _ in 0..22 {
+            assert!(!s
+                .run_tick()
+                .iter()
+                .any(|output| matches!(output, GameOutput::SurvivalBlockBroken { .. })));
+        }
+        assert_eq!(s.authoritative_state(position).as_u32(), 1);
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 3,
+            tool,
+        })
+        .expect("finish");
+        let outputs = s.run_tick();
+        let drops = outputs
+            .iter()
+            .find_map(|output| {
+                if let GameOutput::SurvivalBlockBroken {
+                    drops,
+                    tool_damage,
+                    experience,
+                    ..
+                } = output
+                {
+                    assert_eq!(*tool_damage, 1);
+                    assert_eq!(*experience, 0);
+                    Some(drops)
+                } else {
+                    None
+                }
+            })
+            .expect("committed break");
+        assert_eq!(drops, &[stack("cobblestone", 1)]);
+        assert!(s.authoritative_state(position).is_air());
+    }
+
+    #[tokio::test]
+    async fn survival_mining_early_finish_is_delayed_and_abort_cancels() {
+        let p = player("early_miner");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(&mut s, p, position, 1, Direction::Up, 1.0, 0.0, 1);
+        let tool = mining_tool("wooden_pickaxe");
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 2,
+            tool,
+        })
+        .expect("start");
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 3,
+            tool,
+        })
+        .expect("early");
+        assert!(!s
+            .run_tick()
+            .iter()
+            .any(|output| matches!(output, GameOutput::SurvivalBlockBroken { .. })));
+        for _ in 0..21 {
+            assert!(!s
+                .run_tick()
+                .iter()
+                .any(|output| matches!(output, GameOutput::SurvivalBlockBroken { .. })));
+        }
+        assert!(s
+            .run_tick()
+            .iter()
+            .any(|output| matches!(output, GameOutput::SurvivalBlockBroken { .. })));
+        let _ = place_block(&mut s, p, position, 1, Direction::Up, 1.0, 0.0, 4);
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 5,
+            tool,
+        })
+        .expect("restart");
+        s.enqueue(GameInput::MiningAbort {
+            player: p,
+            position,
+            sequence: 6,
+        })
+        .expect("abort");
+        let _ = s.run_tick();
+        for _ in 0..30 {
+            let _ = s.run_tick();
+        }
+        assert_eq!(s.authoritative_state(position).as_u32(), 1);
+        assert!(s.mining_work.is_empty());
+    }
+
+    #[tokio::test]
+    async fn survival_mining_changed_tool_or_preimage_cannot_finish_old_work() {
+        let p = player("changed_miner");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(&mut s, p, position, 1, Direction::Up, 1.0, 0.0, 1);
+        let tool = mining_tool("wooden_pickaxe");
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 2,
+            tool,
+        })
+        .expect("start");
+        let _ = s.run_tick();
+        s.enqueue(GameInput::MiningToolChanged {
+            player: p,
+            tool: mining_tool("iron_pickaxe"),
+        })
+        .expect("change");
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 3,
+            tool,
+        })
+        .expect("finish");
+        assert!(!s
+            .run_tick()
+            .iter()
+            .any(|output| matches!(output, GameOutput::SurvivalBlockBroken { .. })));
+        assert_eq!(s.authoritative_state(position).as_u32(), 1);
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 4,
+            tool,
+        })
+        .expect("restart");
+        let _ = s.run_tick();
+        let _ = s.apply_block_edit(MutationCause::Test, position, BlockStateId::new(10));
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 5,
+            tool,
+        })
+        .expect("finish");
+        assert!(!s
+            .run_tick()
+            .iter()
+            .any(|output| matches!(output, GameOutput::SurvivalBlockBroken { .. })));
+        assert_eq!(s.authoritative_state(position).as_u32(), 10);
+    }
+
+    #[tokio::test]
+    async fn survival_mining_chest_transfers_complete_contents_before_entity_removal() {
+        let p = player("chest_miner");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let marker = component_heavy_stack();
+        s.container_left_click(p, position, 0, marker.clone())
+            .expect("fill");
+        let tool = mining_tool("diamond_axe");
+        s.enqueue(GameInput::MiningStart {
+            player: p,
+            position,
+            sequence: 2,
+            tool,
+        })
+        .expect("start");
+        let _ = s.run_tick();
+        for _ in 0..10 {
+            let _ = s.run_tick();
+        }
+        s.enqueue(GameInput::MiningFinish {
+            player: p,
+            position,
+            sequence: 3,
+            tool,
+        })
+        .expect("finish");
+        let outputs = s.run_tick();
+        let drops = outputs
+            .iter()
+            .find_map(|output| {
+                if let GameOutput::SurvivalBlockBroken { drops, .. } = output {
+                    Some(drops)
+                } else {
+                    None
+                }
+            })
+            .expect("complete");
+        assert_eq!(drops, &[marker, stack("chest", 1)]);
+        assert!(s
+            .chunks
+            .get(position.to_chunk_pos())
+            .expect("chunk")
+            .block_entity(position)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn chest_inventory_shift_and_hotbar_swap_publish_whole_postimages() {
+        let p = player("shift_trader");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let (_, expected) = s
+            .container_left_click(p, position, 0, stack("diamond", 5))
+            .expect("fill");
+        let (chest, mut inventory) = s
+            .container_inventory_click_checked(
+                p,
+                position,
+                0,
+                None,
+                vec![ItemStack::empty(); 36],
+                &expected,
+            )
+            .expect("shift");
+        assert!(chest[0].item().is_none());
+        assert_eq!(inventory[35], stack("diamond", 5));
+        inventory[27] = stack("stone", 3);
+        let (chest, inventory) = s
+            .container_inventory_click_checked(p, position, 4, Some(0), inventory, &chest)
+            .expect("hotbar");
+        assert_eq!(chest[4], stack("stone", 3));
+        assert!(inventory[27].item().is_none());
+        assert_eq!(inventory[35], stack("diamond", 5));
+        assert_eq!(s.container_open(p, position).expect("snapshot"), chest);
+    }
+
+    #[tokio::test]
+    async fn chest_inventory_stale_snapshot_and_noop_preserve_dirty_masks() {
+        let p = player("stale_trader");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let expected = s.container_open(p, position).expect("open");
+        let (_, actual) = s
+            .container_left_click(p, position, 0, stack("diamond", 5))
+            .expect("fill");
+        let _ = s.loaded_chunks_mut().take_persist_dirty(0);
+        let mut inventory = vec![ItemStack::empty(); 36];
+        inventory[0] = stack("stone", 3);
+        let returned = s
+            .container_inventory_click_checked(p, position, 0, None, inventory.clone(), &expected)
+            .expect("stale returns actual");
+        assert_eq!(returned, (actual.clone(), inventory.clone()));
+        assert_eq!(
+            s.container_inventory_click_checked(p, position, 1, None, inventory.clone(), &actual,)
+                .expect("empty no-op"),
+            (actual, inventory)
+        );
+        assert!(!s
+            .loaded_chunks()
+            .get(position.to_chunk_pos())
+            .expect("resident")
+            .persist_dirty_sections()
+            .any());
+    }
+
+    #[tokio::test]
+    async fn chest_inventory_oversize_and_malformed_transfer_preserve_owner() {
+        let p = player("bounded_trader");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let marker = component_heavy_stack();
+        let (_, expected) = s
+            .container_left_click(p, position, 0, marker.clone())
+            .expect("fill");
+        let _ = s.loaded_chunks_mut().take_persist_dirty(0);
+        let mut inventory = vec![ItemStack::empty(); 36];
+        inventory[27] = marker;
+        assert!(s
+            .container_inventory_click_checked(
+                p,
+                position,
+                1,
+                Some(0),
+                inventory.clone(),
+                &expected
+            )
+            .is_none());
+        assert!(s
+            .container_inventory_click_checked(p, position, 63, None, inventory.clone(), &expected)
+            .is_none());
+        assert!(s
+            .container_inventory_click_checked(p, position, 0, Some(9), inventory, &expected)
+            .is_none());
+        assert_eq!(s.container_open(p, position).expect("snapshot"), expected);
+        assert!(!s
+            .loaded_chunks()
+            .get(position.to_chunk_pos())
+            .expect("resident")
+            .persist_dirty_sections()
+            .any());
     }
 
     fn component_heavy_stack() -> ItemStack {

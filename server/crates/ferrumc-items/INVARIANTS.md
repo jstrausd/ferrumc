@@ -91,3 +91,49 @@
   inline node/entry values without allocation; allocator/RSS costs and retained
   caller capacities are not represented. All postimages are accounted before
   copying. A craftplan has no revision or durable-commit authority.
+
+- Ordinary container exchange and shift-transfer consumers resolve max_stack_size
+  additions (typed or one exact trusted VarInt) and removals before any exchange.
+  Component maxima can lower the registry ceiling; removal uses fallback one.
+  Invalid capacities refuse mutation without normalization. A chest plan has
+  exactly 27+36 slots, one MiB aggregate persisted bytes before cloning, and no
+  cursor/revision/durability authority. Both postimages must publish together.
+
+- Closed ordinary item-rule tables contain all 40 builtin food components and
+  all 68 builtin durability defaults from the hash-pinned 1.21.8 registry
+  snapshot. The owning generator retains exact f32 bits and refuses a changed
+  input hash; food/material/armor contracts are reviewed against Paper build 60.
+- Rule admission validates lossless stacks before cloning. FOOD scalar and
+  DAMAGE/MAX_DAMAGE/UNBREAKABLE patches have bounded, exact payload parsers;
+  unsupported consumable, remainder, attribute, equippable and enchantment
+  overrides return typed refusals instead of applying unrelated default rules.
+- Durability postimages modify only DAMAGE, preserve all unrelated patch order
+  and values, and consume exactly one item only on break. Creative, unbreakable
+  and zero-wear decisions retain the exact original representation. Descriptors
+  and plans own no use timer, effect RNG, inventory revision, event or commit
+  authority; the live consumer must wire these responsibilities.
+
+## Ordinary furnace plans
+
+- The closed 1.21.8 normal catalog contains 72 resource recipes (140 expanded
+  ingredient rows) and 269 fuels, generated from 107 hash-pinned Paper build60
+  complete resources/source inputs. Source receipt digest is immutable; ordinary
+  and Python-optimized regeneration must retain byte-identical catalog output.
+  All normal cooking durations are 200 ticks. Nether nonflammable wood is
+  removed through the actual tag, without suffix heuristics.
+- Exactly three borrowed slots and four bounded scalar timers describe one
+  tick. Every authoritative stack, effective capacity and aggregate encoded
+  representation passes admission before source cloning. Complete furnace bytes
+  include 24 framing bytes and are at most 16 KiB; this is not an RSS allowance.
+- One tick first spends existing burn, then admits fresh fuel only with a
+  compatible result and enough output space, then advances cooking once. Fuel
+  and input consumption preserve surviving patches and drain to canonical empty.
+  Lava leaves one bucket; one wet sponge may fill one bucket with water.
+  Multiple bucket replacement refuses instead of losing surplus buckets.
+- Fixed recipe output uses original defaults. Output merging requires the
+  conservative exact ordered representation comparison, stronger than Paper's
+  effective-component equality. No new normalization, Java events, recipe/XP
+  accumulation, automation or original cached selection history is claimed.
+- The consumer owns input-identity progress resets, simultaneous postimage
+  commit, exclusive loaded-chunk/tick/revision authority, lit block writes,
+  durability, menus and persistence. No World dependency is added to Items.

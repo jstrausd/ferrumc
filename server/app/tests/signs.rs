@@ -220,6 +220,7 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
     // (8, 64, 8), sharing the spawn chunk so the viewer sees the placer's sign.
     let mut viewer = login_to_play(addr, "Viewer").await?;
     let mut placer = login_to_play(addr, "Placer").await?;
+    common::make_creative(&mut placer).await?;
 
     // Equip a sign and place it: click the top of (10, 63, 8) -> sign at (10, 64, 8).
     let sign_pos = (10, 64, 8);
@@ -241,8 +242,10 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
 #[tokio::test]
 async fn place_edit_and_render_a_sign_for_a_viewer() {
     // Ephemeral port; radius-1 spawn keeps the resident area small.
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses");
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nops = [\"Placer\"]\nspawn_chunk_radius = 1\nview_distance = 1",
+    )
+    .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
 

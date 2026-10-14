@@ -252,12 +252,18 @@ fn register_world_owner(
 ///
 /// Returns an error if the spawn area fails to load, the join payload cannot be
 /// built, or the listener cannot bind the configured address.
-#[allow(clippy::too_many_lines)] // one cohesive bring-up: build world+stores, wire channels, spawn tasks, bind
 pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
+    // Restore carries bounded item/mob startup state. Keep that large future on
+    // the heap rather than embedding it into every caller's async stack frame.
+    Box::pin(run_inner(config)).await
+}
+
+#[allow(clippy::too_many_lines)] // one cohesive bring-up: build world+stores, wire channels, spawn tasks, bind
+async fn run_inner(config: &AppConfig) -> anyhow::Result<RunningServer> {
     config.validate()?;
 
     let shard_pos = shard_for_position(config.spawn());
-    let setup = build_world(config, shard_pos).await?;
+    let mut setup = build_world(config, shard_pos).await?;
 
     // The configuration-phase registry payloads are identical for every
     // connection; build them once and share behind an `Arc`.
@@ -289,6 +295,70 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
     // position. This is still single-shard behavior: no second worker, ownership
     // claim, or cross-shard transfer is introduced here.
     let shard_rx = register_world_owner(&mut router, &setup.shard)?;
+
+    // Ground items have their own explicit format5 sidecar. The format4 world
+    // store and its generation metadata remain the primary block authority.
+    let (ground_writer, restored) = crate::ground_persistence::GroundPersistence::open(
+        config.world_dir(),
+        setup.generator.identity(),
+    )
+    .await?;
+    crate::ground_runtime::GroundRuntime::initialize(&mut setup.shard)?;
+    setup
+        .shard
+        .enable_mobs(false, setup.join_kit.spawn_position())?;
+    let pinned: std::collections::BTreeSet<_> = restored
+        .iter()
+        .map(|proposal| proposal.transform().chunk())
+        .collect();
+    let ground_ticket = ferrumc_sim::ChunkTicket::new(
+        ferrumc_sim::TicketReason::Forced,
+        ferrumc_sim::TicketLevel::ENTITY_TICKING,
+    );
+    for pos in &pinned {
+        setup
+            .generator
+            .acquire(
+                setup.shard.loaded_chunks_mut(),
+                setup.persistence.store(),
+                *pos,
+                ground_ticket,
+            )
+            .await?;
+    }
+    let mut ground = crate::ground_runtime::GroundRuntime::new(ground_writer, pinned);
+    let effects = std::collections::BTreeMap::new();
+    let mut startup_mobs =
+        crate::mob_runtime_app::MobRuntime::new(setup.generator.identity().seed().value())?;
+    for (index, proposal) in restored.into_iter().enumerate() {
+        crate::ground_runtime::GroundRuntime::restore(proposal, &mut router, &mut setup.shard)?;
+        if index % 16 == 15 {
+            for _ in 0..512 {
+                setup.shard.run_tick();
+                ground.events(&mut router, &mut setup.shard, &effects)?;
+                startup_mobs.events(&mut setup.shard, &mut router)?;
+                if crate::ground_runtime::GroundRuntime::settled(&setup.shard)? {
+                    break;
+                }
+            }
+            anyhow::ensure!(
+                crate::ground_runtime::GroundRuntime::settled(&setup.shard)?,
+                "mixed entity restore batch did not settle within bounded startup work"
+            );
+        }
+    }
+    for _ in 0..512 {
+        setup.shard.run_tick();
+        ground.events(&mut router, &mut setup.shard, &effects)?;
+        startup_mobs.events(&mut setup.shard, &mut router)?;
+        if crate::ground_runtime::GroundRuntime::settled(&setup.shard)? {
+            break;
+        }
+    }
+    anyhow::ensure!(
+        crate::ground_runtime::GroundRuntime::settled(&setup.shard)?,
+        "mixed entity restore did not settle within its bounded startup work"
+    );
 
     // Resolve every fallible listener/access/status prerequisite before spawning
     // any driver or compatibility actor. A load failure never leaves server tasks.
@@ -368,6 +438,7 @@ pub async fn run(config: &AppConfig) -> anyhow::Result<RunningServer> {
         setup.shard,
         persistence,
         setup.generator,
+        Some(ground),
         shard_rx,
         commands_rx,
         config.tick_period(),
@@ -519,7 +590,7 @@ async fn accept_loop(
                     // slots (global + per-IP) when the task ends.
                     let _permit = permit;
                     let _ip_guard = ip_guard;
-                    if let Err(err) = handle_connection(stream, &ctx, conn_shutdown).await {
+                    if let Err(err) = Box::pin(handle_connection(stream, &ctx, conn_shutdown)).await {
                         // Operators need the actual cause at the default log level
                         // when a client can report only a generic connection reset.
                         tracing::warn!(peer = %addr, error = %format_args!("{err:#}"), "connection ended with an error");

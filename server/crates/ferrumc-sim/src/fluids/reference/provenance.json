@@ -1,0 +1,30 @@
+{
+  "paper_version": "1.21.8 build60",
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "paper_inner_sha256": "c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507",
+  "sources": {
+    "src/minecraft/java/net/minecraft/world/level/material/FlowingFluid.java": "e5da481146bd2da3a967d9d0648f5b065a4d72f21c09ea742570f83d30b57f12",
+    "src/minecraft/java/net/minecraft/world/level/material/WaterFluid.java": "edc2e53e8a30e58a4ada9a783241d981df210139c468641d72dda740610f0380",
+    "src/minecraft/java/net/minecraft/world/level/material/EmptyFluid.java": "efa0d9342b393fb7c7ed0c233cbaaecbe27b125be0fd9b3b3d2fb46da34a2eb1",
+    "src/minecraft/java/net/minecraft/world/level/block/LiquidBlock.java": "c063cb870e0187ff1a5f163c7dfe69ecdf3686009402b4cd967b591afd0f0eea",
+    "src/minecraft/java/net/minecraft/world/level/block/SimpleWaterloggedBlock.java": "76d68bd3f64d6a7c648f9f7c8f117e2622bfafc05fd3784be51435fe8c55f0e7",
+    "src/minecraft/java/net/minecraft/world/level/block/state/BlockBehaviour.java": "60be9c8660ed75597765616479e1197252115b6e9bcdf42839e2c761248a007a",
+    "src/minecraft/java/net/minecraft/world/phys/shapes/Shapes.java": "25f1f36a8e04619bfda21d35628f7e423640f62d403ad7dadb14315fbc398836",
+    "src/minecraft/java/net/minecraft/world/phys/shapes/VoxelShape.java": "a3bf3f0bf7984bf30fd16c40b1ba58ee5a5872e45d87886df8bf3d223e6a634b",
+    "src/minecraft/java/net/minecraft/core/Direction.java": "a50c6a9ce3b1ad8e6282e1df5ba46d11a17ca55d1ab9afa5195a7e9e77eeb8cb",
+    "src/minecraft/java/net/minecraft/world/level/Level.java": "1070a51804ff75b27fce7cae6d2fb27a14353bc6ca9a94b34cc55ea7bd1a7712",
+    "src/minecraft/java/net/minecraft/server/level/ServerLevel.java": "47394ff3c2bfd64882f04f3e318a5557ed0e6a4d1fe68df760db8c1afcbeb5fc",
+    "src/minecraft/java/net/minecraft/server/level/ServerChunkCache.java": "9c872bea6a47a01e5c5a5de1afec1d70ec0feea83ac176d07f9fc0ecacccf8b8",
+    "src/minecraft/java/net/minecraft/world/level/chunk/LevelChunk.java": "f4c30bffefb16f8d55497871dd223af01df72e9fa3041789468128f597bfad77",
+    "patches/sources/net/minecraft/world/level/material/FlowingFluid.java.patch": "fcfe2505277a3fa97c3b000d7ea96a1b26d5a850e844b345796993737df61fe1",
+    "patches/sources/net/minecraft/world/level/material/WaterFluid.java.patch": "95fa866413cfaf5e150a6d891dc77c0f639c6531383e7d1d4965b4cd57a8b5d9",
+    "patches/sources/net/minecraft/world/level/block/LiquidBlock.java.patch": "c22852395fc8c7eb0200ae5d1112efb2c4ea287c24d306f692013955175017d8",
+    "patches/features/0016-Moonrise-optimisation-patches.patch": "267e01eaeb0873893c09a903bae3d9880de7a98c757b59fca03bc827de06297b"
+  },
+  "inspection": "Full FlowingFluid/WaterFluid/LiquidBlock/SimpleWaterloggedBlock/EmptyFluid; relevant complete Level read, collision and Moonrise methods; exact helper constructor signatures and original cache-read methods; relevant complete source patches and Moonrise fluid/collision patch hunks. No running server or Java event differential claim.",
+  "outputs": {
+    "server/crates/ferrumc-sim/src/fluids/data/states.bin": "798503c3a829b9f6bbf5f87659fc1a19de9b97c84bf4e25ef5c11d9ba175ecdc",
+    "server/crates/ferrumc-sim/src/fluids/data/faces.bin": "c06f208bf2597269c2a7a657dc083d77b7f9b3aefa267eaf5a457f71c0fbaed6",
+    "server/crates/ferrumc-sim/src/fluids/reference/paper-rules.tsv": "341e46abedba4a10b19bff871c98a111b527d793cb455fdf16d6a4ef8173d11c"
+  }
+}

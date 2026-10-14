@@ -15,8 +15,8 @@ mod build;
 mod end;
 mod search;
 
-pub(crate) use arrays::NaturalClimateSamples;
 pub use arrays::{BiomeQuartGeometry, BiomeSourceIdentity, BiomeSourceSession, ChunkBiomeSamples};
+pub(crate) use arrays::{NaturalBiomeTransition, NaturalClimateSamples};
 
 /// Largest work allowance for building one complete tree candidate.
 pub const MAX_BIOME_BUILD_WORK: u32 = 67_108_864;

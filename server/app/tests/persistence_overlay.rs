@@ -54,10 +54,12 @@ const DIMENSION: DimensionId = DimensionId::new(0);
 /// Builds a server config that persists to `world_dir` on an ephemeral port with
 /// a small resident spawn area.
 fn persistent_config(world_dir: &Path) -> AppConfig {
-    AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses")
-        .with_world_dir(Some(world_dir.to_path_buf()))
-        .expect("world directory preserves valid config")
+    AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nops = [\"Builder\"]\nspawn_chunk_radius = 1\nview_distance = 1",
+    )
+    .expect("config parses")
+    .with_world_dir(Some(world_dir.to_path_buf()))
+    .expect("world directory preserves valid config")
 }
 
 /// Sends a `UseItemOn` clicking the top face of the block at `pos` (placing on the
@@ -104,6 +106,8 @@ async fn expect_ack(client: &mut TestClient, expected_sequence: i32) -> anyhow::
 /// returning once the place has been acknowledged by the server.
 async fn place_block_at_spawn(addr: SocketAddr) -> anyhow::Result<()> {
     let mut actor = login_to_play(addr, "Builder").await?;
+    common::make_creative(&mut actor).await?;
+    common::supply_creative_slot(&mut actor, 36, 1, 64).await?;
     // Spawn is (8, 64, 8); clicking the top of the grass at (9, 63, 8) places
     // stone at (9, 64, 8), comfortably within reach and in the resident spawn
     // chunk (0, 0).

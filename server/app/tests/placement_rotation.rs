@@ -81,7 +81,7 @@ fn single_item(item_id: i32) -> Vec<u8> {
 }
 
 /// Equips an oak log in hotbar slot 0 and selects it (requires creative mode,
-/// which the connection seeds for every joiner).
+/// explicitly granted by this fixture).
 async fn equip_oak_log(client: &mut TestClient) -> anyhow::Result<()> {
     client
         .send_frame(&encode(|buf| {
@@ -228,6 +228,7 @@ fn encoded_with_edit(pos: ChunkPos, edit: impl FnOnce(&mut Chunk)) -> Vec<u8> {
 async fn rotated_log_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut viewer = login_to_play(addr, "Viewer").await?;
     let mut actor = login_to_play(addr, "Actor").await?;
+    common::make_creative(&mut actor).await?;
 
     equip_oak_log(&mut actor).await?;
 
@@ -248,6 +249,7 @@ async fn rotated_log_flow(addr: SocketAddr) -> anyhow::Result<()> {
 /// data after the placer has left the running server.
 async fn rejoin_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut builder = login_to_play(addr, "Builder").await?;
+    common::make_creative(&mut builder).await?;
     equip_oak_log(&mut builder).await?;
     place_on_east_face(&mut builder, (7, 65, 8), 1).await?;
     expect_ack(&mut builder, 1).await?;
@@ -284,6 +286,7 @@ async fn rejoin_flow(addr: SocketAddr) -> anyhow::Result<()> {
 async fn rotate_in_place_then_place_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut viewer = login_to_play(addr, "RViewer").await?;
     let mut actor = login_to_play(addr, "RActor").await?;
+    common::make_creative(&mut actor).await?;
 
     equip_furnace(&mut actor).await?;
 
@@ -311,7 +314,7 @@ async fn rotate_in_place_then_place_flow(addr: SocketAddr) -> anyhow::Result<()>
 
 #[tokio::test]
 async fn rotate_in_place_then_place_orients_from_the_turned_yaw() {
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1\nsimulation_distance = 1")
+    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nops = [\"RActor\"]\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1\nsimulation_distance = 1")
         .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
@@ -329,7 +332,7 @@ async fn rotate_in_place_then_place_orients_from_the_turned_yaw() {
 
 #[tokio::test]
 async fn side_face_log_is_rotated_and_seen_by_second_client() {
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1\nsimulation_distance = 1")
+    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nops = [\"Actor\"]\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1\nsimulation_distance = 1")
         .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
@@ -349,7 +352,7 @@ async fn side_face_log_is_rotated_and_seen_by_second_client() {
 async fn placed_rotated_log_survives_rejoin() {
     let temp = tempfile::tempdir().expect("temp dir");
     let config = AppConfig::from_toml_str(
-        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1",
+        "bind = \"127.0.0.1:0\"\nops = [\"Builder\"]\nspawn_chunk_radius = 1\nspawn = [8.5, 64.0, 9.5]\nview_distance = 1",
     )
     .expect("config parses")
     .with_world_dir(Some(temp.path().to_path_buf()))

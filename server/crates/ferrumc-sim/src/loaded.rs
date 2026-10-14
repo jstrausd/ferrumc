@@ -608,6 +608,17 @@ impl LoadedChunkMap {
         self.resident.keys().copied()
     }
 
+    pub(crate) fn next_loaded_position(&self, after: Option<ChunkPos>) -> Option<ChunkPos> {
+        match after {
+            Some(pos) => self
+                .resident
+                .range((std::ops::Bound::Excluded(pos), std::ops::Bound::Unbounded))
+                .next()
+                .map(|(pos, _)| *pos),
+            None => self.resident.keys().next().copied(),
+        }
+    }
+
     /// Returns a shared reference to the resident chunk at `pos`, or `None` if it
     /// is not loaded.
     #[must_use]

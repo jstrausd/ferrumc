@@ -154,9 +154,17 @@
 - A Close Container packet may close only the window whose exact ID it carries.
 - Normal window-0 clicks derive changes exclusively from authoritative slots and
   cursor. Spectators cannot exchange items in either section of an open chest
-  or in window 0. Crafting results remain read-only until recipes exist; armor
-  insertion waits for equippable rules. Full-bag crafting input overflow remains
-  in its input slot until ground-item handling exists.
+  or in window 0. Normal 2×2/3×3 crafting results are derived from the pinned
+  shaped/shapeless recipe catalog and consume one complete craft only after
+  output and all remainders can fit. Armor insertion waits for equippable rules.
+  Full-bag input overflow remains in its input slot. Nine crafting-table inputs
+  use lossless schema-4 frames; schema-3 migration supplies canonical empty
+  table inputs and never rewrites a loaded source record.
+- Chest shift transfers and number-key swaps return complete chest/player
+  postimages from the checked shard transaction. Component capacities and exact
+  ordered stack representations govern merges; stale snapshots mutate neither
+  side. App adopts both outputs before the next save and carries no cursor in
+  these transfers. Fresh players receive an empty Survival inventory.
 - The player inventory is the sole owner of the carried stack across every
   screen. Closing or disconnecting attempts a deposit and retains its overflow;
   window 0 and chest resyncs always encode that same stack.
@@ -200,8 +208,9 @@
   Record ceilings bound each request to 12 MiB encoded overlays. Pending data
   can overshoot its threshold by one request; journals and in-memory object
   overhead are additional. These are encoded limits, not an RSS guarantee.
-- New player saves use binary schema 3: exactly 46 slots and a required carried
-  item, each framed with the lossless bounded FCIS item codec. Typed/opaque
+- New player saves use binary schema 4: exactly 46 slots, a required carried
+  item, and nine crafting-table inputs, each framed with the lossless bounded
+  FCIS item codec. Schema 3 explicitly migrates with empty table inputs. Typed/opaque
   components, removals, NBT ordering and floating-point bits survive saves.
   The aggregate payload is at most 1 MiB, checked before each append; at most
   one temporary item buffer is retained during encoding. Malformed data refuses
@@ -285,3 +294,81 @@
 - Minecraft and dashboard default to IPv4 wildcard addresses. The explicit
   `--bind-all-interfaces` startup flag applies after bind/port overrides, preserves
   each listener port and dashboard enablement, and is used by the preview launcher.
+
+- Selected legacy Survival enables water with4096due cells and ordinary furnaces
+  with256registered owners. Bucket preparation freezes the complete inventory
+  until an exact token/sequence/fill owner result; only positive state commits.
+  Rays read resident columns only. Furnace GUI uses the shared window allocator,
+  FCIS slot comparison inside Sim and a complete player-save preflight before
+  exchange. Timer-only updates never invalidate item revisions. Container chunk
+  descriptors expose only empty render tags, never inventory or furnace timers.
+  Current descriptors encode present empty compounds (Vanilla serializes null).
+- Stored mutation causes preserve tags0..3; ordinary water/furnace transitions
+  use new tags4/5, so audit records retain their actual system origin.
+- Delayed mining wear searches exact beforeimages in all56player-owned locations,
+  including cursor/table. Missing/ambiguous beforeimages refuse. A new mining
+  start with any unsettled witness cancels live work and rejects/ACKs the new
+  prediction before creating another token. Only the processed terminal owner
+  receipt retires the old witness; clearing the active selection does not.
+  A deferred committed break retains its witness through later uncommitted
+  releases while the complete food snapshot is pinned. This conservative
+  receipt serialization is a FerrumC policy, not Paper tick/input equivalence.
+  While any mining receipt is unsettled, attack, held drop/swap, inventory
+  exchange, item use/placement and commands refuse before owner mutation or
+  plugin dispatch. Live mining is canceled without retiring its beforeimage;
+  inventory/screen and block predictions are healed. Finish/abort, selection,
+  close, movement and liveness remain available. Separate reply/effect queues
+  never imply that an earlier mining wear has been processed.
+  Creative starts use token0 and retain no unused wear witness: the actual
+  Creative owner branch charges no tool wear. An already unsettled Survival
+  witness still blocks mode changes and subsequent starts until its receipt.
+
+- Tracked combat retains exact hand/armor FCIS beforeimages. Victim admission
+  reserves one effect channel slot and excludes overlapping PvP/AI armor use
+  until the sole inventory writer applies the accepted wear receipt and returns
+  a fresh profile. Ordinary refresh cannot release that reservation. Unsupported
+  or oversized profiles refuse attacks; complete-save wear headroom is checked
+  at capture and again at commit. Ordinary inventory growth must retain the
+  complete projected-DAMAGE envelope described below; cross-store crash
+  atomicity remains separate.
+- Active mobs use only genuine resident computed UpdateLight channels and the
+  owner entity identity allocator. Cached light is evicted on relevant edits.
+  Natural preview attempts are bounded and stop without connected players.
+  The adult sheep/cow/pig/chicken/zombie subset has simplified walking/combat;
+  the spawn schedule is preview policy, not original natural-spawner RNG parity.
+- Death carries the actual owner position into the serial sole-inventory
+  handler. All real inventory/cursor/table drops are preflighted and admitted
+  as one dead-owner batch before complete empty postimages are adopted. The
+  virtual result cell never grants drops. Pending food settles before death
+  clears the pinned inventory. Refused/unknown admission retains the original
+  inventory; the once-per-life owner gate is not a durable crash receipt.
+
+- Ordinary connection-owned inventory edits admit a complete schema-5 56-stack
+  projected-DAMAGE envelope before publishing their postimage. Missing DAMAGE
+  reserves its exact 13-byte FCIS frame; opaque DAMAGE reserves any growth when
+  replaced by a four-byte typed scalar. Future component count, cumulative
+  payload and stack-frame limits are checked as well as the unchanged 1 MiB
+  durable ceiling. The envelope covers every slot, cursor and table input,
+  independently of game mode, so delayed wear cannot lose headroom to ordinary
+  inventory growth. Container previews use the same exact shared planners and
+  are admitted before world-owner commands; committed receipts are then adopted
+  without a fallible post-commit refusal. Restored records remain losslessly
+  loadable; an image without future headroom cannot publish combat or an ordinary
+  candidate that still lacks the envelope. These resource checks do not establish
+  atomic player-health/world/inventory persistence or Paper parity.
+
+- PlayerAction status3/status4 prepare whole/one selected-mainhand ground drops
+  with exact FCIS beforeimages of all 46 slots, cursor and nine table inputs,
+  mode and selected index. The complete projected-save postimage is admitted
+  before the bounded driver request; the non-canceled serial connection awaits
+  a genuine bool reply before shrinking the selected slot. False keeps the
+  original inventory; a lost outcome or changed beforeimage is fatal uncertainty,
+  never denial/retry. The driver checks the actual present/living/nonspectator
+  actor and resident current position, then the existing sole ground owner
+  reserves payload/native/publication/pending capacities. Thrower is the actual
+  player UUID and pickup delay is 40. Ground motion remains feet-origin with
+  initial velocity (0, 0.2, 0), rather than original eye/pitch/yaw throw physics.
+  Inventory resync, mining-tool notification, equipment and outer combat-profile
+  refresh remain serial. GUI/cursor drops, Paper item-drop events/cancellation,
+  stats, map tracking, same-tick drop-rate policy and crash atomicity are outside
+  this held-mainhand slice.

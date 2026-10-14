@@ -72,13 +72,21 @@ mod coordinator;
 mod cross_shard;
 mod entity;
 mod error;
+mod fluids;
+mod furnace_runtime;
 mod generation;
 mod generation_executor;
+mod ground_items;
 mod harness;
 mod item_counters;
 mod item_publication;
 mod loaded;
 mod message;
+mod mining;
+mod mining_facts;
+mod mob_persistence;
+mod mob_runtime;
+pub mod mobs;
 mod mutation;
 mod ownership;
 mod player;
@@ -90,8 +98,11 @@ mod region;
 pub(crate) mod scheduler;
 mod shard;
 mod spawn;
+mod survival;
 mod ticket;
 mod time;
+mod vitals;
+mod water_runtime;
 
 pub use collector_lifecycle::{
     CollectorLifecycleError, CollectorLifecycleLimits, CollectorLifecycleStatus,
@@ -113,6 +124,12 @@ pub use entity::{
 pub use error::{SimError, SimResult};
 pub use generation::{GenerationBinding, VerifiedGenerationBinding};
 pub use generation_executor::{ChunkGenerationExecutor, MAX_CONCURRENT_CHUNK_GENERATIONS};
+pub use ground_items::{
+    GroundItemBatchRefusal, GroundItemDrop, GroundItemDropRefusal, GroundItemError,
+    GroundItemEvent, GroundItemIdentity, GroundItemIdentityRefusal, GroundItemLimits,
+    GroundItemPickupRefusal, GroundItemPickupResult, GroundItemPickupTicket, GroundItemRestore,
+    GroundItemRestoreRefusal,
+};
 pub use harness::{SimHarness, TickOutcome};
 pub use item_counters::{
     OwnedItemCounterHandle, OwnedItemCounterLimits, MAX_CONFIRMED_ITEM_BYTES,
@@ -133,6 +150,7 @@ pub use loaded::{
     CHUNK_SCHEMA_VERSION, OVERLAY_SCHEMA_VERSION,
 };
 pub use message::{GameInput, GameOutput};
+pub use mining::MiningTool;
 // Only the cause is public: the structured `MutationResult` stays internal to
 // the shard so the app never confuses it with `ferrumc_observability::MutationResult`.
 pub use mutation::{MutationCause, PendingMutation};
@@ -160,3 +178,22 @@ pub use ferrumc_world::BlockStateId;
 pub use ferrumc_world::{Sign, SignFace, SignKind, SIGN_LINES};
 pub use spawn::SpawnChunkTickets;
 pub use ticket::{ChunkTicket, TicketLevel, TicketReason};
+
+pub use survival::SurvivalError;
+pub use vitals::{
+    fall_damage, DamageRequest, Difficulty, PlayerVitals, VitalsChange, VitalsError,
+    VitalsSnapshot, VitalsTickPolicy,
+};
+
+pub use fluids::{WaterError, WaterPlan, WaterRules, WaterTickQueue, WaterWrite, WATER_TICK_DELAY};
+
+pub use furnace_runtime::FurnaceError;
+
+pub use mob_runtime::{
+    MobEvent, MobIdentity, MobRuntimeError, MobSnapshot, MobSpawnAttempt, MobSpawnRefusal,
+};
+pub use mobs::{MobKind, MobRules, MobSpawnLight};
+
+pub use mob_persistence::{
+    decode_mob_entity, MobRestoreProposal, MobRestoreRefusal, NATIVE_MOB_ENTITY_BYTES,
+};

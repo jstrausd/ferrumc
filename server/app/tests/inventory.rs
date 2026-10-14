@@ -4,7 +4,7 @@
 //! [`tokio::net::TcpStream`] clients through login to play. It asserts the
 //! creative build loop:
 //! - join sends a `SetContainerContent` for window 0 (state id 1) carrying the
-//!   starter hotbar kit (stone in slot 36, glass in slot 39);
+//!   fresh empty Survival inventory before explicit Creative supplies;
 //! - selecting a hotbar slot (`Set Held Item`) then placing (`UseItemOn`) writes
 //!   the *held* block — glass (block-state 562), not the old hardcoded stone —
 //!   which the active block-rules plugin then rewrites to tinted glass (23377), the
@@ -43,9 +43,9 @@ const FACE_UP: i32 = 1;
 /// Player-inventory window id (window 0 is always open).
 const WINDOW_ID: i32 = 0;
 
-/// Hotbar inventory slot indices for the kit's stone and glass entries.
-const STONE_SLOT: usize = 36;
-const GLASS_SLOT: usize = 39;
+/// Explicitly supplied hotbar inventory slot indices for stone and glass.
+const STONE_SLOT: i16 = 36;
+const GLASS_SLOT: i16 = 39;
 
 /// Protocol item id of `minecraft:glass` and the block-state it places.
 const GLASS_ITEM: i32 = 195;
@@ -135,20 +135,6 @@ fn read_trusted_slot(reader: &mut BoundedReader<'_>) -> anyhow::Result<Option<(i
     Ok(Some((count, item_id)))
 }
 
-/// Walks a `SetContainerContent` payload and returns the slot at `index`.
-fn slot_in_container(payload: &[u8], index: usize) -> anyhow::Result<Option<(i32, i32)>> {
-    let mut reader = BoundedReader::new(payload);
-    let count = usize::try_from(reader.read_var_int()?)?;
-    let mut found = None;
-    for i in 0..count {
-        let slot = read_trusted_slot(&mut reader)?;
-        if i == index {
-            found = slot;
-        }
-    }
-    Ok(found)
-}
-
 /// Builds a hostile untrusted glass slot: an oversized count plus a dangerous
 /// `container` component, both of which validation must normalize away.
 fn hostile_glass_slot() -> Vec<u8> {
@@ -196,7 +182,8 @@ async fn send_place_on_top(
 
 /// Builds a server with the given extra config lines and returns its address.
 async fn start_server(extra: &str) -> (ferrumc_app::RunningServer, SocketAddr) {
-    let toml = format!("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\n{extra}");
+    let toml =
+        format!("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1\n{extra}");
     let config = AppConfig::from_toml_str(&toml).expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
@@ -207,20 +194,29 @@ async fn join_kit_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut viewer = login_to_play(addr, "Viewer").await?;
     let mut builder = login_to_play(addr, "Builder").await?;
 
-    // The join container content carries the starter kit at state id 1.
+    // Fresh joins remain Survival with every owned slot and cursor empty.
+    anyhow::ensure!(
+        builder.join_game_mode() == Some(0),
+        "fresh join must be Survival"
+    );
     let (state_id, payload) = next_container_content(&mut builder).await?;
+    anyhow::ensure!(state_id == 1, "fresh state ID must be one");
+    let mut reader = BoundedReader::new(&payload);
+    anyhow::ensure!(reader.read_var_int()? == 46, "fresh inventory shape");
+    for _ in 0..46 {
+        anyhow::ensure!(
+            read_trusted_slot(&mut reader)?.is_none(),
+            "fresh slot must be empty"
+        );
+    }
     anyhow::ensure!(
-        state_id == 1,
-        "join container state id was {state_id}; expected 1"
+        read_trusted_slot(&mut reader)?.is_none(),
+        "fresh cursor must be empty"
     );
-    anyhow::ensure!(
-        slot_in_container(&payload, STONE_SLOT)? == Some((64, STONE_ITEM)),
-        "hotbar slot 36 is not a full stone stack",
-    );
-    anyhow::ensure!(
-        slot_in_container(&payload, GLASS_SLOT)? == Some((64, GLASS_ITEM)),
-        "hotbar slot 39 is not a full glass stack",
-    );
+    reader.finish()?;
+    common::make_creative(&mut builder).await?;
+    common::supply_creative_slot(&mut builder, STONE_SLOT, STONE_ITEM, 64).await?;
+    common::supply_creative_slot(&mut builder, GLASS_SLOT, GLASS_ITEM, 64).await?;
 
     // Select the glass hotbar slot (index 3 -> inventory slot 39), then place.
     send_held_item(&mut builder, 3).await?;
@@ -244,6 +240,8 @@ async fn creative_slot_flow(addr: SocketAddr) -> anyhow::Result<()> {
     // Consume the join container content (state id 1).
     let (state_id, _) = next_container_content(&mut builder).await?;
     anyhow::ensure!(state_id == 1, "join state id was {state_id}");
+
+    common::make_creative(&mut builder).await?;
 
     // A hostile glass stack into a main slot: oversized count + dangerous component.
     builder
@@ -342,7 +340,7 @@ async fn non_creative_ignored_flow(addr: SocketAddr) -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn join_kit_and_held_block_placement() {
-    let (server, addr) = start_server("builtin_plugins = true\n").await;
+    let (server, addr) = start_server("builtin_plugins = true\nops = [\"Builder\"]\n").await;
     timeout(GUARD, join_kit_flow(addr))
         .await
         .expect("flow finished within the guard")
@@ -355,7 +353,7 @@ async fn join_kit_and_held_block_placement() {
 
 #[tokio::test]
 async fn creative_slot_normalizes_echoes_and_click_resyncs() {
-    let (server, addr) = start_server("").await;
+    let (server, addr) = start_server("ops = [\"Builder\"]\n").await;
     timeout(GUARD, creative_slot_flow(addr))
         .await
         .expect("flow finished within the guard")

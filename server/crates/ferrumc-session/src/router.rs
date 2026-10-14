@@ -227,6 +227,7 @@ impl ShardRegistration {
 #[derive(Debug)]
 pub struct PlayerSessionHandle {
     player: PlayerId,
+    entity_id: i32,
     shard: ShardId,
     outbound: mpsc::Receiver<OutboundMessage>,
     key: Option<PlayerSessionKey>,
@@ -237,6 +238,13 @@ impl PlayerSessionHandle {
     /// The player this session belongs to.
     pub fn player(&self) -> PlayerId {
         self.player
+    }
+
+    /// The admitted local-player wire identity used by this connection's join.
+    /// Legacy sessions share it with remote publications; native sessions retain
+    /// their existing distinct self/remote projection contract.
+    pub fn entity_id(&self) -> i32 {
+        self.entity_id
     }
 
     /// The sealed native session key, or `None` for a legacy session (legacy
@@ -849,6 +857,7 @@ impl SessionRouter {
         let _retained_failure = self.drain_disconnect_worklist(to_disconnect);
         Ok(PlayerSessionHandle {
             player,
+            entity_id,
             shard: shard.home,
             outbound: rx,
             key: None,
@@ -859,6 +868,15 @@ impl SessionRouter {
     /// Allocates the next network entity id from the single checked shared
     /// allocator. `i32::MAX` is issued once; afterwards the allocator is
     /// exhausted and never wraps into reused, colliding or negative ids.
+    /// Allocates a never-reused wire identity from the same checked allocator
+    /// used by player sessions and native item identity refills.
+    ///
+    /// The caller must supply a separate globally unique persistent entity UUID.
+    /// Exhaustion returns before any item admission; burned ids are never reused.
+    pub fn allocate_non_player_entity_id(&mut self) -> Result<i32, SessionError> {
+        self.allocate_entity_id()
+    }
+
     fn allocate_entity_id(&mut self) -> Result<i32, SessionError> {
         let id = self
             .next_entity_id
@@ -1107,10 +1125,24 @@ impl SessionRouter {
     /// Mandatory traffic (corrections, acks, resyncs) is never silently dropped: a
     /// recipient that cannot accept it — full *or* closed — is returned for the
     /// caller to disconnect.
+    #[allow(clippy::too_many_lines)] // One exhaustive output routing boundary.
     pub fn route_output(&mut self, output: &GameOutput) -> Vec<PlayerId> {
         let mut to_disconnect = Vec::new();
         match output {
-            GameOutput::PlayerSpawned { player, position } => {
+            GameOutput::PlayerVitalsChanged { player, snapshot } => {
+                if let Some(entry) = self.players.get(player) {
+                    let packet = ClientboundPlayPacket::UpdateHealth(
+                        ferrumc_proto::generated::play::UpdateHealth::new(
+                            snapshot.health(),
+                            i32::from(snapshot.food()),
+                            snapshot.saturation(),
+                        ),
+                    );
+                    Self::send_mandatory(entry, packet, *player, &mut to_disconnect);
+                }
+            }
+            GameOutput::PlayerRespawned { player, position }
+            | GameOutput::PlayerSpawned { player, position } => {
                 self.update_position(*player, *position);
             }
             GameOutput::PlayerMoved {
@@ -1139,6 +1171,31 @@ impl SessionRouter {
                 // client off-position), so a full/closed channel disconnects it.
                 if let Some(entry) = self.players.get(player) {
                     Self::send_mandatory(entry, move_shell(*position), *player, &mut to_disconnect);
+                }
+            }
+            GameOutput::BlockActionAcknowledged { player, sequence } => {
+                if let Some(entry) = self.players.get(player) {
+                    Self::send_mandatory(entry, ack_shell(*sequence), *player, &mut to_disconnect);
+                }
+            }
+            GameOutput::MiningProgress {
+                player,
+                position,
+                stage,
+            } => {
+                if let Some(entity_id) = self.player_entity_id(*player) {
+                    let packet = ClientboundPlayPacket::BlockDestruction(
+                        ferrumc_proto::generated::play::BlockDestruction::new(
+                            entity_id,
+                            ferrumc_proto::types::BlockPosition::new(
+                                position.x(),
+                                position.y(),
+                                position.z(),
+                            ),
+                            *stage as u8,
+                        ),
+                    );
+                    self.broadcast_block_entity_data(*position, &packet, &mut to_disconnect);
                 }
             }
             GameOutput::BlockChanged {
@@ -1846,6 +1903,30 @@ impl SessionRouter {
         }
     }
 
+    /// Enqueues a mandatory targeted gameplay packet without mutating bindings.
+    /// The caller owns the disconnect policy when the bounded channel refuses.
+    ///
+    /// # Errors
+    /// Returns an unknown-player, full-channel or closed-channel error. No packet
+    /// is silently dropped and this method never initiates a leave cascade.
+    pub fn send_gameplay_packet_to(
+        &self,
+        player: PlayerId,
+        packet: ClientboundPlayPacket,
+    ) -> Result<(), SessionError> {
+        let entry = self
+            .players
+            .get(&player)
+            .ok_or(SessionError::UnknownPlayer { player })?;
+        entry
+            .outbound
+            .try_send(OutboundMessage::mandatory(packet))
+            .map_err(|error| match error {
+                TrySendError::Full(_) => SessionError::OutboundFull { player },
+                TrySendError::Closed(_) => SessionError::OutboundClosed { player },
+            })
+    }
+
     /// Teleports `player` to `position`: snaps the target's own client to the new
     /// position and updates authoritative simulation state.
     ///
@@ -1962,6 +2043,9 @@ impl SessionRouter {
         };
         let shard = match &input {
             GameInput::BlockBreak { position, .. }
+            | GameInput::MiningStart { position, .. }
+            | GameInput::MiningFinish { position, .. }
+            | GameInput::MiningAbort { position, .. }
             | GameInput::BlockPlace { position, .. }
             | GameInput::SetBlockExact { position, .. }
             | GameInput::SetBlockExactTracked { position, .. }
@@ -2643,6 +2727,39 @@ mod tests {
     }
 
     #[test]
+    fn targeted_gameplay_requires_admission_and_retains_binding_on_refusal() {
+        let mut router = SessionRouter::new();
+        let _inbox = router.register_shard(ShardPos::new(0, 0));
+        let actor = player("mandatory");
+        let packet = || ClientboundPlayPacket::GameEvent(GameEvent::new(3, 1.0));
+        assert_eq!(
+            router.send_gameplay_packet_to(actor, packet()),
+            Err(SessionError::UnknownPlayer { player: actor })
+        );
+        let mut handle = router
+            .join_player(actor, "mandatory", spawn_pos())
+            .expect("join");
+        while handle.try_recv().is_some() {}
+        router
+            .send_gameplay_packet_to(actor, packet())
+            .expect("admitted");
+        let received = handle.try_recv().expect("exact packet");
+        assert_eq!(received.criticality(), Criticality::Mandatory);
+        while router.send_gameplay_packet_to(actor, packet()).is_ok() {}
+        assert_eq!(
+            router.send_gameplay_packet_to(actor, packet()),
+            Err(SessionError::OutboundFull { player: actor })
+        );
+        assert!(router.player_position(actor).is_some(), "no implicit leave");
+        drop(handle);
+        assert_eq!(
+            router.send_gameplay_packet_to(actor, packet()),
+            Err(SessionError::OutboundClosed { player: actor })
+        );
+        assert!(router.player_position(actor).is_some());
+    }
+
+    #[test]
     fn join_without_a_shard_is_rejected() {
         let mut router = SessionRouter::new();
         let err = router
@@ -2776,6 +2893,84 @@ mod tests {
         assert!(handle.try_recv().is_none());
         // The move still refreshed the cached position used for routing.
         assert_eq!(router.player_position(p), Some(Vec3::new(4.0, 5.0, 6.0)));
+    }
+
+    #[test]
+    fn survival_health_output_publishes_real_values_and_closed_channel_disconnects() {
+        let mut router = SessionRouter::new();
+        let _inbox = router.register_shard(ShardPos::new(0, 0));
+        let actor = player("survival-health");
+        let mut handle = router
+            .join_player(actor, "survival-health", spawn_pos())
+            .expect("join");
+        let snapshot = ferrumc_sim::VitalsSnapshot::new(7.0, 12, 2.0, 0.0).expect("snapshot");
+        let output = GameOutput::PlayerVitalsChanged {
+            player: actor,
+            snapshot,
+        };
+        assert_eq!(router.route_output(&output).len(), 0);
+        let ClientboundPlayPacket::UpdateHealth(packet) =
+            handle.try_recv().expect("health").into_packet()
+        else {
+            panic!("health packet");
+        };
+        assert_eq!(packet.health(), 7.0);
+        assert_eq!(packet.food(), 12);
+        assert_eq!(packet.saturation(), 2.0);
+        drop(handle);
+        assert_eq!(router.route_output(&output), vec![actor]);
+    }
+
+    #[test]
+    fn mining_ack_and_crack_use_actual_player_wire_identity() {
+        let mut router = SessionRouter::new();
+        let _inbox = router.register_shard(ShardPos::new(0, 0));
+        let item_wire = router.allocate_non_player_entity_id().expect("item first");
+        let actor = player("mining-wire");
+        let mut handle = router
+            .join_player(actor, "mining-wire", spawn_pos())
+            .expect("join");
+        assert!(handle.entity_id() > item_wire);
+        assert_eq!(Some(handle.entity_id()), router.player_entity_id(actor));
+        assert_eq!(
+            router
+                .route_output(&GameOutput::BlockActionAcknowledged {
+                    player: actor,
+                    sequence: 42
+                })
+                .len(),
+            0
+        );
+        let ClientboundPlayPacket::AcknowledgeBlockChange(packet) =
+            handle.try_recv().expect("ack").into_packet()
+        else {
+            panic!("ack packet");
+        };
+        assert_eq!(packet.sequence(), 42);
+        assert_eq!(
+            router
+                .route_output(&GameOutput::MiningProgress {
+                    player: actor,
+                    position: BlockPos::new(8, 63, 8),
+                    stage: -1
+                })
+                .len(),
+            0
+        );
+        let ClientboundPlayPacket::BlockDestruction(packet) =
+            handle.try_recv().expect("crack").into_packet()
+        else {
+            panic!("crack packet");
+        };
+        assert_eq!(
+            packet.entity_id(),
+            router.player_entity_id(actor).expect("actual id")
+        );
+        assert_eq!(packet.progress(), 255);
+        let first = router.allocate_non_player_entity_id().expect("item wire");
+        let second = router.allocate_non_player_entity_id().expect("item wire");
+        assert!(first > packet.entity_id());
+        assert_eq!(second, first + 1);
     }
 
     #[test]

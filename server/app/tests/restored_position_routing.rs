@@ -32,7 +32,7 @@ use common::{encode, login_to_play, TestClient};
 const GUARD: Duration = Duration::from_secs(20);
 
 /// Current app-owned player payload schema.
-const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(3);
+const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(5);
 
 /// Default configured spawn used by this regression.
 const SPAWN: Vec3 = Vec3::new(8.0, 64.0, 8.0);
@@ -443,7 +443,7 @@ async fn restore_advance_and_leave(
     .await?;
     guarded(
         "restored boundary join stream",
-        expect_restored_join(&mut client, expected, case.chunk, GameMode::Creative, 0),
+        expect_restored_join(&mut client, expected, case.chunk, GameMode::Survival, 0),
     )
     .await?;
     guarded(
@@ -565,7 +565,7 @@ fn every_spawn_shard_side_survives_same_process_rejoin_and_restart() {
     for case in BOUNDARIES {
         let record = load_player(&runtime, &database_path, PlayerId::offline(case.name));
         assert_eq!(record.schema_version(), PLAYER_SCHEMA_VERSION);
-        assert_eq!(record.game_mode(), GameMode::Creative);
+        assert_eq!(record.game_mode(), GameMode::Survival);
         assert_record_state(&record, case.after_restart);
     }
 }

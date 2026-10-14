@@ -141,6 +141,9 @@ pub enum EntityStoreError {
     /// The entity tick entry was refused before running work or draining input.
     #[error("shard entity store is not initialized")]
     NotInitialized,
+    /// An opted-in gameplay owner exclusively controls concrete entity work.
+    #[error("ground item runtime requires its exclusive tick consumer")]
+    GroundRuntimeRequired,
     /// Tick-context spawn/move requires a currently ticket-resident target.
     #[error("entity target chunk {chunk:?} is not resident")]
     ChunkNotResident {
@@ -327,6 +330,10 @@ pub struct EntityHandle {
 }
 
 impl EntityHandle {
+    pub(crate) const fn owner(&self) -> ShardId {
+        self.owner
+    }
+
     pub(crate) const fn publication_generation(&self) -> u64 {
         self.generation
     }
@@ -674,6 +681,16 @@ impl EntityStore {
         self.by_wire.get(&wire_id).map(|&index| self.handle(index))
     }
 
+    /// Iterates handles for existing concrete item payloads in slot order.
+    /// Placeholders and non-item registrations are excluded. Handles retain the
+    /// same owner/incarnation checks; this readonly enumeration grants no writes.
+    pub fn concrete_item_handles(&self) -> impl Iterator<Item = EntityHandle> + '_ {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| slot.item.as_ref().map(|_| self.handle(index)))
+    }
+
     /// Iterates this typed owner-local chunk in deterministic admission/move order.
     ///
     /// Queries touch only its fixed bucket and linked occupants, never scan all
@@ -874,6 +891,37 @@ impl<'a> EntityTickContext<'a> {
         self.store.bucket(transform.chunk())?;
         self.require_resident(transform.chunk())?;
         self.store.update_transform_admitted(handle, transform)
+    }
+
+    // Base-only migration cannot steal an item payload or a native lease. All
+    // canonical destination identity/residency/slot checks precede source removal.
+    pub(crate) fn migrate_base_to(
+        &mut self,
+        destination: &mut EntityTickContext<'_>,
+        handle: &EntityHandle,
+        transform: EntityTransform,
+    ) -> Result<EntityHandle, EntityStoreError> {
+        self.store.require_legacy_write()?;
+        destination.store.require_legacy_write()?;
+        let index = self.store.index(handle)?;
+        if self.store.slots[index].item.is_some() {
+            return Err(EntityStoreError::PayloadRequiresOwnedRemove);
+        }
+        let source = *self.store.get(handle)?;
+        self.require_resident(source.chunk())?;
+        let proposal = EntitySpawn::new(
+            source.owner.world(),
+            source.owner.dimension(),
+            source.uuid,
+            source.wire_id,
+            source.entity_type,
+            transform,
+        );
+        let bucket = destination.store.validate_spawn(proposal)?;
+        destination.require_resident(transform.chunk())?;
+        destination.store.reserve_spawn_slot()?;
+        self.store.remove(handle)?;
+        Ok(destination.store.commit_spawn(proposal, None, bucket))
     }
 
     /// Removes a valid registration even if its old chunk is no longer resident.

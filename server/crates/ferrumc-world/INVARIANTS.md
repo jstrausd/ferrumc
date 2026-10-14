@@ -271,6 +271,22 @@
 
 ## General
 
+- Ordinary furnace data has exactly three sealed slots and four private u16
+  timers. Native construction/replacement validates Items' authoritative stacks,
+  effective capacities, present-air refusal and complete 16 KiB encoded budget
+  before publication. Burn remaining <= duration <=32767, cooking total1..32767,
+  progress <total. A refused replacement leaves the owning furnace unchanged.
+- Furnace versioned block-entity tag2 extends schema1 with three framed lossless
+  FCIS records and burn remaining/duration, cooking progress/total (four big-endian
+  u16). Existing legacy/schema1 Sign and Chest bytes remain unchanged. Decode
+  preflights the whole 16 KiB input, frame lengths and native admission; no timer
+  or item is silently clamped. The infallible legacy writer remains explicitly
+  componentless/lossy for container items; durable consumers use try_encode.
+- World furnace data does not tick, update lit blocks, dispatch events, award
+  recipes/XP, open screens or own storage. Items provides a pure complete tick
+  proposal; Sim/App must commit all slots/timers together under exclusive
+  resident chunk authority, preserve input-change reset rules and mark dirty.
+
 - No `unwrap()` or `expect()` outside `#[cfg(test)]`.
 - No unbounded channels or allocations from untrusted input.
 - All public items have rustdoc.
@@ -857,7 +873,7 @@
   the projection for every 3x3 target offset. At most nine real CARVERS baselines
   are required; biome-zoom misses use genuine BIOMES-only center production with
   the same complete cold 3x3 selection chronology as the terrain generator.
-- Clone-shared, seed-bound caches retain only immutable RAW baselines (32 entries)
+- Clone-shared, seed-bound caches retain only immutable RAW baselines (64 entries)
   and genuine biome arrays (64 entries). They never receive edited chunks,
   feature output, overlays or player state. Cache eviction and request order
   affect cost, not output. Generation runs outside cache locks. Every source has
@@ -896,9 +912,9 @@ outputs with logs above soil above leaves above grass; equal ranks use canonical
 source X/Z order. This protects trunks from independent neighboring crowns and is
 a deliberate scheduling policy. Static leaf distances follow their own source
 history; no cross-source or gameplay leaf ticking is claimed. Raw/biome cache
-capacity remains 32/64; tree cache retains 32 immutable source diffs of at most
+capacity is 64/64; tree cache retains 32 immutable source diffs of at most
 4096 cells each (at most 2 MiB scalar diff payload). Caches never observe edits.
-Preview caches keep their established FIFO ordering and 32/64/32 entry bounds.
+Preview caches keep their established FIFO ordering and 64/64/32 entry bounds.
 Cold computation remains outside the cache locks; publication rechecks the key,
 so concurrent successful misses occupy one entry rather than duplicate slots.
 Concurrent same-key misses use the bounded production gates documented below.
@@ -951,7 +967,7 @@ acquires its stripe and rechecks the cache before computing; numerical generatio
 never holds a cache mutex. Concurrent same-key callers reuse a successful retained
 publication, while unrelated stripe collisions may serialize cost only. No gate
 retains a key, result, Chunk or source history. Content capacities and FIFO policies
-remain 32 RAW / 64 BIOME / 32 SOURCE; eviction still permits genuine recomputation.
+remain 64 RAW / 64 BIOME / 32 SOURCE; eviction still permits genuine recomputation.
 
 The order is SOURCE gate -> RAW or BIOME gate -> short corresponding cache lock.
 RAW production and standalone BIOME production never call SOURCE or each other;
@@ -967,7 +983,7 @@ public budget, generation revision, dependency or baseline output changes.
 
 ## Bounded immutable natural climate-target reuse
 
-Natural composition retains at most 64 complete fresh-noise climate columns in
+Natural composition retains at most 128 complete fresh-noise climate columns in
 one seed/settings/geometry-bound FIFO cache shared by its clones. Each column
 contains exactly 1536 original quantized six-axis targets (73,728 payload bytes),
 produced by a genuinely fresh Paper NoiseChunk in section-Y/local-X/Y/Z order.
@@ -976,7 +992,8 @@ mutate NoiseChunk. No foreign final biome array, mutable noise wrapper, cached
 last leaf, work meter, edited terrain or feature state enters this cache.
 
 Every centered nine-column traversal still owns a fresh BiomeSourceSession and
-replays every original RTree selection in X-outer/Z-inner source order. It retains
+visits all original source columns in X-outer/Z-inner order. Selection executes
+the original traversal or the exact sealed transition memo below. It retains
 identical prior-leaf ties, staged history, source-work charges and complete
 biome-array publication. The sealed private natural replay path uses the same
 array fill and source refusal handling as the public fresh-noise producer. Public
@@ -992,15 +1009,18 @@ Cache work runs outside the short cache mutex; 32 fixed producer stripes coalesc
 same-key concurrent misses with a post-lock lookup. Lock order is the existing
 SOURCE/RAW/BIOME producer gate, then CLIMATE stripe, then short CLIMATE cache
 mutex. Climate never calls any upstream cache or source selection, so there is no
-reverse dependency. Content capacity stays exactly 64; evictions and concurrency
+reverse dependency. Content capacity stays exactly 128; evictions and concurrency
 change cost, not output. The cold revision-3 target uses a 5x5 RAW union and 7x7
-climate union (49 columns); 64 accommodates this working set while remaining
-bounded. Native cache payload is at most 4,718,592 bytes, plus measured column,
-Arc and mutex/deque metadata (measured total 4,724,008 native bytes on this
-64-bit host); allocator overhead is separate. Active workers can
+climate union (49 columns);128 accommodates two independent49-column climate
+working sets while remaining bounded. Native cache payload is at most 9,437,184 bytes, plus measured column,
+Arc and mutex/deque metadata (measured total 9,447,720 native bytes on this
+64-bit host). Retention additionally enforces a 10 MiB native ceiling, counting the
+cache including 32 gates, deque capacity, complete column objects/payloads and Arc
+headers; a usable oversized producer result is returned without retention.
+Allocator overhead is separate. Active workers can
 hold one additional leased immutable column each, and up to 32 serialized stripe
 producers can own their original constructor scratch. These leases/scratch are
-not counted as resident cache capacity. RAW32/BIOME64/SOURCE32 remain unchanged.
+not counted as resident cache capacity. RAW64/BIOME64/SOURCE32 are bounded separately below.
 
 The seven pure wrapping-distance axes admit a public seven-unit work group when
 all seven units remain. Otherwise they execute the original per-axis charge
@@ -1011,3 +1031,136 @@ preserves every sum, tie, selection, source history and public allowance boundar
 Focused tests compare the original unit loop for public/wide 0..9 allowances and
 extreme signed coordinates, and cached-vs-original full nine-column source
 traversals including N-1/N/N+1 refusal/poison/history boundaries.
+
+## Survival lighting snapshot
+
+`LightingNeighborhood` borrows 1..9 unique chunks inside the centre's 3×3 window.
+Missing neighbours are opaque; no generator or saved edit is invoked. A synchronous
+cold recompute reads actual state opacity/emission and paired face occlusion from
+the pinned Paper build 60 JVM export (27946 records, 38 unique 16×16 face masks).
+No mutable state crosses calls, so source/roof removal cannot retain stale light.
+One-chunk halo exceeds the maximum 14-edge propagated reach; each cell has at most
+15 increases per layer. The queue admission bit bounds live queued cells to the
+48×48×384 arena. The caller relights affected centres after neighbour availability
+changes and committed block edits; it publishes complete snapshots as mandatory
+light updates. Unknown palette states fail before publication. Above-ceiling sky is
+15; below-floor sky extends the bottom row; sentinel block light is zero.
+Moving pistons/world-dependent occlusion and a running Paper differential remain
+outside this static snapshot contract. Generation identities/blocks are untouched.
+
+## Pure cell-interpolation work grouping
+
+An owned filling-cell Interpolated lookup may charge its seven pure lerp units
+as one group only when a public allowance admits all seven. Small public
+allowances and private 192-bit Carver meters execute the original unit loop,
+preserving exact first refusal, used limbs and segment behavior. The original
+X/Y/Z lerp3 order, wrapper state, noise requests, layouts, caps and generation
+identities are unchanged. Actual-wrapper tests cover remaining allowances 0..10
+with zero/nonzero consumed prefixes for both meter kinds and exact result bits.
+
+
+## Bounded natural biome-transition memo
+
+Natural Binding alone owns an optional FIFO memo of at most64 complete successful
+multinoise column transitions and at most131072 charged native bytes. The key is
+the column position and exact incoming leaf, inside an immutable seed/settings/
+geometry/source/tree binding. Each record retains the sealed array, exact final
+leaf and full original successful source-work delta. Replay independently checks
+the tree Arc identity, incoming leaf, source, seed, settings, position and geometry.
+The climate producer is still requested before every memo lookup, so upstream
+climate refusal and poison behavior cannot be bypassed. Private Carver sessions,
+standalone climate production and all public biome APIs retain their original path.
+
+A hit charges the entire original source-work delta only if the complete public
+allowance admits it, then commits the exact complete history. Insufficient allowance
+leaves work/history/status untouched and runs the original array producer, retaining
+its unit-level first refusal, poisoning and no-partial-publication behavior. Traced
+test sources bypass the memo. Errors and partial arrays are never inserted. This is
+private composition reuse of completed immutable output: a hit does not rerun the
+original allocation attempts, distance arithmetic or staging writes. Output admission
+has already succeeded for the sealed array; allocation-pressure behavior may differ.
+
+Memo computation runs outside the short mutex, and insertion rechecks the exact key;
+concurrent misses can compute twice but occupy at most one record. No producer gates
+or inverse lock dependencies are added. A failed optional deque reservation disables
+insertion; a poisoned memo mutex falls back to the original source producer without
+introducing a new generation error. Full caches evict oldest entries before insertion.
+Native admission charges the cache object, full deque capacity, every retained array
+object, boxed biome payload and Arc header. Shared binding tree allocation, allocator
+overhead and active worker array leases are excluded explicitly. Active workers may
+retain nine arrays each through surface/installation, including evicted leases, as
+before. Exact64-entry native accounting and the128KiB bound are checked on this host;
+no RSS or equivalent-scope Paper performance claim follows from those native bytes.
+
+
+## Two-target natural cache working set
+
+Two admitted blocking preview workers can require a disjoint 50-column RAW union
+and 98-column climate union. RAW retains at most 64 immutable baselines and at
+most 32 MiB charged native resident bytes. Its charge includes the short cache
+mutex, cache/deque object and RAW producer gates, full RAW deque capacity, Chunk
+objects, actual block palette/backing vector capacities, biome boxes and Arc
+headers. The unchanged standalone BIOME deque/payload and its gates are separate,
+as are shared immutable catalog/binding/tree state, allocator overhead and active
+worker leases. A raw producer containing block entities or lighting outside this
+closed census is returned successfully without retention. Oversized results are
+also usable but uncached. FIFO eviction occurs before retention until both ceilings
+fit; numeric production still runs outside all cache locks. No work budget, worker
+count, public layout, generation identity, selection chronology or output arithmetic
+changes.
+
+The direct-storage worst baseline (24 complete 32-bit sections and 1536 biomes)
+is 396944 native bytes per raw column on this host; 64 such independent baselines
+with cache metadata/gates total 25405768 native bytes, below the 32 MiB ceiling.
+Tests charge actual retained vector capacities, check FIFO eviction and refuse
+retention of an entity-bearing baseline. Climate's 128-entry bound and 10 MiB
+native ceiling use the same census in production and the focused bound test.
+
+## Optional immutable natural cold-constructor plan
+
+After all original Natural Binding producers succeed, an optional immutable plan
+may compile from one real origin constructor. Public fresh Paper constructors,
+Carver constructors and NoiseChunkSession layout remain unchanged. Only Natural's
+material, preliminary-surface and climate constructor sites consult this plan.
+The key is exact immutable router Arc identity, with its complete seed/settings/
+geometry/noise basis. A foreign router, unsupported graph/geometry, failed optional
+reservation or failed verification uses the unchanged original constructor.
+
+The retained graph contains no mutable wrapper, sampled flat value, RNG/session
+history, work meter or output. A compact fallible graph copy shares only immutable
+compiled spline and BlendedNoise allocations. Every session calls original
+ChunkState::new, rebuilding its NormalNoise bases, both empty-Blender grids and all
+mutable cache/scratch arrays. Recipes recreate wrappers in original ID order and
+repeat every original position-dependent flat-cache sample and write in X-outer/
+Z-inner order. A wrapper becomes visible only after its original flat fill. The
+compiled graph must be topological; each wrapper's input precedes its output.
+All mutable fresh state is compared bit-for-bit against the real constructor at
+compile origin before publication, including every cache, index, counter, scratch
+value and original graph/cache/scratch admission census.
+
+The omitted immutable cold work is exact original constructor work minus original
+fresh-state and position-dependent replay work. Each candidate stages privately,
+then charges the whole original successful total only if the complete caller
+allowance fits. Otherwise it discards staging and executes the unchanged original
+constructor, preserving the exact typed first refusal and subsequent work/history/
+poison behavior. Defensive replay errors also use the original path. No original
+allocation-pressure schedule is claimed; replay skips immutable graph/visitor/
+spline reconstruction and may allocate before the fallback budget refusal.
+
+Root-authorized caps are 512 KiB plan-native retained and 8 MiB simultaneous private
+compile scratch. The closed geometry is exactly -64/384, cell width4/height8. A
+conservative simultaneous census uses original2 MiB graph/4 MiB cold caps, at most
+128 wrappers (largest cache has2*5*49 f64 values),96 scratch levels of128 f64 values,
+two complete stages/surface caches and two full512 KiB plan copies. It is6,493,568
+bytes in Release (6,494,640 with test trace fields), below8 MiB; clone-before-admission and original cold phases are
+smaller. Failed admission retains no plan and does not widen any original cap.
+Actual compact Release plan-native census is167,688 bytes (167,696 with test
+trace fields): plan object, node/recipe vector
+capacities, every boxed spline point/coordinate, compiled spline graph and blended
+sampler allocation/header. Repeated immutable Arc targets are conservatively
+charged per retaining node. Existing shared router/binding allocation and allocator
+overhead are excluded explicitly; fresh worker state remains independently owned.
+The omitted cold charge is518669 units; original fresh-state46362 units and all
+position-dependent samples remain executed. Four focused tests cover full state,
+work, climate bits, signed seeds/domain seams, N-1/N/N+1/small refusal boundaries,
+foreign-router/invalid-domain fallback and the native ceilings.

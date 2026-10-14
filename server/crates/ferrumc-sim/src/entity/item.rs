@@ -492,6 +492,14 @@ pub struct RestoredItemEntity {
     item: ItemEntityState,
 }
 impl RestoredItemEntity {
+    pub(crate) fn snapshot_admitted(&self) -> Self {
+        Self {
+            key: self.key,
+            entity_type: self.entity_type,
+            transform: self.transform,
+            item: self.item.snapshot_admitted(),
+        }
+    }
     /// Returns the validated persistent scope and UUID.
     pub const fn key(&self) -> PersistentEntityKey {
         self.key
@@ -856,6 +864,54 @@ impl EntityStore {
 }
 
 impl EntityTickContext<'_> {
+    /// Moves one legacy concrete item between disjoint canonical region owners.
+    /// Destination payload/residency/slot allocation passes before source removal;
+    /// the same UUID, wire id and stack then commit with no fallible step.
+    pub(crate) fn migrate_item_to(
+        &mut self,
+        destination: &mut EntityTickContext<'_>,
+        handle: &EntityHandle,
+        transform: EntityTransform,
+        properties: ItemEntityProperties,
+    ) -> Result<EntityHandle, ItemEntityError> {
+        let index = self.resident_item_index(handle)?;
+        let source = self.store.slots[index]
+            .entity
+            .ok_or(EntityStoreError::StaleHandle)?;
+        let item = self.store.slots[index]
+            .item
+            .as_ref()
+            .ok_or(ItemEntityError::MissingItemState)?;
+        let proposal = EntitySpawn::new(
+            source.owner.world(),
+            source.owner.dimension(),
+            source.uuid,
+            source.wire_id,
+            source.entity_type,
+            transform,
+        );
+        let (bucket, fcis_len, used) =
+            destination.prepare_item_spawn(proposal, &item.stack, properties)?;
+        destination.store.reserve_spawn_slot()?;
+        let removed = self.remove_owned(handle)?;
+        let (_, item) = removed.into_parts();
+        let Some(item) = item else {
+            panic!("preflighted item migration lost its payload");
+        };
+        let (stack, _) = item.into_parts();
+        let handle = destination.store.commit_spawn(
+            proposal,
+            Some(ItemEntityState {
+                stack,
+                properties,
+                fcis_len,
+            }),
+            bucket,
+        );
+        destination.store.item_bytes_used = used;
+        Ok(handle)
+    }
+
     fn resident_item_index(&self, handle: &EntityHandle) -> Result<usize, ItemEntityError> {
         self.store.require_legacy_write()?;
         let index = self.store.item_index(handle)?;

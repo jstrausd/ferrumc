@@ -1420,6 +1420,35 @@ mod tests {
     }
 
     #[test]
+    fn mutation_log_round_trips_physics_causes_without_retagging_old_records() {
+        for (cause, tag) in [
+            (MutationLogCause::PlayerCreative, 0),
+            (MutationLogCause::Command, 1),
+            (MutationLogCause::Plugin, 2),
+            (MutationLogCause::Test, 3),
+            (MutationLogCause::Fluid, 4),
+            (MutationLogCause::Furnace, 5),
+        ] {
+            let record = BlockMutationLogRecord::new(
+                SchemaVersion::new(1),
+                2,
+                11,
+                MutationActor::System,
+                BlockPos::new(-16, 64, 15),
+                BlockStateId::AIR,
+                BlockStateId::new(1),
+                cause,
+            );
+            let bytes = encode_mutation_log_record(&record);
+            assert_eq!(bytes.last(), Some(&tag));
+            assert_eq!(
+                decode_mutation_log_record(&bytes).expect("decode cause"),
+                record
+            );
+        }
+    }
+
+    #[test]
     fn mutation_log_decoder_rejects_malformed_input() {
         // Truncated header.
         assert!(decode_mutation_log_record(&[0, 0, 0, 0]).is_err());

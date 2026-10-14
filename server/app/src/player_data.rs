@@ -10,16 +10,18 @@
 //!
 //! # Versioning and robustness
 //!
-//! New records use strict schema 3, with a bounded binary player envelope and
-//! independent [`ferrumc_items`] storage records for all 46 slots and the cursor.
+//! New records use strict schema 5, with a bounded binary player envelope and
+//! independent [`ferrumc_items`] storage records for all 46 slots, the cursor, and nine crafting-table inputs.
 //! Counts, patches, typed/opaque representations and NBT are preserved without
 //! creative-input normalization. The aggregate encoded payload is at most 1 MiB;
 //! encoding retains at most one additional bounded item buffer at a time.
+//! All nine validated vitals scalars/timers follow the unchanged item frames.
 //!
 //! Schema 1 and 2 JSON records explicitly migrate in memory with their original
 //! slot-normalization policy. Schema 2 still requires the exact layout, a valid
 //! cursor and known fields. Loading never rewrites a record: only a later
-//! successful leave-save writes schema 3. Unsupported versions and malformed
+//! successful leave-save writes schema 5. Schemas 3/4 migrate their exact binary
+//! item/table representations with fresh default vitals. Unsupported versions and malformed
 //! payloads are classified; only a confirmed storage miss permits fresh defaults.
 
 mod codec;
@@ -33,6 +35,7 @@ use serde::{Deserialize, Serialize};
 use ferrumc_core::{GameMode, PlayerId, ServerError};
 use ferrumc_items::{ComponentPatch, ItemId, ItemStack};
 use ferrumc_math::Vec3;
+use ferrumc_sim::{PlayerVitals, VitalsError, VitalsSnapshot};
 use ferrumc_storage::{PlayerRecord, PlayerStore, SchemaVersion, StorageError};
 
 use crate::inventory::{PlayerInventory, SLOT_COUNT};
@@ -40,10 +43,12 @@ use codec::PlayerPayloadError;
 
 /// The schema version stamped on every [`PlayerRecord`] this module writes.
 ///
-/// Schemas 1 and 2 migrate explicitly; other versions are incompatible.
-pub(crate) const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(3);
+/// Schemas 1 through 4 migrate explicitly; other versions are incompatible.
+pub(crate) const PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(5);
 const LEGACY_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(1);
+const LOSSLESS_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(3);
 const JSON_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(2);
+const TABLE_PLAYER_SCHEMA_VERSION: SchemaVersion = SchemaVersion::new(4);
 
 /// Largest magnitude accepted for a player coordinate.
 ///
@@ -196,7 +201,7 @@ impl PersistedSlot {
 
 /// Schema-2 carried item, strictly validated rather than silently normalized.
 /// Its storage contract retains item identity/count, matching inventory slots;
-/// New schema-3 saves use the independent item codec instead.
+/// New schema-5 saves use the independent item codec instead.
 #[derive(Debug, Clone, PartialEq)]
 struct PersistedCarried(ItemStack);
 
@@ -245,6 +250,8 @@ impl From<LegacyPlayerData> for PlayerData {
             selected_slot: normalize_legacy_selection(data.selected_slot),
             slots: Box::new(slots),
             carried: ItemStack::empty(),
+            table_inputs: Box::new(std::array::from_fn(|_| ItemStack::empty())),
+            vitals: PlayerVitals::new().snapshot(),
         }
     }
 }
@@ -276,6 +283,8 @@ impl From<JsonPlayerData> for PlayerData {
             // Keep schema 2's historical slot policy while its cursor is strict.
             slots: Box::new(std::array::from_fn(|index| data.slots[index].restore())),
             carried: data.carried.0,
+            table_inputs: Box::new(std::array::from_fn(|_| ItemStack::empty())),
+            vitals: PlayerVitals::new().snapshot(),
         }
     }
 }
@@ -304,6 +313,8 @@ pub(crate) struct PlayerData {
     // admission/save future. Component trees remain owned by the snapshot.
     slots: Box<[ItemStack; SLOT_COUNT]>,
     carried: ItemStack,
+    table_inputs: Box<[ItemStack; 9]>,
+    vitals: VitalsSnapshot,
 }
 
 /// Decodes only the schema-2 window layout, rejecting excess entries before
@@ -370,6 +381,8 @@ impl PlayerData {
             selected_slot: inventory.selected(),
             slots: Box::new(slots),
             carried: inventory.carried().clone(),
+            table_inputs: Box::new(inventory.table_inputs().clone()),
+            vitals: PlayerVitals::new().snapshot(),
         }
     }
 
@@ -388,21 +401,37 @@ impl PlayerData {
         self.pitch
     }
 
+    /// Complete saved health/hunger state and all deterministic transient timers.
+    pub(crate) fn vitals(&self) -> VitalsSnapshot {
+        self.vitals
+    }
+
+    /// Admit an authoritative Sim vitals snapshot atomically before encoding.
+    /// Capture starts with fresh defaults; leave-save wiring must supply live
+    /// vitals through this method. Refusal preserves the prior snapshot.
+    pub(crate) fn set_vitals(&mut self, snapshot: VitalsSnapshot) -> Result<(), VitalsError> {
+        PlayerVitals::from_snapshot(snapshot)?;
+        self.vitals = snapshot;
+        Ok(())
+    }
+
     /// Rebuilds the authoritative [`PlayerInventory`] for `game_mode` from the
     /// persisted slots and selected index.
     ///
-    /// Legacy normalization has already happened during migration. Schema 3
+    /// Legacy normalization has already happened during migration. Schema 5
     /// restores every stack exactly, including the carried component patch.
     pub(crate) fn restore_inventory(&self, game_mode: GameMode) -> PlayerInventory {
-        PlayerInventory::from_persisted(
+        let mut inventory = PlayerInventory::from_persisted(
             game_mode,
             self.selected_slot,
             *self.slots.clone(),
             self.carried.clone(),
-        )
+        );
+        inventory.restore_table_inputs(*self.table_inputs.clone());
+        inventory
     }
 
-    /// Encodes the complete snapshot into one bounded schema-3 record.
+    /// Encodes the complete snapshot into one bounded schema-5 record.
     ///
     /// # Errors
     /// Rejects an unsafe state, invalid item/component, or aggregate encoded
@@ -432,8 +461,20 @@ impl PlayerData {
             serde_json::from_slice::<JsonPlayerData>(record.data())
                 .map(Self::from)
                 .map_err(PlayerPayloadError::Json)
-        } else if record.schema_version() == PLAYER_SCHEMA_VERSION {
-            codec::decode(record.data())
+        } else if record.schema_version() == PLAYER_SCHEMA_VERSION
+            || record.schema_version() == LOSSLESS_PLAYER_SCHEMA_VERSION
+            || record.schema_version() == TABLE_PLAYER_SCHEMA_VERSION
+        {
+            codec::decode(
+                record.data(),
+                if record.schema_version() == LOSSLESS_PLAYER_SCHEMA_VERSION {
+                    3
+                } else if record.schema_version() == TABLE_PLAYER_SCHEMA_VERSION {
+                    4
+                } else {
+                    5
+                },
+            )
         } else {
             return Err(PlayerLoadError::Incompatible {
                 found: record.schema_version(),

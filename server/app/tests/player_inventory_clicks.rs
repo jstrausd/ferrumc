@@ -121,7 +121,7 @@ async fn close(client: &mut TestClient) -> anyhow::Result<InventoryView> {
 
 async fn start() -> (ferrumc_app::RunningServer, SocketAddr) {
     let config = AppConfig::from_toml_str(
-        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nbuiltin_plugins = false\nops = [\"InventoryTester\"]",
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1\nbuiltin_plugins = false\nops = [\"InventoryTester\"]",
     )
     .expect("config");
     let server = ferrumc_app::run(&config).await.expect("start server");
@@ -132,6 +132,13 @@ async fn start() -> (ferrumc_app::RunningServer, SocketAddr) {
 async fn ordinary_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = login_to_play(addr, "InventoryTester").await?;
     let mut view = content(&mut client).await?;
+    anyhow::ensure!(
+        view.slots.iter().all(Option::is_none) && view.cursor.is_none(),
+        "fresh Survival inventory is empty"
+    );
+    game_mode(&mut client, 1).await?;
+    creative(&mut client, 36, 64, 1).await?;
+    view = click(&mut client, &view, 0, -999, 0, 0).await?;
     game_mode(&mut client, 0).await?;
     view = click(&mut client, &view, 0, 36, 1, 0).await?;
     anyhow::ensure!(view.slots[36] == Some((32, 1)) && view.cursor == Some((32, 1)));
@@ -153,7 +160,6 @@ async fn ordinary_flow(addr: SocketAddr) -> anyhow::Result<()> {
         (0, 5, 0, 0),
         (0, -999, 0, 0),
         (0, 46, 0, 0),
-        (0, 9, 0, 1),
         (0, 9, 0, 5),
     ] {
         let before = view.clone();
@@ -166,9 +172,19 @@ async fn ordinary_flow(addr: SocketAddr) -> anyhow::Result<()> {
     }
     view = close(&mut client).await?;
     anyhow::ensure!(view.cursor.is_none() && view.slots[9] == Some((32, 1)));
+    // Shift transfer merges the 32 storage items into the held stack of 32.
+    let mut expected = view.clone();
+    expected.slots[9] = None;
+    expected.slots[36] = Some((64, 1));
+    view = click(&mut client, &view, 0, 9, 0, 1).await?;
+    anyhow::ensure!(
+        view.slots == expected.slots && view.cursor == expected.cursor,
+        "supported shift conserves all 64 items and every other owned slot"
+    );
     game_mode(&mut client, 3).await?;
     let before = view.clone();
-    view = click(&mut client, &view, 0, 9, 0, 0).await?;
+    // A normal pickup would move this nonempty stack onto the cursor.
+    view = click(&mut client, &view, 0, 36, 0, 0).await?;
     anyhow::ensure!(
         view.slots == before.slots && view.cursor == before.cursor,
         "spectator mutated"
@@ -179,6 +195,7 @@ async fn ordinary_flow(addr: SocketAddr) -> anyhow::Result<()> {
 async fn full_bag_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = login_to_play(addr, "InventoryTester").await?;
     let initial = content(&mut client).await?;
+    game_mode(&mut client, 1).await?;
     for slot in 9..45 {
         creative(&mut client, slot, 64, 1).await?;
     }

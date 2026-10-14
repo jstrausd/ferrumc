@@ -1267,3 +1267,146 @@ fields = [
     { name = "line_3", type = "string(384)" },
     { name = "line_4", type = "string(384)" },
 ]
+
+# --- Survival runtime wire surface (Paper 1.21.8 build60 / protocol772) ---
+# InteractEntity conditional hand/target-coordinate/sneaking fields are a capped
+# unprefixed tail. Session validates action-specific exact shape and values.
+# Semantic health/food/mining/reach/light rules remain with their owner.
+
+[[packet]]
+state = "play"
+direction = "serverbound"
+name = "ClientStatus"
+id = 0x0B
+fields = [
+    { name = "action", type = "varint" },
+]
+
+[[packet]]
+state = "play"
+direction = "serverbound"
+name = "UseItem"
+id = 0x40
+fields = [
+    { name = "hand", type = "varint" },
+    { name = "sequence", type = "varint" },
+    { name = "yaw", type = "f32" },
+    { name = "pitch", type = "f32" },
+]
+
+[[packet]]
+state = "play"
+direction = "serverbound"
+name = "InteractEntity"
+id = 0x19
+fields = [
+    { name = "target", type = "varint" },
+    { name = "action", type = "varint" },
+    { name = "interaction_raw", type = "bounded_remaining_bytes(18)" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "UpdateHealth"
+id = 0x61
+fields = [
+    { name = "health", type = "f32" },
+    { name = "food", type = "varint" },
+    { name = "saturation", type = "f32" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "SetExperience"
+id = 0x60
+fields = [
+    { name = "progress", type = "f32" },
+    { name = "level", type = "varint" },
+    { name = "total", type = "varint" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "Respawn"
+id = 0x4B
+fields = [
+    { name = "world_state", type = "SpawnInfo" },
+    { name = "data_to_keep", type = "u8" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "BlockDestruction"
+id = 0x05
+fields = [
+    { name = "entity_id", type = "varint" },
+    { name = "position", type = "position" },
+    { name = "progress", type = "u8" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "EntityEvent"
+id = 0x1E
+fields = [
+    { name = "entity_id", type = "i32" },
+    { name = "event", type = "i8" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "CombatDeath"
+id = 0x3D
+fields = [
+    { name = "player_id", type = "varint" },
+    { name = "message", type = "nbt" },
+]
+
+[[packet]]
+state = "play"
+direction = "clientbound"
+name = "UpdateLight"
+id = 0x2A
+fields = [
+    { name = "x", type = "varint" },
+    { name = "z", type = "varint" },
+    { name = "sky_light_mask", type = "prefixed_array<i64>" },
+    { name = "block_light_mask", type = "prefixed_array<i64>" },
+    { name = "empty_sky_light_mask", type = "prefixed_array<i64>" },
+    { name = "empty_block_light_mask", type = "prefixed_array<i64>" },
+    { name = "sky_light", type = "prefixed_array<prefixed_bytes(2048)>" },
+    { name = "block_light", type = "prefixed_array<prefixed_bytes(2048)>" },
+]
+
+# Paper ServerboundMovePlayerPacket.StatusOnly: bit0 ground, bit1 horizontal collision.
+[[packet]]
+state = "play"
+direction = "serverbound"
+name = "SetPlayerOnGround"
+id = 0x20
+fields = [{ name = "flags", type = "u8" }]
+
+# Paper ServerboundPlayerInputPacket/Input: bits0..6 forward/back/left/right/jump/shift/sprint.
+[[packet]]
+state = "play"
+direction = "serverbound"
+name = "PlayerInput"
+id = 0x2A
+fields = [{ name = "inputs", type = "u8" }]
+
+[[packet]]
+name = "SetContainerProperty"
+state = "play"
+direction = "clientbound"
+id = 0x13
+fields = [
+  { name = "window_id", type = "varint" },
+  { name = "property", type = "i16" },
+  { name = "value", type = "i16" },
+]

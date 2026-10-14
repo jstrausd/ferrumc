@@ -46,13 +46,6 @@ pub(super) enum VisitorPass {
 
 #[derive(Debug, Clone)]
 pub(super) struct BoundNode {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Retains original construction provenance for audited subsequent chunk consumers."
-        )
-    )]
     pub origin: SourceOrigin,
     pub resource: &'static str,
     pub kind: BoundKind,
@@ -64,13 +57,6 @@ pub(super) struct BoundNode {
 
 #[derive(Debug)]
 pub(super) struct BoundView {
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Retains the actual visitor identity for audited subsequent chunk consumers."
-        )
-    )]
     pub pass: VisitorPass,
     pub nodes: Vec<BoundNode>,
 }

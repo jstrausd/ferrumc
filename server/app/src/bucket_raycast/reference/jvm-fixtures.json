@@ -1,0 +1,1966 @@
+[
+  {
+    "name": "cube_pour",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      -1
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "cube_fill_blocked",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      },
+      {
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "source_water_fill",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "source_lava_fill",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:lava}[level\u003d0]",
+        "state": 102
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "water_pour_none",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      },
+      {
+        "pos": [
+          0,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      0,
+      1
+    ],
+    "hitPos": [
+      0,
+      0,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "flowing_water_skipped",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d1]",
+        "state": 87
+      },
+      {
+        "pos": [
+          0,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      0,
+      2
+    ],
+    "hitPos": [
+      0,
+      0,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "falling_water_skipped",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d8]",
+        "state": 94
+      },
+      {
+        "pos": [
+          0,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      0,
+      2
+    ],
+    "hitPos": [
+      0,
+      0,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "slab_bottom_pour",
+    "eye": [
+      0.5,
+      0.25,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_slab}[type\u003dbottom,waterlogged\u003dfalse]",
+        "state": 12054
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fd0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fd0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "slab_clear_half",
+    "eye": [
+      0.5,
+      0.75,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_slab}[type\u003dbottom,waterlogged\u003dfalse]",
+        "state": 12054
+      },
+      {
+        "pos": [
+          0,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe8000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      0,
+      1
+    ],
+    "hitPos": [
+      0,
+      0,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe8000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "slab_upper_wet_lower_fluid",
+    "eye": [
+      0.5,
+      0.25,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_slab}[type\u003dtop,waterlogged\u003dtrue]",
+        "state": 12051
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fd0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fd0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "slab_upper_wet_outline",
+    "eye": [
+      0.5,
+      0.95,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_slab}[type\u003dtop,waterlogged\u003dtrue]",
+        "state": 12051
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "0"
+    ]
+  },
+  {
+    "name": "slab_top_pour_keeps_clicked",
+    "eye": [
+      0.5,
+      0.75,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_slab}[type\u003dtop,waterlogged\u003dfalse]",
+        "state": 12052
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe8000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe8000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "fence_outline_low",
+    "eye": [
+      0.5,
+      1.25,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_fence}[east\u003dfalse,north\u003dfalse,south\u003dfalse,waterlogged\u003dfalse,west\u003dfalse]",
+        "state": 6027
+      },
+      {
+        "pos": [
+          0,
+          1,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3ff4000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      1,
+      1
+    ],
+    "hitPos": [
+      0,
+      1,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3ff4000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "fence_thin_miss",
+    "eye": [
+      0.1,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_fence}[east\u003dfalse,north\u003dfalse,south\u003dfalse,waterlogged\u003dfalse,west\u003dfalse]",
+        "state": 6027
+      },
+      {
+        "pos": [
+          0,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fb999999999999a",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      0,
+      1
+    ],
+    "hitPos": [
+      0,
+      0,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fb999999999999a",
+      "3fe0000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "fence_wet_fluid_hit",
+    "eye": [
+      0.1,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_fence}[east\u003dfalse,north\u003dfalse,south\u003dfalse,waterlogged\u003dtrue,west\u003dfalse]",
+        "state": 6025
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fb999999999999a",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fb999999999999a",
+      "3fe0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "grass_outline_not_collision",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:short_grass}",
+        "state": 2048
+      },
+      {
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "3fc0000000000000"
+    ]
+  },
+  {
+    "name": "negative_coordinates",
+    "eye": [
+      -0.5,
+      0.5,
+      -3.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          -1,
+          0,
+          -1
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "bfe0000000000000",
+      "3fe0000000000000",
+      "3ff8000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      -1,
+      0,
+      -2
+    ],
+    "hitPos": [
+      -1,
+      0,
+      -1
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "bfe0000000000000",
+      "3fe0000000000000",
+      "bff0000000000000"
+    ]
+  },
+  {
+    "name": "inside_cube",
+    "eye": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "yaw": 90.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "bff0000000000000",
+      "8000000000000000",
+      "0"
+    ],
+    "toBits": [
+      "c010000000000000",
+      "3fe0000000000000",
+      "3fe0000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 1,
+    "target": [
+      1,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 5,
+    "inside": true,
+    "locationBits": [
+      "3fdfb645a1cac083",
+      "3fe0000000000000",
+      "3fe0000000000000"
+    ]
+  },
+  {
+    "name": "inside_water",
+    "eye": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "yaw": 90.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      }
+    ],
+    "viewBits": [
+      "bff0000000000000",
+      "8000000000000000",
+      "0"
+    ],
+    "toBits": [
+      "c010000000000000",
+      "3fe0000000000000",
+      "3fe0000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 1,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 5,
+    "inside": true,
+    "locationBits": [
+      "3fdfb645a1cac083",
+      "3fe0000000000000",
+      "3fe0000000000000"
+    ]
+  },
+  {
+    "name": "exact_face_forward",
+    "eye": [
+      0.5,
+      0.5,
+      0.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4012000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 2,
+    "target": [
+      0,
+      0,
+      -1
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": true,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "3f726e978d4fdf3c"
+    ]
+  },
+  {
+    "name": "exact_face_away",
+    "eye": [
+      0.5,
+      0.5,
+      0.0
+    ],
+    "yaw": 180.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "3ca1a62640000000",
+      "8000000000000000",
+      "bff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000005",
+      "3fe0000000000000",
+      "c012000000000000"
+    ],
+    "type": "MISS",
+    "visitedCells": 6
+  },
+  {
+    "name": "end_face_exclusive",
+    "eye": [
+      0.5,
+      0.5,
+      -1.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 1.0,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "0"
+    ],
+    "type": "MISS",
+    "visitedCells": 3
+  },
+  {
+    "name": "end_face_next_float",
+    "eye": [
+      0.5,
+      0.5,
+      -1.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 1.0000001,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "3e7ad7f29b000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 3,
+    "target": [
+      0,
+      0,
+      -1
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "0"
+    ]
+  },
+  {
+    "name": "grid_corner_tie",
+    "eye": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "yaw": -45.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      },
+      {
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "3fe6a09e60000000",
+      "8000000000000000",
+      "3fe6a09e60000000"
+    ],
+    "toBits": [
+      "400d74b22c000000",
+      "3fe0000000000000",
+      "400d74b22c000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 2,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      1
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3ff0000000000000",
+      "3fe0000000000000",
+      "3ff0000000000000"
+    ]
+  },
+  {
+    "name": "dry_above_source_gap",
+    "eye": [
+      0.5,
+      0.95,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "4004000000000000"
+    ],
+    "type": "MISS",
+    "visitedCells": 6
+  },
+  {
+    "name": "same_above_source_full",
+    "eye": [
+      0.5,
+      0.95,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      },
+      {
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "0"
+    ]
+  },
+  {
+    "name": "flow_above_source_full",
+    "eye": [
+      0.5,
+      0.95,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      },
+      {
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d3]",
+        "state": 89
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "0"
+    ]
+  },
+  {
+    "name": "other_fluid_above_source_gap",
+    "eye": [
+      0.5,
+      0.95,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:water}[level\u003d0]",
+        "state": 86
+      },
+      {
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "description": "Block{minecraft:lava}[level\u003d0]",
+        "state": 102
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fee666666666666",
+      "4004000000000000"
+    ],
+    "type": "MISS",
+    "visitedCells": 6
+  },
+  {
+    "name": "flower_offset_negative",
+    "eye": [
+      -12.5,
+      0.3,
+      15.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          -13,
+          0,
+          17
+        ],
+        "description": "Block{minecraft:dandelion}",
+        "state": 2121
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "c029000000000000",
+      "3fd3333333333333",
+      "4033800000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      -13,
+      0,
+      16
+    ],
+    "hitPos": [
+      -13,
+      0,
+      17
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "c029000000000000",
+      "3fd3333333333333",
+      "40315ccccd000000"
+    ]
+  },
+  {
+    "name": "bamboo_offset",
+    "eye": [
+      1.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:bamboo}[age\u003d0,leaves\u003dnone,stage\u003d0]",
+        "state": 14000
+      },
+      {
+        "pos": [
+          1,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3ff8000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      1,
+      0,
+      -1
+    ],
+    "hitPos": [
+      1,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3ff8000000000000",
+      "3fe0000000000000",
+      "3fd2eeeef0000000"
+    ]
+  },
+  {
+    "name": "composter_interaction_direction",
+    "eye": [
+      0.5,
+      1.01,
+      0.5
+    ],
+    "yaw": 0.0,
+    "pitch": 45.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:composter}[level\u003d0]",
+        "state": 20432
+      }
+    ],
+    "viewBits": [
+      "0",
+      "bfe6a09e60000000",
+      "3fe6a09e60000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "c00160374ab851ec",
+      "400d74b22c000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 2,
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 1,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe451eb851eb852",
+      "3fec000000000000"
+    ]
+  },
+  {
+    "name": "hopper_interaction_direction",
+    "eye": [
+      0.5,
+      1.01,
+      0.5
+    ],
+    "yaw": 0.0,
+    "pitch": 45.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:hopper}[enabled\u003dtrue,facing\u003ddown]",
+        "state": 10034
+      }
+    ],
+    "viewBits": [
+      "0",
+      "bfe6a09e60000000",
+      "3fe6a09e60000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "c00160374ab851ec",
+      "400d74b22c000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 2,
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 1,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe6000000000000",
+      "3fea51eb851eb852"
+    ]
+  },
+  {
+    "name": "cauldron_interaction_direction",
+    "eye": [
+      0.5,
+      1.01,
+      0.5
+    ],
+    "yaw": 0.0,
+    "pitch": 45.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:cauldron}",
+        "state": 8182
+      }
+    ],
+    "viewBits": [
+      "0",
+      "bfe6a09e60000000",
+      "3fe6a09e60000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "c00160374ab851ec",
+      "400d74b22c000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 2,
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 1,
+    "inside": false,
+    "locationBits": [
+      "3fe0000000000000",
+      "3fe451eb851eb852",
+      "3fec000000000000"
+    ]
+  },
+  {
+    "name": "stone_stairs_clear_quarter",
+    "eye": [
+      0.75,
+      0.75,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:oak_stairs}[facing\u003dwest,half\u003dbottom,shape\u003dstraight,waterlogged\u003dfalse]",
+        "state": 2989
+      },
+      {
+        "pos": [
+          0,
+          0,
+          2
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe8000000000000",
+      "3fe8000000000000",
+      "4004000000000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 6,
+    "target": [
+      0,
+      0,
+      1
+    ],
+    "hitPos": [
+      0,
+      0,
+      2
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "3fe8000000000000",
+      "3fe8000000000000",
+      "4000000000000000"
+    ]
+  },
+  {
+    "name": "yaw_fractional",
+    "eye": [
+      0.33,
+      0.71,
+      -2.0
+    ],
+    "yaw": 13.2,
+    "pitch": -4.1,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      },
+      {
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "bfcd2468e0000000",
+      "3fb24b42e0000000",
+      "3fef131c60000000"
+    ],
+    "toBits": [
+      "bfe63999d30a3d70",
+      "3ff08153c4c28f5c",
+      "4002f57fec000000"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 5,
+    "target": [
+      -1,
+      0,
+      -1
+    ],
+    "hitPos": [
+      -1,
+      0,
+      0
+    ],
+    "face": 2,
+    "inside": false,
+    "locationBits": [
+      "bfc1c7b1eb916e56",
+      "3feb6e0007ee2560",
+      "0"
+    ]
+  },
+  {
+    "name": "pitch_vertical",
+    "eye": [
+      0.5,
+      3.0,
+      0.5
+    ],
+    "yaw": 132.4,
+    "pitch": 90.0,
+    "reach": 4.5,
+    "fill": false,
+    "blocks": [
+      {
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "description": "Block{minecraft:stone}",
+        "state": 1
+      }
+    ],
+    "viewBits": [
+      "bc9a114d80000000",
+      "bff0000000000000",
+      "bc97ccc2a0000000"
+    ],
+    "toBits": [
+      "3fdffffffffffff9",
+      "bff8000000000000",
+      "3fdffffffffffff9"
+    ],
+    "type": "BLOCK",
+    "visitedCells": 4,
+    "target": [
+      0,
+      1,
+      0
+    ],
+    "hitPos": [
+      0,
+      0,
+      0
+    ],
+    "face": 1,
+    "inside": false,
+    "locationBits": [
+      "3fdffffffffffffd",
+      "3ff0000000000000",
+      "3fdffffffffffffd"
+    ]
+  },
+  {
+    "name": "empty_miss",
+    "eye": [
+      0.5,
+      0.5,
+      -2.0
+    ],
+    "yaw": 0.0,
+    "pitch": 0.0,
+    "reach": 4.5,
+    "fill": true,
+    "blocks": [],
+    "viewBits": [
+      "0",
+      "8000000000000000",
+      "3ff0000000000000"
+    ],
+    "toBits": [
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "4004000000000000"
+    ],
+    "type": "MISS",
+    "visitedCells": 6
+  }
+]

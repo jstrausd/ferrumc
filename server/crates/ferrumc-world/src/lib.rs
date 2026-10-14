@@ -53,6 +53,7 @@ mod generation;
 mod generator;
 mod grass;
 mod heightmap;
+mod lighting;
 mod natural;
 mod network;
 pub mod noise;
@@ -63,12 +64,14 @@ mod sample_work;
 pub mod spline;
 pub mod stored_biome;
 pub mod surface_rules;
+mod survival_ores;
 mod tree_kernel;
 mod trees;
 
 pub use block_entity::{
-    is_chest_state, sign_kind_for_state, BlockEntity, ChestInventory, Sign, SignFace, SignKind,
-    CHEST_SLOTS, SIGN_LINES,
+    is_chest_state, is_furnace_state, sign_kind_for_state, BlockEntity, ChestInventory,
+    FurnaceDataError, FurnaceInventory, Sign, SignFace, SignKind, CHEST_SLOTS, FURNACE_SLOTS,
+    SIGN_LINES,
 };
 pub use block_entity_codec::{
     decode_block_entity, encode_block_entity, try_encode_block_entity, BlockEntityCodecError,
@@ -86,6 +89,7 @@ pub use generation::{
 };
 pub use generator::FlatWorldGenerator;
 pub use heightmap::{Heightmap, HeightmapKind};
+pub use lighting::{block_light_emission, LightError, LightingNeighborhood};
 pub use natural::{NaturalGenerationStage, NaturalWorldGenerator, RuntimeWorldGenerator};
 pub use network::{
     encode_chunk_section_data, network_biome_resources, pack_motion_blocking_heightmap,

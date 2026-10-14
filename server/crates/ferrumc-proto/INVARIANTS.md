@@ -26,3 +26,5 @@
   No EOF/serializer/Slot/component/NBT/trailing-byte validation or insertion
   occurs here. Semantic builders must validate their complete output within
   the cap in separately reviewed consumer tickets.
+
+- Survival wire IDs follow protocol772: UpdateHealth0x61, experience0x60, Respawn0x4B, UpdateLight0x2A, BlockDestruction0x05, EntityEvent0x1E, CombatDeath0x3D, ClientStatus0x0B, UseItem0x40 and InteractEntity0x19. InteractEntity has an opaque18-byte capped tail; Session must validate exact action-specific shape, hand and finite coordinates. Packet codecs establish wire format only, not gameplay or full light semantics.

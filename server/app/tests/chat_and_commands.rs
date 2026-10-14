@@ -202,7 +202,7 @@ async fn section_codes_are_stripped_from_relay(addr: SocketAddr) -> anyhow::Resu
 #[tokio::test]
 async fn command_feedback_and_gamemode_reach_the_issuer() {
     let config = AppConfig::from_toml_str(
-        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nops = [\"GmTester\"]",
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1\nops = [\"GmTester\"]",
     )
     .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
@@ -226,8 +226,10 @@ async fn command_feedback_and_gamemode_reach_the_issuer() {
 
 #[tokio::test]
 async fn serverbound_chat_relays_to_all_players() {
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses");
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1",
+    )
+    .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
 

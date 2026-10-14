@@ -505,7 +505,7 @@ fn schema_three_rejects_every_truncation_and_invalid_envelope_before_restoring()
     }
     for (offset, replacement) in [
         (0, b"NOPE".as_slice()),
-        (4, 4_u16.to_be_bytes().as_slice()),
+        (4, 6_u16.to_be_bytes().as_slice()),
         (38, [9].as_slice()),
         (39, 45_u16.to_be_bytes().as_slice()),
         (39, 47_u16.to_be_bytes().as_slice()),
@@ -651,11 +651,13 @@ async fn aggregate_limit_accepts_exact_boundary_and_failed_save_preserves_prior_
         data.slots[index] = huge.clone();
     }
     let total = 41
-        + 47 * 4
+        + codec::VITALS_BYTES
+        + 56 * 4
         + data
             .slots
             .iter()
             .chain(std::iter::once(&data.carried))
+            .chain(data.table_inputs.iter())
             .map(|stack| {
                 ferrumc_items::encode_persisted_stack(stack)
                     .expect("individually valid")
@@ -691,4 +693,327 @@ async fn aggregate_limit_accepts_exact_boundary_and_failed_save_preserves_prior_
         original,
         "failed encoding never submits a partial or lossy record"
     );
+}
+
+#[test]
+fn crafting_table_inputs_persist_losslessly_and_schema_three_migrates() {
+    let mut inventory = PlayerInventory::from_persisted(
+        GameMode::Survival,
+        0,
+        std::array::from_fn(|_| ItemStack::empty()),
+        ItemStack::empty(),
+    );
+    let patch = rich_patch();
+    let inputs = std::array::from_fn(|index| {
+        ItemStack::try_new(
+            ItemId::from_name("stone").unwrap(),
+            (index + 1) as u8,
+            patch.clone(),
+        )
+        .unwrap()
+    });
+    inventory.restore_table_inputs(inputs.clone());
+    let captured = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &inventory);
+    let record = captured.to_record(GameMode::Survival).unwrap();
+    let restored = PlayerData::from_record(&record)
+        .unwrap()
+        .restore_inventory(GameMode::Survival);
+    for (actual, expected) in restored.table_inputs().iter().zip(&inputs) {
+        assert_eq!(
+            ferrumc_items::encode_persisted_stack(actual).unwrap(),
+            ferrumc_items::encode_persisted_stack(expected).unwrap()
+        );
+    }
+    let empty = PlayerInventory::from_persisted(
+        GameMode::Survival,
+        0,
+        std::array::from_fn(|_| ItemStack::empty()),
+        ItemStack::empty(),
+    );
+    let record = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &empty)
+        .to_record(GameMode::Survival)
+        .unwrap();
+    let mut old = record.data().to_vec();
+    old.truncate(old.len() - 9 * 11 - codec::VITALS_BYTES);
+    old[4..6].copy_from_slice(&3u16.to_be_bytes());
+    let legacy = PlayerRecord::new(
+        LOSSLESS_PLAYER_SCHEMA_VERSION,
+        GameMode::Survival,
+        old.clone(),
+    )
+    .unwrap();
+    let migrated = PlayerData::from_record(&legacy).unwrap();
+    assert!(migrated
+        .table_inputs
+        .iter()
+        .all(|stack| stack.item().is_none()));
+    assert_eq!(legacy.data(), old);
+    assert_eq!(
+        migrated
+            .to_record(GameMode::Survival)
+            .unwrap()
+            .schema_version(),
+        PLAYER_SCHEMA_VERSION
+    );
+    let mismatched = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, old).unwrap();
+    assert!(PlayerData::from_record(&mismatched).is_err());
+}
+
+fn snapshot_fixture() -> VitalsSnapshot {
+    VitalsSnapshot::new(13.25, 17, 4.75, 3.5)
+        .unwrap()
+        .with_timers(71, 19, 9, 6.25, 13)
+        .unwrap()
+}
+
+#[test]
+fn schema_five_vitals_suffix_matches_independent_twenty_one_byte_grammar() {
+    let mut data = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &sample_inventory());
+    let before = data.to_record(GameMode::Survival).unwrap();
+    data.set_vitals(snapshot_fixture()).unwrap();
+    let record = data.to_record(GameMode::Survival).unwrap();
+    assert_eq!(record.schema_version(), SchemaVersion::new(5));
+    assert_eq!(&record.data()[4..6], &5u16.to_be_bytes());
+    let suffix = &record.data()[record.data().len() - codec::VITALS_BYTES..];
+    let golden: [u8; 21] = [
+        0x41, 0x54, 0, 0, 17, 0x40, 0x98, 0, 0, 0x40, 0x60, 0, 0, 71, 19, 9, 0x40, 0xc8, 0, 0, 13,
+    ];
+    assert_eq!(suffix, golden);
+    assert_eq!(
+        &before.data()[..before.data().len() - 21],
+        &record.data()[..record.data().len() - 21]
+    );
+    let restored = PlayerData::from_record(&record).unwrap();
+    assert_eq!(restored.vitals(), snapshot_fixture());
+    assert_eq!(
+        restored.to_record(GameMode::Survival).unwrap().data(),
+        record.data()
+    );
+}
+
+#[test]
+fn schemas_one_through_four_migrate_to_fresh_vitals_without_changing_item_bytes() {
+    let fresh = PlayerVitals::new().snapshot();
+    let mut legacy_json = schema_two_payload();
+    legacy_json.as_object_mut().unwrap().remove("carried");
+    for (schema, json) in [
+        (LEGACY_PLAYER_SCHEMA_VERSION, legacy_json),
+        (JSON_PLAYER_SCHEMA_VERSION, schema_two_payload()),
+    ] {
+        let bytes = serde_json::to_vec(&json).unwrap();
+        let record = PlayerRecord::new(schema, GameMode::Survival, bytes.clone()).unwrap();
+        assert_eq!(PlayerData::from_record(&record).unwrap().vitals(), fresh);
+        assert_eq!(record.data(), bytes);
+    }
+    let mut data = PlayerData::capture(Vec3::new(2.0, 64.0, -8.0), 3.0, 4.0, &sample_inventory());
+    data.slots[0] =
+        ItemStack::try_new(ItemId::from_name("stone").unwrap(), 13, rich_patch()).unwrap();
+    data.carried =
+        ItemStack::try_new(ItemId::from_name("stone").unwrap(), 7, rich_patch()).unwrap();
+    data.table_inputs[0] =
+        ItemStack::try_new(ItemId::from_name("stone").unwrap(), 3, rich_patch()).unwrap();
+    data.set_vitals(snapshot_fixture()).unwrap();
+    let current = data.to_record(GameMode::Survival).unwrap();
+    let mut four = current.data()[..current.data().len() - 21].to_vec();
+    four[4..6].copy_from_slice(&4u16.to_be_bytes());
+    let record_four = PlayerRecord::new(
+        TABLE_PLAYER_SCHEMA_VERSION,
+        GameMode::Survival,
+        four.clone(),
+    )
+    .unwrap();
+    let restored_four = PlayerData::from_record(&record_four).unwrap();
+    assert_eq!(restored_four.vitals(), fresh);
+    assert_eq!(record_four.data(), four);
+    let rewritten = restored_four.to_record(GameMode::Survival).unwrap();
+    assert_eq!(
+        &rewritten.data()[6..rewritten.data().len() - 21],
+        &four[6..]
+    );
+    // Independently find the first 47 frames rather than assuming table item size.
+    let mut offset = 41;
+    for _ in 0..47 {
+        let length = u32::from_be_bytes(four[offset..offset + 4].try_into().unwrap()) as usize;
+        offset += 4 + length;
+    }
+    let mut three = four[..offset].to_vec();
+    three[4..6].copy_from_slice(&3u16.to_be_bytes());
+    let record_three = PlayerRecord::new(
+        LOSSLESS_PLAYER_SCHEMA_VERSION,
+        GameMode::Survival,
+        three.clone(),
+    )
+    .unwrap();
+    let restored_three = PlayerData::from_record(&record_three).unwrap();
+    assert_eq!(restored_three.vitals(), fresh);
+    assert!(restored_three
+        .table_inputs
+        .iter()
+        .all(|item| item.item().is_none()));
+    assert_eq!(record_three.data(), three);
+    let rewritten = restored_three.to_record(GameMode::Survival).unwrap();
+    assert_eq!(&rewritten.data()[6..offset], &three[6..]);
+}
+
+#[test]
+fn every_binary_outer_inner_schema_pair_requires_exact_agreement() {
+    let data = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &sample_inventory());
+    let five = data.to_record(GameMode::Survival).unwrap().data().to_vec();
+    for outer in 3..=5 {
+        for inner in 3..=5 {
+            let mut payload = five.clone();
+            if inner < 5 {
+                payload.truncate(payload.len() - 21);
+            }
+            if inner == 3 {
+                payload.truncate(payload.len() - 9 * 11);
+            }
+            payload[4..6].copy_from_slice(&(inner as u16).to_be_bytes());
+            let record =
+                PlayerRecord::new(SchemaVersion::new(outer), GameMode::Survival, payload).unwrap();
+            assert_eq!(
+                PlayerData::from_record(&record).is_ok(),
+                outer == inner,
+                "outer{outer} inner{inner}"
+            );
+        }
+    }
+}
+
+#[test]
+fn malformed_vitals_scalars_and_each_timer_are_classified_without_default_fallback() {
+    let mut data = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &sample_inventory());
+    data.set_vitals(snapshot_fixture()).unwrap();
+    let valid = data.to_record(GameMode::Survival).unwrap().data().to_vec();
+    let start = valid.len() - 21;
+    for (offset, error) in [
+        (0, VitalsError::InvalidHealth),
+        (5, VitalsError::InvalidSaturation),
+        (9, VitalsError::InvalidExhaustion),
+        (16, VitalsError::InvalidTimers),
+    ] {
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0] {
+            let mut payload = valid.clone();
+            payload[start + offset..start + offset + 4]
+                .copy_from_slice(&invalid.to_bits().to_be_bytes());
+            let record =
+                PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload).unwrap();
+            assert!(
+                matches!(PlayerData::from_record(&record),Err(PlayerLoadError::Corrupt{
+                source:PlayerPayloadError::InvalidVitals(actual)}) if actual==error)
+            );
+        }
+    }
+    for (offset, value, error) in [
+        (4, 21, VitalsError::InvalidFood),
+        (13, 80, VitalsError::InvalidTimers),
+        (14, 21, VitalsError::InvalidTimers),
+        (15, 11, VitalsError::InvalidTimers),
+        (20, 20, VitalsError::InvalidTimers),
+    ] {
+        let mut payload = valid.clone();
+        payload[start + offset] = value;
+        let record = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload).unwrap();
+        assert!(
+            matches!(PlayerData::from_record(&record),Err(PlayerLoadError::Corrupt{
+            source:PlayerPayloadError::InvalidVitals(actual)}) if actual==error)
+        );
+    }
+    for (offset, value, error) in [
+        (0, 20.5, VitalsError::InvalidHealth),
+        (5, 17.5, VitalsError::InvalidSaturation),
+        (9, 40.5, VitalsError::InvalidExhaustion),
+    ] {
+        let mut payload = valid.clone();
+        payload[start + offset..start + offset + 4]
+            .copy_from_slice(&f32::to_bits(value).to_be_bytes());
+        let record = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload).unwrap();
+        assert!(
+            matches!(PlayerData::from_record(&record),Err(PlayerLoadError::Corrupt{
+            source:PlayerPayloadError::InvalidVitals(actual)}) if actual==error)
+        );
+    }
+}
+
+#[test]
+fn schema_five_accepts_boundary_vitals_and_preserves_all_signed_zero_bits() {
+    let mut data = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &sample_inventory());
+    for snapshot in [
+        VitalsSnapshot::new(20.0, 20, 20.0, 40.0)
+            .unwrap()
+            .with_timers(79, 20, 10, f32::MAX, 19)
+            .unwrap(),
+        VitalsSnapshot::new(-0.0, 0, -0.0, -0.0)
+            .unwrap()
+            .with_timers(0, 0, 0, -0.0, 0)
+            .unwrap(),
+    ] {
+        data.set_vitals(snapshot).unwrap();
+        let record = data.to_record(GameMode::Survival).unwrap();
+        let restored = PlayerData::from_record(&record).unwrap();
+        let actual = restored.vitals();
+        for (a, b) in [
+            (actual.health(), snapshot.health()),
+            (actual.saturation(), snapshot.saturation()),
+            (actual.exhaustion(), snapshot.exhaustion()),
+            (actual.last_hurt(), snapshot.last_hurt()),
+        ] {
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+        assert_eq!(
+            restored.to_record(GameMode::Survival).unwrap().data(),
+            record.data()
+        );
+    }
+}
+
+#[tokio::test]
+async fn saved_vitals_restore_midcycle_and_repeat_exact_simulation_after_reload() {
+    use ferrumc_sim::{DamageRequest, Difficulty, VitalsTickPolicy};
+    use ferrumc_storage::{InMemoryStore, PlayerStore};
+    let store = InMemoryStore::new();
+    let id = PlayerId::offline("VitalsRestart");
+    let policy = VitalsTickPolicy::new(Difficulty::Normal, true);
+    let mut live = PlayerVitals::from_snapshot(snapshot_fixture()).unwrap();
+    for _ in 0..7 {
+        live.tick(policy);
+    }
+    let mut data = PlayerData::capture(Vec3::new(8.0, 64.0, -8.0), 1.0, 2.0, &sample_inventory());
+    data.set_vitals(live.snapshot()).unwrap();
+    store
+        .save_player(id, data.to_record(GameMode::Survival).unwrap())
+        .await
+        .unwrap();
+    let PlayerLoad::Restored { data, .. } = load_player_for_join(&store, id).await.unwrap() else {
+        panic!("savedplayer missing");
+    };
+    let mut restored = PlayerVitals::from_snapshot(data.vitals()).unwrap();
+    for tick in 0..240 {
+        if tick % 37 == 0 {
+            let request = DamageRequest::new(1.0, 0.0, 0.0).unwrap();
+            assert_eq!(live.hurt(request).unwrap(), restored.hurt(request).unwrap());
+        }
+        assert_eq!(live.tick(policy), restored.tick(policy));
+        assert_eq!(live.snapshot(), restored.snapshot());
+    }
+}
+
+#[tokio::test]
+async fn corrupt_vitals_rejoin_refuses_and_keeps_the_exact_stored_record() {
+    use ferrumc_storage::{InMemoryStore, PlayerStore};
+    let store = InMemoryStore::new();
+    let id = PlayerId::offline("VitalsCorrupt");
+    let data = PlayerData::capture(Vec3::ZERO, 0.0, 0.0, &sample_inventory());
+    let mut payload = data.to_record(GameMode::Survival).unwrap().data().to_vec();
+    let start = payload.len() - 21;
+    payload[start..start + 4].copy_from_slice(&f32::NAN.to_bits().to_be_bytes());
+    let record = PlayerRecord::new(PLAYER_SCHEMA_VERSION, GameMode::Survival, payload).unwrap();
+    store.save_player(id, record.clone()).await.unwrap();
+    assert!(matches!(
+        load_player_for_join(&store, id).await,
+        Err(PlayerLoadError::Corrupt {
+            source: PlayerPayloadError::InvalidVitals(VitalsError::InvalidHealth)
+        })
+    ));
+    assert_eq!(store.load_player(id).await.unwrap().unwrap(), record);
 }

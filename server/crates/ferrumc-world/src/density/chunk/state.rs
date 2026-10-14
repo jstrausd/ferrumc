@@ -427,8 +427,13 @@ impl MarkerEvaluator for ChunkState {
                     let x = f64::from(self.in_x) / self.width as f64;
                     let y = f64::from(self.in_y) / self.height as f64;
                     let z = f64::from(self.in_z) / self.width as f64;
-                    for _ in 0..7 {
-                        work.charge_core().map_err(|e| density_budget(pos, e))?;
+                    // No state or numerical result is published between these
+                    // pure lerp charges. Preserve the original first refusal and
+                    // private wide-meter sequence when grouping is unavailable.
+                    if !work.try_charge_public_group(7) {
+                        for _ in 0..7 {
+                            work.charge_core().map_err(|e| density_budget(pos, e))?;
+                        }
                     }
                     Ok(lerp(
                         z,
@@ -599,5 +604,86 @@ impl ChunkState {
                 self.material_picker.is_none()
             )
         )
+    }
+}
+
+impl ChunkState {
+    // Compile-time guard for the sealed fresh-state recipe. Normal samplers are
+    // independently rebuilt by the same State::new and immutable router identity.
+    pub(super) fn plan_equivalent(&self, other: &Self) -> bool {
+        self.normal_noises.len() == other.normal_noises.len()
+            && self.graph_bytes == other.graph_bytes
+            && self.scratch_bytes == other.scratch_bytes
+            && self.lifecycle == other.lifecycle
+            && self.driver_phase == other.driver_phase
+            && self.driver_x == other.driver_x
+            && self.origin == other.origin
+            && self.geometry == other.geometry
+            && self.width == other.width
+            && self.height == other.height
+            && self.count_xz == other.count_xz
+            && self.count_y == other.count_y
+            && self.min_cell_y == other.min_cell_y
+            && self.wrapper_nodes == other.wrapper_nodes
+            && self.interpolators == other.interpolators
+            && self.cells == other.cells
+            && self.cache_bytes == other.cache_bytes
+            && self.scratch.len() == other.scratch.len()
+            && self
+                .scratch
+                .iter()
+                .zip(&other.scratch)
+                .all(|(a, b)| equal_bits(a, b))
+            && self.interpolating == other.interpolating
+            && self.filling_cell == other.filling_cell
+            && self.start == other.start
+            && self.in_x == other.in_x
+            && self.in_y == other.in_y
+            && self.in_z == other.in_z
+            && self.scalar_counter == other.scalar_counter
+            && self.array_counter == other.array_counter
+            && self.array_index == other.array_index
+            && self.own_context == other.own_context
+            && self.marker_error == other.marker_error
+            && self.wrappers.len() == other.wrappers.len()
+            && self.wrappers.iter().zip(&other.wrappers).all(|(a, b)| {
+                a.node == b.node && a.input == b.input && equal_cache(&a.cache, &b.cache)
+            })
+    }
+}
+fn equal_bits(a: &[f64], b: &[f64]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits())
+}
+fn equal_cache(a: &Cache, b: &Cache) -> bool {
+    match (a, b) {
+        (Cache::Interpolated(a), Cache::Interpolated(b)) => {
+            equal_bits(&a.slice0, &b.slice0)
+                && equal_bits(&a.slice1, &b.slice1)
+                && equal_bits(&a.corners, &b.corners)
+                && equal_bits(&a.y_values, &b.y_values)
+                && equal_bits(&a.x_values, &b.x_values)
+                && a.value.to_bits() == b.value.to_bits()
+        }
+        (Cache::Flat(a), Cache::Flat(b)) | (Cache::Cell(a), Cache::Cell(b)) => equal_bits(a, b),
+        (Cache::TwoD { key: a, value: av }, Cache::TwoD { key: b, value: bv }) => {
+            a == b && av.to_bits() == bv.to_bits()
+        }
+        (
+            Cache::Once {
+                counter: a,
+                array_counter: aa,
+                value: av,
+                array: ar,
+                valid_len: al,
+            },
+            Cache::Once {
+                counter: b,
+                array_counter: ba,
+                value: bv,
+                array: br,
+                valid_len: bl,
+            },
+        ) => a == b && aa == ba && av.to_bits() == bv.to_bits() && equal_bits(ar, br) && al == bl,
+        _ => false,
     }
 }

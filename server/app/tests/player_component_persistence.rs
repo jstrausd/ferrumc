@@ -22,7 +22,7 @@ const GUARD: Duration = Duration::from_secs(20);
 const NAME: &str = "ComponentPlayer";
 
 fn persistent_config(world: &Path) -> AppConfig {
-    AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\nbuiltin_plugins = false")
+    AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nops = [\"ComponentPlayer\"]\nspawn_chunk_radius = 0\nview_distance = 0\nbuiltin_plugins = false")
         .expect("config")
         .with_world_dir(Some(world.to_path_buf()))
         .expect("world path")
@@ -78,6 +78,7 @@ async fn creative(client: &mut TestClient, slot: i16, item: Vec<u8>) -> anyhow::
 async fn seed_and_stop(config: &AppConfig) -> anyhow::Result<Vec<u8>> {
     let server = ferrumc_app::run(config).await?;
     let mut client = login_to_play(server.local_addr(), NAME).await?;
+    common::make_creative(&mut client).await?;
     let _ = content(&mut client).await?;
     for slot in 9..45 {
         creative(&mut client, slot, fixture("stone", 64, None)?).await?;

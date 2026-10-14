@@ -23,6 +23,9 @@ use crate::inventory::{PlayerInventory, MAIN_START, PLAYER_WINDOW_END};
 /// Verified against the pinned 1.21.8 menu registry (`generic_9x3` = 2).
 pub(crate) const GENERIC_9X3_TYPE: i32 = 2;
 
+/// Pinned minecraft:crafting menu id.
+pub(crate) const CRAFTING_TYPE: i32 = 12;
+
 /// The window state id stamped on the first `SetContainerContent`, bumped on every
 /// subsequent send so the client validates clicks against the latest value.
 const INITIAL_STATE_ID: i32 = 1;
@@ -50,6 +53,7 @@ pub(crate) struct OpenContainer {
     /// Mirror of the chest's [`CHEST_SLOTS`] slots (authoritative copy is in the sim).
     slots: Vec<ItemStack>,
     state_id: i32,
+    crafting: bool,
 }
 
 impl OpenContainer {
@@ -61,7 +65,13 @@ impl OpenContainer {
             position,
             slots,
             state_id: INITIAL_STATE_ID,
+            crafting: false,
         }
+    }
+
+    /// Whether this screen is a local 3×3 crafting table.
+    pub(crate) fn is_crafting(&self) -> bool {
+        self.crafting
     }
 
     /// The assigned window id (the client echoes it on click / close).
@@ -135,7 +145,19 @@ impl OpenContainer {
 /// rolling window-id allocator.
 pub(crate) struct WindowState {
     open: Option<OpenContainer>,
+    pub(crate) furnace: Option<crate::furnace_window::FurnaceWindow>,
+    pub(crate) furnace_poll: u64,
     next_window_id: i32,
+    next_bucket_token: u64,
+    next_attack_token: u64,
+    /// Last admitted client ground flag; server collision verification remains separate.
+    on_ground: bool,
+    secondary_use: bool,
+    pub(crate) consumption: crate::consumption::Consumption,
+    pub(crate) sprinting: bool,
+    pub(crate) mining: crate::mining_witness::MiningWitnesses,
+    pub(crate) combat_profile: Option<crate::combat::CombatProfile>,
+    pub(crate) combat_revision: Option<(i32, u8, ferrumc_core::GameMode)>,
 }
 
 impl WindowState {
@@ -144,13 +166,60 @@ impl WindowState {
     pub(crate) fn new() -> Self {
         Self {
             open: None,
+            furnace: None,
+            furnace_poll: 0,
             next_window_id: 1,
+            next_bucket_token: 0,
+            next_attack_token: 0,
+            on_ground: true,
+            secondary_use: false,
+            consumption: crate::consumption::Consumption::new(),
+            sprinting: false,
+            mining: crate::mining_witness::MiningWitnesses::new(),
+            combat_profile: None,
+            combat_revision: None,
         }
+    }
+
+    /// Monotonic identity for one serial connection-pinned attack.
+    pub(crate) fn attack_token(&mut self) -> anyhow::Result<u64> {
+        self.next_attack_token = self
+            .next_attack_token
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("attack token exhausted"))?;
+        Ok(self.next_attack_token)
+    }
+
+    /// Monotonic identity for one pinned, serial bucket transaction.
+    pub(crate) fn bucket_token(&mut self) -> anyhow::Result<u64> {
+        self.next_bucket_token = self
+            .next_bucket_token
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("bucket token exhausted"))?;
+        Ok(self.next_bucket_token)
+    }
+
+    /// Secondary-use input is the protocol-772 shift bit, not an obsolete action ID.
+    pub(crate) fn set_secondary_use(&mut self, value: bool) {
+        self.secondary_use = value;
+    }
+    pub(crate) fn secondary_use(&self) -> bool {
+        self.secondary_use
+    }
+
+    /// Records the ground flag only after validated movement admission.
+    pub(crate) fn set_on_ground(&mut self, value: bool) {
+        self.on_ground = value;
+    }
+
+    /// Last admitted ground flag for ordinary mining penalties.
+    pub(crate) fn on_ground(&self) -> bool {
+        self.on_ground
     }
 
     /// Allocates the next container window id, cycling `1..=99` so a click for a
     /// just-closed window cannot be confused with a freshly opened one.
-    fn allocate_window_id(&mut self) -> i32 {
+    pub(crate) fn allocate_window_id(&mut self) -> i32 {
         let id = self.next_window_id;
         self.next_window_id = if id >= 99 { 1 } else { id + 1 };
         id
@@ -165,6 +234,28 @@ impl WindowState {
         window_id
     }
 
+    /// Opens a crafting-table screen over its validated world position.
+    pub(crate) fn open_crafting(&mut self, position: BlockPos) -> i32 {
+        let window_id = self.allocate_window_id();
+        let mut open = OpenContainer::new(window_id, position, Vec::new());
+        open.crafting = true;
+        self.open = Some(open);
+        window_id
+    }
+
+    /// Whether a chest, crafting table or furnace screen is active.
+    pub(crate) fn has_open(&self) -> bool {
+        self.open.is_some() || self.furnace.is_some()
+    }
+
+    /// Current shared screen id, including the always-open player inventory.
+    pub(crate) fn current_window_id(&self) -> i32 {
+        self.furnace.as_ref().map_or_else(
+            || self.open.as_ref().map_or(0, OpenContainer::window_id),
+            crate::furnace_window::FurnaceWindow::window_id,
+        )
+    }
+
     /// The open container window, if any.
     pub(crate) fn open(&self) -> Option<&OpenContainer> {
         self.open.as_ref()
@@ -177,6 +268,7 @@ impl WindowState {
 
     /// Takes (closes) the open container window, if any.
     pub(crate) fn take(&mut self) -> Option<OpenContainer> {
+        self.furnace = None;
         self.open.take()
     }
 }

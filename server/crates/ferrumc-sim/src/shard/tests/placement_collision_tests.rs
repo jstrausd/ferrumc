@@ -626,3 +626,31 @@ async fn relocated_merge_completion_reports_actual_primary_position() {
     completion(&outputs, actor, clicked, 40, block_at(&shard, clicked));
     assert_ne!(block_at(&shard, clicked), Some(BlockStateId::new(OAK_SLAB)));
 }
+
+#[tokio::test]
+async fn fluid_replacement_owner_flowing_water_and_lava_are_replaceable_without_body_bypass() {
+    for name in ["water", "lava"] {
+        let (mut shard, actor) = owner(Vec3::new(6.5, 64.0, 8.5)).await;
+        let liquid = BlockStateId::new(
+            ferrumc_registry::block_state::compute_state_id(
+                name,
+                &[("level", "3")].into_iter().collect(),
+            )
+            .expect("flowing state"),
+        );
+        let target = BlockPos::new(8, 65, 8);
+        let _ = shard.apply_block_edit(MutationCause::Test, target, liquid);
+        let outputs = place_block(&mut shard, actor, target, 1, Direction::Up, 0.5, 0.0, 21);
+        assert_eq!(shard.authoritative_state(target), BlockStateId::new(1));
+        assert!(outputs.iter().any(
+            |output| matches!(output,GameOutput::BlockChanged {position,..} if *position==target)
+        ));
+        let feet = BlockPos::new(6, 64, 8);
+        let _ = shard.apply_block_edit(MutationCause::Test, feet, liquid);
+        let outputs = place_block(&mut shard, actor, feet, 1, Direction::Up, 0.5, 0.0, 22);
+        assert_eq!(shard.authoritative_state(feet), liquid);
+        assert!(outputs
+            .iter()
+            .any(|output| matches!(output, GameOutput::BlockChangeRejected { .. })));
+    }
+}

@@ -213,6 +213,7 @@ async fn place_matrix(
 ) -> anyhow::Result<Vec<(BlockPos, u32)>> {
     let mut viewer = login_to_play(addr, "TorchViewer").await?;
     let mut actor = login_to_play(addr, "TorchBuilder").await?;
+    common::make_creative(&mut actor).await?;
     spawn_chunk(&mut viewer).await?;
     spawn_chunk(&mut actor).await?;
     let mut sequence = 0;
@@ -321,7 +322,7 @@ async fn verify_restart(addr: SocketAddr, expected: &[(BlockPos, u32)]) -> anyho
 async fn actual_torch_items_place_on_supported_faces_and_survive_redb_restart() {
     let (stone_item, stone_state, torches) = fixture_data().expect("Minecraft fixture IDs");
     let temp = tempfile::tempdir().expect("test world directory");
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
+    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nops = [\"TorchBuilder\"]\nspawn_chunk_radius = 1\nview_distance = 1")
         .expect("config parses")
         .with_world_dir(Some(temp.path().to_path_buf()))
         .expect("durable config");

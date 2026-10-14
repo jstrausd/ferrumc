@@ -58,56 +58,59 @@ fn sentinel(id: i32) -> Vec<u8> {
 
 #[tokio::test]
 async fn released_frame_responses_flush_without_a_followup_read_or_timer() {
-    timeout(GUARD, async {
-        // A periodic UpdateTime after 20 ticks must not accidentally flush the
-        // response. One TPS keeps it beyond the one-second progress deadline,
-        // just like the explicitly slow chunk and Keep Alive timers.
-        let config = AppConfig::from_toml_str(
-            "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\n\
+    timeout(
+        GUARD,
+        Box::pin(async {
+            // A periodic UpdateTime after 20 ticks must not accidentally flush the
+            // response. One TPS keeps it beyond the one-second progress deadline,
+            // just like the explicitly slow chunk and Keep Alive timers.
+            let config = AppConfig::from_toml_str(
+                "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\n\
              ops = [\"TeleportGuard\"]\nticks_per_second = 1\nio_timeout_secs = 1\n\
              chunk_stream_interval_ms = 60000\nkeep_alive_interval_ms = 15000\n",
-        )?;
-        for request in [sentinel(781), command("spawn")] {
-            let server = ferrumc_app::run(&config).await?;
-            let mut client =
-                login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
-            let initial = next_sync(&mut client).await?;
-            // Driver acceptance queues /tp's sync before the next frame. The
-            // held request is released by the last output turn. Send nothing
-            // afterwards: another socket read must not repair the missing flush.
-            client
-                .send_frames(&[
-                    &confirm(initial.teleport_id()),
-                    &command("tp 20 64 8"),
-                    &request,
-                ])
-                .await?;
-            let teleport = next_sync(&mut client).await?;
-            anyhow::ensure!(
-                teleport.x().to_bits() == 20.0_f64.to_bits(),
-                "first routed teleport missing"
-            );
-            loop {
-                match client.next_play().await? {
-                    ClientboundPlayPacket::TabCompleteResponse(response)
-                        if response.transaction_id() == 781 =>
-                    {
-                        break
+            )?;
+            for request in [sentinel(781), command("spawn")] {
+                let server = ferrumc_app::run(&config).await?;
+                let mut client =
+                    login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
+                let initial = next_sync(&mut client).await?;
+                // Driver acceptance queues /tp's sync before the next frame. The
+                // held request is released by the last output turn. Send nothing
+                // afterwards: another socket read must not repair the missing flush.
+                client
+                    .send_frames(&[
+                        &confirm(initial.teleport_id()),
+                        &command("tp 20 64 8"),
+                        &request,
+                    ])
+                    .await?;
+                let teleport = next_sync(&mut client).await?;
+                anyhow::ensure!(
+                    teleport.x().to_bits() == 20.0_f64.to_bits(),
+                    "first routed teleport missing"
+                );
+                loop {
+                    match client.next_play().await? {
+                        ClientboundPlayPacket::TabCompleteResponse(response)
+                            if response.transaction_id() == 781 =>
+                        {
+                            break
+                        }
+                        ClientboundPlayPacket::SynchronizePlayerPosition(sync)
+                            if sync.teleport_id() != teleport.teleport_id()
+                                && sync.x().to_bits() == SPAWN.x.to_bits() =>
+                        {
+                            break
+                        }
+                        _ => {}
                     }
-                    ClientboundPlayPacket::SynchronizePlayerPosition(sync)
-                        if sync.teleport_id() != teleport.teleport_id()
-                            && sync.x().to_bits() == SPAWN.x.to_bits() =>
-                    {
-                        break
-                    }
-                    _ => {}
                 }
+                drop(client);
+                server.shutdown().await?;
             }
-            drop(client);
-            server.shutdown().await?;
-        }
-        Ok::<(), anyhow::Error>(())
-    })
+            Ok::<(), anyhow::Error>(())
+        }),
+    )
     .await
     .expect("released response flow within guard")
     .expect("responses generated after the prefix flush reach the socket");
@@ -158,26 +161,30 @@ async fn assert_position(
 
 #[tokio::test]
 async fn initial_position_waits_for_matching_confirmation() {
-    timeout(GUARD, async {
-        let server = start_server().await?;
-        let mut client = login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
-        let sync = next_sync(&mut client).await?;
-        client.send_frame(&movement(MOVE, 31.0, -17.0)).await?;
-        assert_position(&server, &mut client, SPAWN).await?;
-        client
-            .send_frames(&[
-                &confirm(sync.teleport_id() + 99),
-                &movement(MOVE, 31.0, -17.0),
-            ])
-            .await?;
-        assert_position(&server, &mut client, SPAWN).await?;
-        client
-            .send_frames(&[&confirm(sync.teleport_id()), &movement(MOVE, 31.0, -17.0)])
-            .await?;
-        assert_position(&server, &mut client, MOVE).await?;
-        drop(client);
-        server.shutdown().await
-    })
+    timeout(
+        GUARD,
+        Box::pin(async {
+            let server = start_server().await?;
+            let mut client =
+                login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
+            let sync = next_sync(&mut client).await?;
+            client.send_frame(&movement(MOVE, 31.0, -17.0)).await?;
+            assert_position(&server, &mut client, SPAWN).await?;
+            client
+                .send_frames(&[
+                    &confirm(sync.teleport_id() + 99),
+                    &movement(MOVE, 31.0, -17.0),
+                ])
+                .await?;
+            assert_position(&server, &mut client, SPAWN).await?;
+            client
+                .send_frames(&[&confirm(sync.teleport_id()), &movement(MOVE, 31.0, -17.0)])
+                .await?;
+            assert_position(&server, &mut client, MOVE).await?;
+            drop(client);
+            server.shutdown().await
+        }),
+    )
     .await
     .expect("teleport flow completed within guard")
     .expect("pending initial teleport gates position");
@@ -185,30 +192,34 @@ async fn initial_position_waits_for_matching_confirmation() {
 
 #[tokio::test]
 async fn command_teleport_supersedes_initial_and_stale_confirmations() {
-    timeout(GUARD, async {
-        let server = start_server().await?;
-        let mut client = login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
-        let initial = next_sync(&mut client).await?;
-        client.send_frame(&command("spawn")).await?;
-        let spawn = next_sync(&mut client).await?;
-        anyhow::ensure!(
-            spawn.teleport_id() != initial.teleport_id(),
-            "spawn reused join ID"
-        );
-        client
-            .send_frames(&[
-                &confirm(initial.teleport_id()),
-                &movement(MOVE, 40.0, -10.0),
-            ])
-            .await?;
-        assert_position(&server, &mut client, SPAWN).await?;
-        client
-            .send_frames(&[&confirm(spawn.teleport_id()), &movement(MOVE, 40.0, -10.0)])
-            .await?;
-        assert_position(&server, &mut client, MOVE).await?;
-        drop(client);
-        server.shutdown().await
-    })
+    timeout(
+        GUARD,
+        Box::pin(async {
+            let server = start_server().await?;
+            let mut client =
+                login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
+            let initial = next_sync(&mut client).await?;
+            client.send_frame(&command("spawn")).await?;
+            let spawn = next_sync(&mut client).await?;
+            anyhow::ensure!(
+                spawn.teleport_id() != initial.teleport_id(),
+                "spawn reused join ID"
+            );
+            client
+                .send_frames(&[
+                    &confirm(initial.teleport_id()),
+                    &movement(MOVE, 40.0, -10.0),
+                ])
+                .await?;
+            assert_position(&server, &mut client, SPAWN).await?;
+            client
+                .send_frames(&[&confirm(spawn.teleport_id()), &movement(MOVE, 40.0, -10.0)])
+                .await?;
+            assert_position(&server, &mut client, MOVE).await?;
+            drop(client);
+            server.shutdown().await
+        }),
+    )
     .await
     .expect("supersession within guard")
     .expect("newest inline teleport wins");
@@ -216,41 +227,45 @@ async fn command_teleport_supersedes_initial_and_stale_confirmations() {
 
 #[tokio::test]
 async fn routed_tp_fences_a_move_in_the_same_tcp_write() {
-    timeout(GUARD, async {
-        let server = start_server().await?;
-        let mut client = login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
-        let initial = next_sync(&mut client).await?;
-        client.send_frame(&confirm(initial.teleport_id())).await?;
-        client
-            .send_frames(&[&command("tp 20 64 8"), &movement(MOVE, 55.0, -20.0)])
-            .await?;
-        let first = next_sync(&mut client).await?;
-        anyhow::ensure!(
-            first.teleport_id() != initial.teleport_id(),
-            "routed tp reused join ID"
-        );
-        assert_position(&server, &mut client, Vec3::new(20.0, 64.0, 8.0)).await?;
-        // An earlier ID must stay stale even when another /tp and ACK share a read.
-        client
-            .send_frames(&[
-                &command("tp 24 64 8"),
-                &confirm(first.teleport_id()),
-                &movement(MOVE, 66.0, -21.0),
-            ])
-            .await?;
-        let second = next_sync(&mut client).await?;
-        anyhow::ensure!(
-            second.teleport_id() != first.teleport_id(),
-            "superseding tp reused ID"
-        );
-        assert_position(&server, &mut client, Vec3::new(24.0, 64.0, 8.0)).await?;
-        client
-            .send_frames(&[&confirm(second.teleport_id()), &movement(MOVE, 66.0, -21.0)])
-            .await?;
-        assert_position(&server, &mut client, MOVE).await?;
-        drop(client);
-        server.shutdown().await
-    })
+    timeout(
+        GUARD,
+        Box::pin(async {
+            let server = start_server().await?;
+            let mut client =
+                login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
+            let initial = next_sync(&mut client).await?;
+            client.send_frame(&confirm(initial.teleport_id())).await?;
+            client
+                .send_frames(&[&command("tp 20 64 8"), &movement(MOVE, 55.0, -20.0)])
+                .await?;
+            let first = next_sync(&mut client).await?;
+            anyhow::ensure!(
+                first.teleport_id() != initial.teleport_id(),
+                "routed tp reused join ID"
+            );
+            assert_position(&server, &mut client, Vec3::new(20.0, 64.0, 8.0)).await?;
+            // An earlier ID must stay stale even when another /tp and ACK share a read.
+            client
+                .send_frames(&[
+                    &command("tp 24 64 8"),
+                    &confirm(first.teleport_id()),
+                    &movement(MOVE, 66.0, -21.0),
+                ])
+                .await?;
+            let second = next_sync(&mut client).await?;
+            anyhow::ensure!(
+                second.teleport_id() != first.teleport_id(),
+                "superseding tp reused ID"
+            );
+            assert_position(&server, &mut client, Vec3::new(24.0, 64.0, 8.0)).await?;
+            client
+                .send_frames(&[&confirm(second.teleport_id()), &movement(MOVE, 66.0, -21.0)])
+                .await?;
+            assert_position(&server, &mut client, MOVE).await?;
+            drop(client);
+            server.shutdown().await
+        }),
+    )
     .await
     .expect("pipelined tp within guard")
     .expect("routed teleport fences subsequent movement");
@@ -258,7 +273,7 @@ async fn routed_tp_fences_a_move_in_the_same_tcp_write() {
 
 #[tokio::test]
 async fn replay_of_current_id_closes_before_pipelined_sentinel() {
-    timeout(GUARD, async {
+    timeout(GUARD, Box::pin(async {
         let server = start_server().await?;
         let mut client = login_to_play_unconfirmed(server.local_addr(), "TeleportGuard").await?;
         let initial = next_sync(&mut client).await?;
@@ -267,12 +282,12 @@ async fn replay_of_current_id_closes_before_pipelined_sentinel() {
             anyhow::ensure!(!matches!(packet, ClientboundPlayPacket::TabCompleteResponse(response) if response.transaction_id() == 77), "replay failed to stop next frame");
         }
         server.shutdown().await
-    }).await.expect("replay closure within guard").expect("current-ID replay terminates");
+    })).await.expect("replay closure within guard").expect("current-ID replay terminates");
 }
 
 #[tokio::test]
 async fn pending_teleport_position_and_allowed_look_survive_restart_without_ack() {
-    timeout(GUARD, async {
+    timeout(GUARD, Box::pin(async {
         let directory = tempfile::tempdir()?;
         let config = AppConfig::from_toml_str(
             "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\nops = [\"TeleportGuard\"]\n",
@@ -296,5 +311,5 @@ async fn pending_teleport_position_and_allowed_look_survive_restart_without_ack(
         anyhow::ensure!((restored.yaw().to_bits(), restored.pitch().to_bits()) == (73.0_f32.to_bits(), (-31.0_f32).to_bits()), "Paper's allowed pending look was lost");
         drop(client);
         server.shutdown().await
-    }).await.expect("no-ACK restart within guard").expect("server teleport persists before client acknowledgement");
+    })).await.expect("no-ACK restart within guard").expect("server teleport persists before client acknowledgement");
 }

@@ -22,9 +22,11 @@ use std::sync::Arc;
 
 use ferrumc_anvil::{region_pos_from_path, Region};
 use ferrumc_codec::{BoundedBytes, BoundedString};
-use ferrumc_core::{DimensionId, WorldId};
+use ferrumc_core::{DimensionId, GameMode, WorldId};
 use ferrumc_math::{BlockPos, ChunkPos, Vec3};
-use ferrumc_proto::generated::play::{ChunkDataAndLight, Heightmap, JoinGame, SpawnInfo};
+use ferrumc_proto::generated::play::{
+    ChunkBlockEntity, ChunkDataAndLight, Heightmap, JoinGame, PlayerAbilities, SpawnInfo,
+};
 use ferrumc_proto::types::BlockPosition;
 use ferrumc_registry::dimension;
 
@@ -47,9 +49,7 @@ use crate::persistence::PersistenceTarget;
 use ferrumc_config::WorldGenerationPreset;
 use sha2::{Digest, Sha256};
 
-/// Placeholder protocol entity id assigned to a joining player in `JoinGame`.
-///
-/// The simulation does not yet allocate entity ids; `1` stands in for the slice.
+/// Template identity only; admission replaces it with the actual router identity.
 const PLAYER_ENTITY_ID: i32 = 1;
 
 /// Maximum players advertised in `JoinGame`. Informational only this milestone.
@@ -118,6 +118,37 @@ impl JoinKit {
     /// The `JoinGame` packet to send first.
     pub(crate) fn join_game(&self) -> &JoinGame {
         &self.join_game
+    }
+
+    /// Builds connection framing from the actual admitted identity and saved mode.
+    pub(crate) fn join_game_for_player(&self, entity_id: i32, mode: GameMode) -> JoinGame {
+        let template = self.join_game();
+        let state = template.world_state();
+        let state = SpawnInfo::new(
+            state.dimension_type(),
+            state.dimension_name().clone(),
+            state.hashed_seed(),
+            mode.as_id(),
+            state.previous_gamemode(),
+            state.is_debug(),
+            state.is_flat(),
+            state.death_location().cloned(),
+            state.portal_cooldown(),
+            state.sea_level(),
+        );
+        JoinGame::new(
+            entity_id,
+            template.is_hardcore(),
+            template.world_names().to_vec(),
+            template.max_players(),
+            template.view_distance(),
+            template.simulation_distance(),
+            template.reduced_debug_info(),
+            template.enable_respawn_screen(),
+            template.do_limited_crafting(),
+            state,
+            template.enforces_secure_chat(),
+        )
     }
 
     /// The absolute world-spawn position to synchronize the client to.
@@ -292,6 +323,8 @@ pub(crate) async fn build_world(
                 .map_err(anyhow::Error::from),
             3 => RuntimeWorldGenerator::natural_with_trees(identity.seed())
                 .map_err(anyhow::Error::from),
+            4 => RuntimeWorldGenerator::natural_survival(identity.seed())
+                .map_err(anyhow::Error::from),
             _ => anyhow::bail!("unsupported natural generation revision {identity:?}"),
         },
         _ => anyhow::bail!("unsupported persisted generation identity {identity:?}"),
@@ -363,7 +396,7 @@ pub(crate) async fn build_world(
             shard.loaded_chunks(),
             config.spawn(),
             &positions,
-            identity.generator_revision() == 3,
+            identity.generator_revision() >= 3,
         )?;
         report_natural_preview(identity.generator_revision(), selected);
         selected
@@ -384,6 +417,8 @@ pub(crate) async fn build_world(
 /// Reports only the selected preview subset; revision3 does not imply FEATURES.
 fn report_natural_preview(revision: u32, selected: Vec3) {
     match revision {
+            4 => tracing::info!(x = selected.x, y = selected.y, z = selected.z,
+                "Survival terrain preview ready: terrain, biomes, surfaces, caves, short grass, bounded oak/birch trees and placed ores; structures and complete biome features remain incomplete"),
             3 => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
                 "natural tree preview ready: terrain/biomes/surfaces/carvers, short grass and bounded oak/birch trees; other placed features, placed ores and structures remain incomplete"),
             2 => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
@@ -391,7 +426,7 @@ fn report_natural_preview(revision: u32, selected: Vec3) {
             _ => tracing::warn!(x = selected.x, y = selected.y, z = selected.z,
                 "natural Overworld preview ready: terrain/biomes/surfaces/carvers; features, placed ores, trees and structures are not populated"),
         }
-    tracing::warn!("preview lighting computes direct vertical skylight only; lateral light propagation and emitted block light are not implemented");
+    tracing::info!("resident lighting uses bounded asynchronous skylight and block-light propagation; missing neighbor columns remain opaque");
 }
 
 /// The two trait-object views of the one store backend opened at startup.
@@ -469,10 +504,16 @@ async fn reconcile_generation(
         Some(WorldGenerationPreset::FerrumcNaturalTreePreview) => {
             GenerationIdentity::natural_overworld_with_trees(seed)
         }
+        Some(WorldGenerationPreset::FerrumcNaturalSurvivalPreview) => {
+            GenerationIdentity::natural_overworld_survival(seed)
+        }
         Some(preset) => anyhow::bail!("unsupported world generation preset {preset:?}"),
         None => match stored {
             Some(identity) => match identity.generator_kind() {
                 GeneratorKind::FerrumcFlat => GenerationIdentity::flat_overworld(seed),
+                GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 4 => {
+                    GenerationIdentity::natural_overworld_survival(seed)
+                }
                 GeneratorKind::FerrumcNaturalPreview if identity.generator_revision() == 3 => {
                     GenerationIdentity::natural_overworld_with_trees(seed)
                 }
@@ -856,6 +897,16 @@ fn obfuscate_seed(seed: WorldSeed) -> i64 {
     i64::from_le_bytes(std::array::from_fn(|index| digest[index]))
 }
 
+/// Publishes mode-appropriate flight, invulnerability and instant-build flags.
+pub(crate) fn player_abilities(mode: GameMode) -> PlayerAbilities {
+    let flags = match mode {
+        GameMode::Survival | GameMode::Adventure => 0,
+        GameMode::Creative => 0x01 | 0x04 | 0x08,
+        GameMode::Spectator => 0x01 | 0x02 | 0x04,
+    };
+    PlayerAbilities::new(flags, 0.05, 0.1)
+}
+
 /// Builds the `ChunkDataAndLight` packet for one resident chunk.
 ///
 /// The payload is the real 1.21.8 wire form: the paletted section blob from
@@ -903,7 +954,7 @@ pub(crate) fn chunk_packet(pos: ChunkPos, chunk: &Chunk) -> anyhow::Result<Chunk
         pos.z(),
         heightmaps,
         blob,
-        Vec::new(),
+        chunk_render_entities(chunk)?,
         light.sky_light_mask().to_vec(),
         light.block_light_mask().to_vec(),
         light.empty_sky_light_mask().to_vec(),
@@ -911,6 +962,35 @@ pub(crate) fn chunk_packet(pos: ChunkPos, chunk: &Chunk) -> anyhow::Result<Chunk
         sky_light,
         Vec::new(),
     ))
+}
+
+/// Container render descriptors carry no inventory or timers. The protocol
+/// models a present compound; an empty compound is the same client update as
+/// Vanilla's nullable empty update tag, without exposing save-only contents.
+fn chunk_render_entities(chunk: &Chunk) -> anyhow::Result<Vec<ChunkBlockEntity>> {
+    let mut entries = Vec::new();
+    for (position, entity) in chunk.block_entities() {
+        let Some(state) = chunk.get_block(position) else {
+            continue;
+        };
+        let name = ferrumc_registry::block_state::state_id_to_block_name(state.as_u32());
+        let kind = match (entity, name) {
+            (ferrumc_world::BlockEntity::Chest(_), Some("chest")) => 1,
+            (ferrumc_world::BlockEntity::Chest(_), Some("trapped_chest")) => 2,
+            (ferrumc_world::BlockEntity::Furnace(_), Some("furnace")) => 0,
+            _ => continue,
+        };
+        let packed =
+            u8::try_from((position.x().rem_euclid(16) << 4) | position.z().rem_euclid(16))?;
+        entries.push(ChunkBlockEntity::new(
+            packed,
+            i16::try_from(position.y())?,
+            kind,
+            ferrumc_nbt::NbtTag::Compound(ferrumc_nbt::NbtCompound::new()),
+        ));
+    }
+    crate::render_descriptors::append_state_render_entities(chunk, &mut entries)?;
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -1068,6 +1148,21 @@ mod tests {
         assert_eq!(setup.shard.loaded_chunks().loaded_count(), expected);
         assert_eq!(setup.join_kit.chunk_positions().count(), expected);
         assert_eq!(setup.join_kit.spawn_position(), config.spawn());
+        for (mode, flags) in [
+            (GameMode::Survival, 0),
+            (GameMode::Creative, 13),
+            (GameMode::Adventure, 0),
+            (GameMode::Spectator, 7),
+        ] {
+            let framing = setup.join_kit.join_game_for_player(130, mode);
+            assert_eq!(framing.entity_id(), 130);
+            assert_eq!(framing.world_state().gamemode(), mode.as_id());
+            assert_eq!(
+                framing.world_state().hashed_seed(),
+                setup.join_kit.join_game().world_state().hashed_seed()
+            );
+            assert_eq!(player_abilities(mode).flags(), flags);
+        }
         assert_eq!(
             setup.join_kit.join_game().view_distance(),
             config.view_distance()

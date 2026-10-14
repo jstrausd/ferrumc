@@ -113,7 +113,8 @@ reads matching center biome arrays it already owns after shared-cache eviction.
 Successful concurrent raw/biome publication rechecks the key to retain one slot;
 it does not suppress concurrent computation. FIFO ordering and raw/biome/source
 capacities remain **32/64/32**. No generator revision, new species, runtime budgets
-or cache payload limits change. Existing revision-3 worlds remain compatible.
+or cache payload limits change. Existing revision-3 worlds retain their preset
+and generation identity.
 
 Root checked the exact final **396-file World** source, canonical SHA256
 `8937d0c3c59ca3615a5445b4f6b037ae72348f9cfbc1c4782c8e598d5f137804`, on the clean

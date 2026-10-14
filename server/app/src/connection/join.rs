@@ -11,8 +11,8 @@ use ferrumc_math::{ChunkPos, Vec3};
 use ferrumc_net::{CompressionState, PlayWriter};
 use ferrumc_observability::SessionDebug;
 use ferrumc_proto::generated::play::{
-    ClientboundPlayPacket, ClientboundSetHeldItem, Commands, GameEvent, PlayerAbilities,
-    SetCenterChunk, SetContainerContent, SetDefaultSpawnPosition,
+    ClientboundPlayPacket, ClientboundSetHeldItem, Commands, GameEvent, SetCenterChunk,
+    SetContainerContent, SetDefaultSpawnPosition,
 };
 
 use crate::driver::{SimCommand, StreamedChunk};
@@ -28,17 +28,6 @@ use super::{spawn_sync, GAME_EVENT_CHANGE_GAMEMODE};
 /// `JoinGame` to tell the client the spawn chunks are on their way; without it
 /// the client never leaves the "Loading terrain" screen.
 const GAME_EVENT_LEVEL_CHUNKS_LOAD_START: u8 = 13;
-
-/// Player Abilities `flags` bits sent to a creative client on join: invulnerable
-/// (`0x01`) | allow flying (`0x04`) | instabuild/creative (`0x08`). Flying itself
-/// (`0x02`) is left off so the player starts grounded but may take off.
-const CREATIVE_ABILITY_FLAGS: i8 = 0x01 | 0x04 | 0x08;
-
-/// Flying speed sent in Player Abilities (the vanilla creative default).
-const ABILITY_FLYING_SPEED: f32 = 0.05;
-
-/// Walking speed (field-of-view modifier base) sent in Player Abilities.
-const ABILITY_WALKING_SPEED: f32 = 0.1;
 
 /// Sends the join kit in the order a real client needs to leave the loading
 /// screen: `JoinGame`, `GameEvent(13)`, `SetCenterChunk`, `SetDefaultSpawnPosition`,
@@ -75,6 +64,7 @@ pub(super) async fn send_join_kit(
     ctx: &ConnContext,
     debug: &mut SessionDebug,
     player: PlayerId,
+    entity_id: i32,
     name: &str,
     position: Vec3,
     yaw: f32,
@@ -97,7 +87,7 @@ pub(super) async fn send_join_kit(
         debug,
         compression,
         clock,
-        ClientboundPlayPacket::JoinGame(kit.join_game().clone()),
+        ClientboundPlayPacket::JoinGame(kit.join_game_for_player(entity_id, inventory.game_mode())),
     );
     // Put the local player on their own tab list: a Player Info Update "Add
     // Player" for themselves. Other players' entries arrive from the session
@@ -150,17 +140,14 @@ pub(super) async fn send_join_kit(
         clock,
         ClientboundPlayPacket::Commands(Commands::new(command_body)),
     );
-    // Player Abilities: tell a creative client it may fly and instabuild, so the
-    // flight + creative-reach UX matches the creative mode JoinGame advertised.
+    // The first abilities packet agrees with the actual saved/default mode.
     send_mandatory(
         writer,
         debug,
         compression,
         clock,
-        ClientboundPlayPacket::PlayerAbilities(PlayerAbilities::new(
-            CREATIVE_ABILITY_FLAGS,
-            ABILITY_FLYING_SPEED,
-            ABILITY_WALKING_SPEED,
+        ClientboundPlayPacket::PlayerAbilities(crate::world::player_abilities(
+            inventory.game_mode(),
         )),
     )?;
     // Initialize window 0 with the full 46-slot inventory (the starter kit in the
@@ -316,7 +303,7 @@ async fn guard_join_stage<T>(
 
 /// The first column must not be tail-dropped: unlike later view columns it is the
 /// support for the first teleport and cannot be deferred to another stream pump.
-fn queue_destination_chunk(
+pub(super) fn queue_destination_chunk(
     ctx: &ConnContext,
     writer: &mut PlayWriter,
     debug: &mut SessionDebug,
@@ -365,7 +352,7 @@ fn queue_destination_packets(
 /// Empty replies mean the background producer is still running, not permission
 /// to teleport the client into an absent column. No additional cache is retained.
 #[allow(clippy::too_many_arguments)] // explicit destination, ticket ownership, pacing and cancellation
-async fn await_destination_chunk(
+pub(super) async fn await_destination_chunk(
     commands: &tokio::sync::mpsc::Sender<SimCommand>,
     viewer: PlayerId,
     destination: ChunkPos,

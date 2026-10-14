@@ -1,0 +1,40 @@
+{
+  "paper_version": "1.21.8 build60",
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "paper_inner_sha256": "c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507",
+  "sources": {
+    "src/minecraft/java/net/minecraft/world/level/levelgen/feature/OreFeature.java": "ef3acffd018b7017860bed1ca63abf3d5a1e257960bb7e2f361b534524cafbf0",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/feature/Feature.java": "3e21d09e8564b03bbfdb23def4b76b023e056a3af8dfa88ca03ced11cf306032",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/feature/configurations/OreConfiguration.java": "d17904a5976a957f36cc6d40cc1ebf2d870062fb4765212f597be8d175aaf042",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/WorldgenRandom.java": "f7b1d5f902d8e42286f7a0836a5b8b729d063b40c373fa185d77f996d95a286e",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/BitRandomSource.java": "726528fb348082c248218899112a2d6fba1a1897dad719aa41939eff643ff2c1",
+    "src/minecraft/java/net/minecraft/data/worldgen/placement/OrePlacements.java": "0b9ae12d6affc82e940223bf185625bfaaf1654ab7fc4d42f3918511aa463e0f",
+    "src/minecraft/java/net/minecraft/data/worldgen/features/OreFeatures.java": "0f3695a0b22a0a94a3d3354b216d09996d55bd50dd4091d76fe3c86486b5131c",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/heightproviders/TrapezoidHeight.java": "db4fe412f085c3a521b7de3b22711181392674211f5c8e30d2027ffe97f6dbc3",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/heightproviders/UniformHeight.java": "aaed9d1c645defc94f1321c9b9e0199365627d8df56238896ac2579c3e1b9367",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/placement/RarityFilter.java": "f1c170dc62de601bbed0d09d4f97f5860cf7b026c291cce60d02f4377db53190",
+    "src/minecraft/java/net/minecraft/world/level/levelgen/placement/InSquarePlacement.java": "948e16e4a0c5559a78502f1f3f65b17b337a81776ff588819c300bb3426d78d2",
+    "src/minecraft/java/net/minecraft/world/level/chunk/ChunkGenerator.java": "99f1f09da78f879a2f6f661e657a5266a601f61081f6273a25b938f1b17dd50f",
+    "src/minecraft/java/net/minecraft/world/level/chunk/BulkSectionAccess.java": "c411b1ba73f0b5a9d0a82f78c5c11daf6b8301525e59c12229a1f77767e1b7cc",
+    "src/minecraft/java/net/minecraft/world/level/chunk/LevelChunkSection.java": "ab13391b6d398a7625f83b36b428337adb0ef0c77be5df8b389079bfd7cf35a8",
+    "src/minecraft/java/net/minecraft/world/level/lighting/LightEngine.java": "d90b228e9cad2b7ceef6b106daddfff8b133a2f5a2ec551f91bf52cde2ebb115",
+    "src/minecraft/java/net/minecraft/world/level/lighting/SkyLightEngine.java": "cb2a92429cbedafdd5ab686b70b8825ed88a915e0ab4ba83f11bc55c2484b3d4",
+    "src/minecraft/java/net/minecraft/world/level/lighting/BlockLightEngine.java": "53f7efc42ed1e1d25fae5403bfcebe589afa52292a6aee787f354c4d32f4a87b",
+    "src/minecraft/java/net/minecraft/world/level/lighting/ChunkSkyLightSources.java": "644e107308b81b554188f86c83062cac4868a8731c464d8a6e4b2557d62fb7ea",
+    "src/minecraft/java/net/minecraft/world/level/block/state/BlockBehaviour.java": "60be9c8660ed75597765616479e1197252115b6e9bcdf42839e2c761248a007a",
+    "src/minecraft/java/net/minecraft/world/level/block/Blocks.java": "1d5b821a55c14f2d46be44eec7d44a9febaa05843030b7497dcef701815768a2",
+    "src/minecraft/java/ca/spottedleaf/moonrise/patches/starlight/light/SkyStarLightEngine.java": "307a0d2baaf05acfeeb30d6b741675f46e9943904d5930f95531aa70417480e6",
+    "src/minecraft/java/ca/spottedleaf/moonrise/patches/starlight/light/BlockStarLightEngine.java": "6c3fec7417202b47febc65fa94ce6ef9a5572e467ea6b9034f3fa08206ae5fcd",
+    "src/minecraft/java/ca/spottedleaf/moonrise/patches/starlight/light/StarLightEngine.java": "7309e93ec2cd6bfca3ae4be61c00a106813d48ea59f35dbffae74165a005784d",
+    "patches/features/0016-Moonrise-optimisation-patches.patch": "267e01eaeb0873893c09a903bae3d9880de7a98c757b59fca03bc827de06297b",
+    "patches/features/0012-Optimize-Bit-Operations-by-inlining.patch": "05917edf3c780e02fbea9b667afbeaf0bb09100aea10baf53da7f92909371dd0",
+    "patches/features/0004-Anti-Xray.patch": "3a5744c75bd3f66673f7a167b826300ebc936eda5ebb077aad1895ea7cac61f1"
+  },
+  "input_notes": "Complete applied OreFeature read, plus relevant complete placement/RNG/light methods and Moonrise implementation. Base/feature layers read through applied sources and relevant original layer context. No running server differential claim.",
+  "outputs": {
+    "server/crates/ferrumc-world/tests/fixtures/survival_ores/paper-kernel.tsv": "48b39d2bf0d129234d1cec71d452111030a77bb7222afe6e1bec0c1562657568",
+    "server/crates/ferrumc-world/tests/fixtures/survival_ores/paper-random.tsv": "689acfd1bab4a9999ba8b82ea7e4f874cd8433518aae78ec8cb811f81aa66605",
+    "server/crates/ferrumc-world/src/survival_ores/blocks_motion.bin": "5b43393e13881a1d64403e607e2f95aa3d7fcdebdf760ec6355e50f2d6564ad6",
+    "server/crates/ferrumc-world/src/survival_ores/catalog.rs": "213fd4430fe80f6ad066713500561d7f617b10955e26a9af249b8d57df29355b"
+  }
+}

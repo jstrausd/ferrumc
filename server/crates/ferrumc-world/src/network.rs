@@ -203,9 +203,9 @@ fn pack_heightmap(chunk: &Chunk, kind: HeightmapKind) -> Result<Vec<i64>, WorldE
 /// The light masks and per-section light arrays for one chunk column.
 ///
 /// These populate the `Update Light` portion of `Chunk Data and Update Light`.
-/// Full lighting propagation is not computed. [`ChunkLightData::full_bright`] is a
-/// constructor: it floods the column with full sky light and no block light,
-/// which is what a flat overworld looks like to a client.
+/// [`crate::LightingNeighborhood::compute`] produces propagated snapshots from
+/// actual blocks. [`ChunkLightData::full_bright`] remains an explicit legacy
+/// constructor for callers that deliberately choose full sky and no block light.
 ///
 /// The masks are `BitSet`s over [`LIGHT_SECTION_COUNT`] (26) sections, indexed
 /// from one section below the build floor up to one above the build ceiling. A
@@ -279,6 +279,33 @@ impl ChunkLightData {
             }
         }
         light
+    }
+
+    pub(crate) fn from_sections(sky: Vec<Vec<u8>>, block: Vec<Vec<u8>>) -> Self {
+        fn compact(sections: Vec<Vec<u8>>) -> (Vec<i64>, Vec<i64>, Vec<Vec<u8>>) {
+            let mut present = 0_i64;
+            let mut empty = 0_i64;
+            let mut arrays = Vec::with_capacity(LIGHT_SECTION_COUNT);
+            for (index, data) in sections.into_iter().enumerate() {
+                if data.iter().all(|byte| *byte == 0) {
+                    empty |= 1 << index;
+                } else {
+                    present |= 1 << index;
+                    arrays.push(data);
+                }
+            }
+            (vec![present], vec![empty], arrays)
+        }
+        let (sky_light_mask, empty_sky_light_mask, sky_light) = compact(sky);
+        let (block_light_mask, empty_block_light_mask, block_light) = compact(block);
+        Self {
+            sky_light_mask,
+            block_light_mask,
+            empty_sky_light_mask,
+            empty_block_light_mask,
+            sky_light,
+            block_light,
+        }
     }
 
     /// The sky-light `BitSet`: sections that carry sky-light data.

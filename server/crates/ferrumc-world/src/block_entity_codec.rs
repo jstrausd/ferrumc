@@ -14,6 +14,7 @@
 //! payload := tag(u8) body
 //! tag 0 (Sign):  sign_kind(u8) is_waxed(u8) face(front) face(back)
 //! tag 1 (Chest): stack × CHEST_SLOTS          // a fixed count, never file-declared
+//! tag 2 (Furnace): stack × 3 ++ four timer(u16) // explicitly componentless
 //!
 //! face  := string(color) has_glowing_text(u8) string(line) × SIGN_LINES
 //! string:= len(u16) utf8[len]                 // len capped per field on decode
@@ -43,6 +44,11 @@
 //! components. [`encode_block_entity`] remains the explicitly lossy legacy
 //! writer until the separate storage consumer adopts the fallible API. Adding
 //! this codec therefore does not itself switch existing overlay capture.
+//!
+//! Furnace versioned tag two stores exactly three framed FCIS records followed
+//! by burn remaining/duration and cooking progress/total (four big-endian u16).
+//! It extends schema one without changing any existing sign or chest bytes.
+//! Native furnace admission validates capacities, aggregate size and timers.
 
 use std::num::NonZeroU8;
 
@@ -52,7 +58,8 @@ use ferrumc_items::{
 };
 
 use crate::block_entity::{
-    BlockEntity, ChestInventory, Sign, SignFace, SignKind, CHEST_SLOTS, SIGN_LINES,
+    BlockEntity, ChestInventory, FurnaceInventory, Sign, SignFace, SignKind, CHEST_SLOTS,
+    FURNACE_SLOTS, SIGN_LINES,
 };
 
 /// Maximum accepted length, in bytes, of a single serialized [`BlockEntity`]
@@ -79,6 +86,8 @@ pub const MAX_SIGN_COLOR_BYTES: usize = 64;
 const TAG_SIGN: u8 = 0;
 /// Payload tag for a [`BlockEntity::Chest`].
 const TAG_CHEST: u8 = 1;
+/// Payload tag for the fixed ordinary furnace data grammar.
+const TAG_FURNACE: u8 = 2;
 /// Versioned payload discriminator, distinct from every legacy entity tag.
 const TAG_VERSIONED: u8 = 0x7f;
 /// Current world-owned block-entity grammar; independent of overlay metadata.
@@ -113,6 +122,10 @@ pub enum BlockEntityCodecError {
     /// A versioned envelope selected an unimplemented payload grammar.
     #[error("unsupported block-entity payload schema {0}")]
     UnsupportedSchema(u16),
+
+    /// Furnace slots, capacities or timer bounds failed native admission.
+    #[error("invalid persisted furnace state")]
+    InvalidFurnaceState,
 
     /// An encoded whole entity exceeded its aggregate byte allowance.
     #[error("block-entity payload has {len} bytes, exceeding {max}")]
@@ -196,7 +209,7 @@ pub enum BlockEntityCodecError {
 /// Appends the legacy, componentless serialized form of `entity` to `out`.
 ///
 /// This compatibility seam deliberately retains the original grammar and
-/// drops chest data components. It cannot report malformed or oversized input.
+/// drops chest/furnace data components. It cannot report malformed or oversized input.
 /// New persistence consumers must use [`try_encode_block_entity`] to preserve
 /// components and receive atomic, classified failures. Existing storage capture
 /// must migrate separately instead of silently ignoring a new `Result`.
@@ -215,6 +228,13 @@ pub fn encode_block_entity(entity: &BlockEntity, out: &mut Vec<u8>) {
             for slot in chest.slots() {
                 encode_stack(slot, out);
             }
+        }
+        BlockEntity::Furnace(furnace) => {
+            out.push(TAG_FURNACE);
+            for stack in furnace.slots() {
+                encode_stack(stack, out);
+            }
+            encode_furnace_timers(furnace, out);
         }
     }
 }
@@ -256,6 +276,31 @@ pub fn try_encode_block_entity(
                 payload.extend_from_slice(&item);
             }
         }
+        BlockEntity::Furnace(furnace) => {
+            ferrumc_items::validate_furnace_parts(
+                furnace.slots(),
+                furnace.burn_remaining(),
+                furnace.burn_duration(),
+                furnace.cook_progress(),
+                furnace.cook_total(),
+            )
+            .map_err(|_| BlockEntityCodecError::InvalidFurnaceState)?;
+            payload.push(TAG_FURNACE);
+            for (slot, stack) in furnace.slots().iter().enumerate() {
+                let item = encode_persisted_stack(stack)
+                    .map_err(|source| BlockEntityCodecError::Item { slot, source })?;
+                check_payload_size(
+                    payload
+                        .len()
+                        .saturating_add(4)
+                        .saturating_add(item.len())
+                        .saturating_add(8),
+                )?;
+                payload.extend_from_slice(&(item.len() as u32).to_be_bytes());
+                payload.extend_from_slice(&item);
+            }
+            encode_furnace_timers(furnace, &mut payload);
+        }
     }
     check_payload_size(payload.len())?;
     out.extend_from_slice(&payload);
@@ -270,6 +315,17 @@ fn check_payload_size(len: usize) -> Result<(), BlockEntityCodecError> {
         });
     }
     Ok(())
+}
+
+fn encode_furnace_timers(furnace: &FurnaceInventory, out: &mut Vec<u8>) {
+    for timer in [
+        furnace.burn_remaining(),
+        furnace.burn_duration(),
+        furnace.cook_progress(),
+        furnace.cook_total(),
+    ] {
+        out.extend_from_slice(&timer.to_be_bytes());
+    }
 }
 
 /// Decodes a complete legacy or versioned [`BlockEntity`] payload.
@@ -321,6 +377,29 @@ pub fn decode_block_entity(bytes: &[u8]) -> Result<BlockEntity, BlockEntityCodec
                 }
             }
             BlockEntity::Chest(chest)
+        }
+        TAG_FURNACE => {
+            let mut slots = std::array::from_fn(|_| ItemStack::empty());
+            for (index, slot) in slots.iter_mut().enumerate().take(FURNACE_SLOTS) {
+                *slot = if versioned {
+                    decode_versioned_stack(&mut reader, index)?
+                } else {
+                    decode_stack(&mut reader)?
+                };
+            }
+            let burn_remaining = reader.read_u16()?;
+            let burn_duration = reader.read_u16()?;
+            let cook_progress = reader.read_u16()?;
+            let cook_total = reader.read_u16()?;
+            let furnace = FurnaceInventory::try_from_parts(
+                slots,
+                burn_remaining,
+                burn_duration,
+                cook_progress,
+                cook_total,
+            )
+            .map_err(|_| BlockEntityCodecError::InvalidFurnaceState)?;
+            BlockEntity::Furnace(furnace)
         }
         other => return Err(BlockEntityCodecError::UnknownTag(other)),
     };

@@ -1,0 +1,83 @@
+{
+  "paper_version": "1.21.8 build60",
+  "paper_commit": "29c8822d90899c89d2689338e81a98f690bcba12",
+  "paper_inner_sha256": "c64fb7dbc95cd15aa0b7460a5b1e117eef5ee91c4e6fa7a8f1fe6487b6c31507",
+  "sources": {
+    "src/minecraft/java/net/minecraft/world/entity/Mob.java": "cb8bbe43086f117e159625c99e1b84f6e26f1297ea3bb691f7c03735289b9864",
+    "src/minecraft/java/net/minecraft/world/entity/PathfinderMob.java": "c9d9b4e9ebcd4751c895f467a4a2e286aa71a5e6d1e76d1265cffa496bcabe14",
+    "src/minecraft/java/net/minecraft/world/entity/LivingEntity.java": "bd7c28c6e1e2b4adc8af9a9f55cbb909517e25f68b1ef923ba1016db20f4dd7f",
+    "src/minecraft/java/net/minecraft/world/entity/AgeableMob.java": "2ca4c1c99aab382c2e24424418aa1d38f4267ae3314a1e1c78578cc86622e976",
+    "src/minecraft/java/net/minecraft/world/entity/EntityType.java": "77985fa70226475eadbc4df921edd969729fae839a47dbad0d5dfe5109800bdc",
+    "src/minecraft/java/net/minecraft/world/entity/SpawnPlacementTypes.java": "b504020ce25accb030727b2562580f4ce1dda2c319f587e29eae327c942f0686",
+    "src/minecraft/java/net/minecraft/world/entity/monster/Monster.java": "2ffdb11f0be233e1062d11262b8cfae7f8b8041471f3ab1e039a292e7cc555de",
+    "src/minecraft/java/net/minecraft/world/entity/monster/Zombie.java": "bb4fbcafe78adeda7c4aa9c425934a8dc3d8971b34d47bb2936fc3fa996a54d9",
+    "src/minecraft/java/net/minecraft/world/entity/animal/Animal.java": "e72d69839380735d8dbe2f2f1fad4823917220896c645167a49d3da7458ee950",
+    "src/minecraft/java/net/minecraft/world/entity/animal/AbstractCow.java": "f43ce14ee2f0bdaf7683c308755b96f30f05b40395cfe9f421d8eb1c41cba478",
+    "src/minecraft/java/net/minecraft/world/entity/animal/Cow.java": "7b7bba3cbfe28f054df91b7d8d35a7e69e4af6ca392ccdcacfae96554d81de3b",
+    "src/minecraft/java/net/minecraft/world/entity/animal/Pig.java": "816c549fe38ab834d8a02c13da10648620f44512bdd803fc7b3cb3e34d769ca8",
+    "src/minecraft/java/net/minecraft/world/entity/animal/Chicken.java": "e302fb106059c1825ab90eaf8de0a825b342a50f5c89e4d3f4c116ca85ed13cc",
+    "src/minecraft/java/net/minecraft/world/entity/animal/sheep/Sheep.java": "928ed66b02f52eab79b69b317ef9736f18b22016574ea2b8d987baf58b625ed5",
+    "src/minecraft/java/net/minecraft/world/entity/ai/attributes/DefaultAttributes.java": "bf9ff6a5d5e75fcd7f029621be065328e591326432a773f19978c952c2c51c87",
+    "src/minecraft/java/net/minecraft/world/entity/ai/attributes/AttributeSupplier.java": "b0952dcfa7970e0ced3b70c9daa90bdc1081452aeeb28f4654342959c3575df2",
+    "src/minecraft/java/net/minecraft/world/entity/ai/goal/MeleeAttackGoal.java": "bd228841dfa25fee82a33c1e72096540171484f506615376f4ac85eeb97db0bc",
+    "src/minecraft/java/net/minecraft/world/entity/ai/goal/ZombieAttackGoal.java": "72f0bc22d6b259ac51dbb769cf4c3571b2d47edb568b680b06a5eef7e2241832",
+    "src/minecraft/java/net/minecraft/world/entity/ai/goal/Goal.java": "fb53841ecb30690a04bfd640f8669c9db4936bf43dba81f884092f6c4d4f9bab",
+    "src/minecraft/java/net/minecraft/world/entity/ai/control/MoveControl.java": "4b7d0cf7db629368e596c0ea38c7b1fc4dd0695c728283a42bbc30b6f0b719b1",
+    "src/minecraft/java/net/minecraft/world/damagesource/CombatRules.java": "fcbacc413b1ffc5bd34108b695c570ed1421f9f1d44a055eaaccf8c49313f050",
+    "src/minecraft/java/net/minecraft/world/damagesource/DamageSource.java": "b2b0cc533f9e8442d1cdc1a17aa7e4586c92c52c53633106464f58f3623c3015",
+    "src/minecraft/java/net/minecraft/world/level/NaturalSpawner.java": "31441195dec48cd5a0047d2a4554a6858765bd3ee65a6eaed6f899a48f0ccd5e",
+    "src/minecraft/java/net/minecraft/world/level/block/state/BlockBehaviour.java": "60be9c8660ed75597765616479e1197252115b6e9bcdf42839e2c761248a007a",
+    "src/minecraft/java/net/minecraft/world/level/pathfinder/NodeEvaluator.java": "15fdce21a2bf739e9608cf66438df75c9c158ded5d87fb6224580cf26ad17c24",
+    "src/minecraft/java/net/minecraft/network/syncher/EntityDataAccessor.java": "14a5e885db2978454e17893757ccb68eed0c8f7b20218549f974ae59a8388aa8",
+    "src/minecraft/java/net/minecraft/world/entity/player/Player.java": "6d6cbe9a6149e573182a3172b4a534e001f808f18a2385970bb0aa53c54b020a",
+    "src/minecraft/resources/data/minecraft/loot_table/entities/cow.json": "af433f39e594529651addfd6faadf0cd88c3fe0dbb764e808e582c421fbfc62a",
+    "src/minecraft/resources/data/minecraft/loot_table/entities/pig.json": "1300cec390f407c748f2b9e656fd3da87313c85568a073cca86d2f12731bbf40",
+    "src/minecraft/resources/data/minecraft/loot_table/entities/chicken.json": "0daf92fdfd4ff064f93c6f8825d2e816feae6eb1f494eee8ac4d7c2622d25289",
+    "src/minecraft/resources/data/minecraft/loot_table/entities/sheep.json": "6810f6ee2cd5f8ee47bfb55a5e3daf81daf62d3d7408af4027bef0fc131e75ef",
+    "src/minecraft/resources/data/minecraft/loot_table/entities/sheep/white.json": "904680e660ce4fd87cd31f6bd87822618ae4f797f716f57acb051470f670cb93",
+    "src/minecraft/resources/data/minecraft/loot_table/entities/zombie.json": "4d5ba5badde970a40aedf71df9c510e5641aec9acd8f892f60b272bc7afb3aea",
+    "src/minecraft/resources/data/minecraft/tags/block/animals_spawnable_on.json": "99d58ed47c9dfd8b3fc8dbd812427aad846a012c33944c9e69319c4f3c0cf7b5",
+    "src/minecraft/resources/data/minecraft/tags/block/prevent_mob_spawning_inside.json": "6cf71b71fe0d1effc9f1f088b49fe4eba05ed2a09a5142a798a6551bed2e8172",
+    "src/minecraft/resources/data/minecraft/tags/block/rails.json": "6df91472ac5c0303ae9891c01e9a2299c3cc1150fd28daf4b13ca23177d629bd",
+    "src/minecraft/resources/data/minecraft/tags/block/fire.json": "b3d3ce1d646fa52af6b7c8d8432eef440ee779f23e38e8ed48eb8d11309365b0",
+    "patches/sources/net/minecraft/world/entity/Mob.java.patch": "278366bacfece0fbb1afd421adf4cf4300990df9dd956ae75b629ede260d7eaf",
+    "patches/sources/net/minecraft/world/entity/monster/Zombie.java.patch": "b05de031d22ec6feb6a399b908c87b5619ce449e17dfd1bc6ddc0374f8a3ba0f",
+    "patches/sources/net/minecraft/world/entity/animal/Animal.java.patch": "b27bfa5496d9d7ee79596a16a62bc775c60436c930f29354d4ec1316514e6069",
+    "patches/sources/net/minecraft/world/entity/animal/AbstractCow.java.patch": "43cbbc3a7690e47a8fe2a6d66b4a623ec0ba778a241242be744b3ac14aec389f",
+    "patches/sources/net/minecraft/world/entity/animal/Pig.java.patch": "10228b2ccfd990f7c7fb0cacfbaec7a913632b614233f976ccfb086c32599863",
+    "patches/sources/net/minecraft/world/entity/animal/Chicken.java.patch": "22c7d79517fe064ae62d10a4463d9d5dc2bad28f09c453d90423a96ff4c72a1b",
+    "patches/sources/net/minecraft/world/entity/animal/sheep/Sheep.java.patch": "c77abcd7f84830d9b828ff4179007ebbd82a1a193cdd027170059195c1cd37f0",
+    "patches/features/0016-Moonrise-optimisation-patches.patch": "267e01eaeb0873893c09a903bae3d9880de7a98c757b59fca03bc827de06297b"
+  },
+  "inspection": "Full applied Mob/PathfinderMob/Zombie/Monster/Animal/Cow/AbstractCow/Pig/Chicken/Sheep/AgeableMob; complete relevant hurtServer/actuallyHurt/armor, dimensions/accessors, goal/control, spawn and cache methods; full relevant mob/passive source patches and Moonrise collision hunks. No running Java server, full AI or event differential claim.",
+  "tag_expansions": {
+    "animals_spawnable_on": [
+      "grass_block"
+    ],
+    "prevent_mob_spawning_inside": [
+      "rail",
+      "powered_rail",
+      "detector_rail",
+      "activator_rail"
+    ],
+    "fire": [
+      "fire",
+      "soul_fire"
+    ]
+  },
+  "static_facts": {
+    "states": 27946,
+    "admitted": 27767,
+    "deduplicated_shapes": 321,
+    "largest_shape_boxes": 15,
+    "format": "states = BE u16 flags + BE u16 shape; shapes = BE u16 list count, each BE u16 box count then six BE f64 minX/minY/minZ/maxX/maxY/maxZ"
+  },
+  "outputs": {
+    "server/crates/ferrumc-sim/src/mobs/data/armor.tsv": "610ec31b933720a243510c2381583cf2a69ddbe7e35906dd9ec3465878f291a3",
+    "server/crates/ferrumc-sim/src/mobs/data/attack-reach.txt": "2f7e9d3f4baa6c3a3646066e4a0e4f7329aa05819e73ff075264e4a64717f65e",
+    "server/crates/ferrumc-sim/src/mobs/data/attributes.tsv": "59066b74141753de67d0af54e4f4e4593aa731eeeb4f6558324ae4260b60f121",
+    "server/crates/ferrumc-sim/src/mobs/data/metadata.tsv": "3aba7d0c6c2d8de68ef518301226123d58042a28c0491e4baef5b4a2d8971ca1",
+    "server/crates/ferrumc-sim/src/mobs/data/shapes.bin": "29309b54388a13eb77de9a429668c98b9bde9d71f741fbdf1208f06b812c7202",
+    "server/crates/ferrumc-sim/src/mobs/data/states.bin": "33f9442bae00ca0d45603cd425f11c3b8936afc06aafa0673454f20be2b34ab7"
+  }
+}

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep_until;
 
 use ferrumc_core::PlayerId;
@@ -70,6 +70,7 @@ pub(super) struct ChunkStream {
     pub(super) loaded: BTreeSet<ChunkPos>,
     /// Columns whose chunk and block-entity packets actually entered the writer.
     pub(super) sent: BTreeSet<ChunkPos>,
+    reported: BTreeSet<ChunkPos>,
     /// Recent movement direction prioritizes a small visible corridor and outer baselines.
     movement_hint: ChunkPos,
     /// A join request was admitted but its exact acquired batch is unconfirmed.
@@ -101,6 +102,7 @@ impl ChunkStream {
             view_distance: ctx.view_distance.clamp(0, STREAM_VIEW_DISTANCE_MAX),
             loaded: BTreeSet::new(),
             sent: BTreeSet::new(),
+            reported: BTreeSet::new(),
             movement_hint: ChunkPos::new(0, 0),
             ticket_handoff_pending: false,
             pending_position: None,
@@ -130,6 +132,32 @@ impl ChunkStream {
     /// or negative client sentinel retains that configured cap.
     pub(super) fn limit_view_distance(&mut self, server_radius: i32, client_radius: Option<i8>) {
         self.view_distance = effective_view_distance(server_radius, client_radius);
+    }
+
+    /// Reports only column packets from the previous successful socket flush.
+    /// This fence prevents State-priority entities overtaking their World column.
+    pub(super) async fn report_delivered(
+        &mut self,
+        commands: &mpsc::Sender<SimCommand>,
+        player: PlayerId,
+    ) -> anyhow::Result<()> {
+        if self.sent == self.reported {
+            return Ok(());
+        }
+        let added = self.sent.difference(&self.reported).copied().collect();
+        let removed = self.reported.difference(&self.sent).copied().collect();
+        commands
+            .send(SimCommand::GroundChunks {
+                player,
+                added,
+                removed,
+            })
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("simulation driver closed during chunk visibility publication")
+            })?;
+        self.reported.clone_from(&self.sent);
+        Ok(())
     }
 
     /// Records the client's latest validated and admitted position.
@@ -965,6 +993,7 @@ mod tests {
             view_distance: 0,
             loaded: BTreeSet::new(),
             sent: BTreeSet::new(),
+            reported: BTreeSet::new(),
             movement_hint: ChunkPos::new(0, 0),
             pending_position: None,
             last_position: None,

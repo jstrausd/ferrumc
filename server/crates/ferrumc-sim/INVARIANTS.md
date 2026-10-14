@@ -617,3 +617,188 @@
   ordinary BlockPlace continues to do so. Session treats the tracked input as
   authoritative data and routes by the final block's owner. Its internal
   completion has no client packet or disconnect effect.
+
+## Explicit legacy Survival mining and ground consumer
+
+- Ordinary start/finish/abort mining retains a block preimage, logical tick
+  progress and caller tool witness; changing an exact held slot cancels work.
+  Finish is necessary unless the initial progress is already instant. Drops and
+  chest contents pass complete item/persistence and bounded ground reservation
+  before the irreversible block edit. Empty identity pools retain owned drops.
+- Ground activation is exclusive with native durable ownership and generic
+  entity writers. Each live payload belongs to the original canonical
+  EntityStore slot; up to64 additional canonical8x8 regional stores permit the
+  legacy one-shard world-cover application without weakening owner checks.
+  Global admission caps live/pending/offered/restoring items at4096 and native
+  reserved bytes at both the selected item budget and the selected<=4MiB limit.
+- Trusted item metadata must encode before admission and fit the same reserved
+  native charge. Thus aggregate publication metadata cannot exceed that global
+  reservation. Adoption rechecks existing payloads. Refusal retains the entire
+  drop/restore input; pending unloaded entries rotate without losing payloads.
+- Pickup moves the actual payload through a single-use incarnation ticket.
+  Until the exact FCIS remainder is returned, its native slot/byte credits stay
+  reserved and capture refuses. Empty remainder means actual complete deposit;
+  no timeout, disconnect or cloned inventory projection proves that deposit.
+- Logical item counters advance once per resident tick for all admitted items.
+  Physics/contact/publication use a fair256-item phase, an outbox256/2MiB cap,
+  and at most32 offers/responses. Full publication capacity retains pending
+  work; destruction can be delayed until a publication credit exists. Coarse
+  full-cube physics, no merge/activation/plugin events, partial-return delay10,
+  ordinary unenchanted mining and deterministic FerrumC loot RNG are explicit
+  limits, not claimed Paper differential acceptance.
+- Regional migration preflights canonical destination payload/residency/slot
+  before source removal, preserving original UUID, wire ID and owned stack.
+  Snapshot clones receive no second active consumer. Exact native record capture
+  is readonly and neither acknowledges persistence nor clears dirty data. Legacy
+  graceful sidecar save/restore is not native DUR activation or crash atomicity.
+
+## Selected legacy player vitals consumer
+
+- enable_survival is default-off, once-only and exclusive with native player
+  ownership. Fixed-size health/hunger/timers live on actual PlayerState; native
+  inventory admissions have no legacy vitals producer. Snapshot copies lose tick
+  authority. All restore/food/damage/fall/respawn inputs mutate only at a boundary.
+- Health and hunger tick once per present actor; all9 saved fields are queried
+  from that actual owner. Session sends mandatory UpdateHealth from its snapshot.
+  Effective damage and one death edge follow committed health, never HUD inputs.
+  Dead players cannot mine/place/pick up/consume/attack; respawn requires dead
+  state and resets vitals and actual position. Death inventory/location policy,
+  CombatDeath/Respawn sequence, status effects and Java events remain App contracts.
+- FoodConsumptionResolved carries a positive monotonically increasing per-player
+  App token. A repeated token cannot apply food again. player_can_eat is a probe,
+  not inventory authority: the connection must freeze its complete exact prepared
+  inventory mutation until the matching owner acknowledgement and must commit
+  only accepted results. No food inventory atomicity is claimed without that App
+  pin/commit contract. Legacy UUID inputs retain existing Session lifecycle scope;
+  this does not mint native admission, receipt or durability authority.
+- Selected Survival applies earlier coalesced move prefixes before nonmovement
+  actions, so reach/contact/death inspect actual preceding positions. Default-off
+  replay ordering stays unchanged. Fall only lands on coarse full-cube support,
+  water clears distance, and teleports>64blocks reset it. Sprint exhaustion uses
+  actual ground/sprint flags with real coarse support. Partial support geometry,
+  airborne anti-cheat, swimming/jump exhaustion and general environmental damage
+  are explicit remaining work. PVP uses coarse3block contact and10tick attack
+  interval; weapon-strength curves, obstruction, knockback and armor wear are
+  separate consumers, not claimed Paper combat parity.
+- Paper full FoodData,Player hurtServer/canEat/causeFallDamage,ServerPlayer
+  tickRegeneration,and LivingEntity hurtServer/handleEntityDamage/actuallyHurt/
+  calculateFallDamage were source-reviewed at the pinned build60 commit. Ordinary
+  armor/cooldown/food formulas are checked deterministically; no Java events or
+  gameplay differential acceptance are inferred from source inspection.
+
+## Selected ordinary-water and furnace consumers
+
+- Water and furnace selection are once-only legacy owners, exclusive with native
+  player durability. Clones carry no tick authority; dimension/world checks run
+  before inbox drain. Water advances by logical ticks only; at most64due cells
+  and6writes per admitted plan, five-tick delay, no force loads. Complete changed
+  postimage scheduling and ground native/metadata/region reservation precede any
+  flow write. Refusal keeps the entire preimage and retains due work for retry.
+- Bucket tokens are positive and increasing, with exact source-only filling,
+  resident/mode/living/reach checks and full queue admission before one world
+  mutation. Only an accepted BucketUseResolved permits App's pinned full player
+  inventory commit. App owns actual UseItem ray geometry/eye pose and complete
+  bucket inventory postimage; this position API alone is not real-client use.
+- Furnace World data remains the sole owner of three slots and four timers.
+  Registered resident ordinary furnaces are capped at1024; discovery admits64
+  block entities across at most4columns per tick (each column already has a
+  fixed4096entity ceiling), while all registered furnaces tick exactly once.
+  Unload stops timers and frees registration; imported data is rediscovered.
+  Placement reserves registry and native block-entity capacity before writing.
+- A furnace tick admits its complete native postimage and lit-state transition
+  before consuming fuel/input. Lit changes use MutationCause::Furnace through
+  the existing journal/persist/block publication funnel, preserving block data.
+  Every changed timer/slot body marks persist dirty, even without a block change.
+  Mining reserves all three content stacks plus normal block drop before removal.
+- Checked furnace exchange compares exact FCIS slot bytes inside the owner,
+  excluding ticking timers. Stale returns actual data and unchanged player/cursor.
+  All furnace/player/cursor candidates are staged; full16KiB native codec admission
+  precedes one furnace commit. Input representation replacement resets cooking;
+  count-only changes preserve progress. App must freeze/preflight its complete
+  56-slot PlayerData and commit only the returned postimage after owner success.
+- Original full FlowingFluid/WaterFluid/BucketItem/ClipContext and furnace
+  AbstractFurnaceBlockEntity/AbstractFurnaceMenu/AbstractFurnaceBlock plus owning
+  source patches were read at Paper build60. Ordinary pure rules and owner tests
+  do not claim Java event parity, furnace recipe XP, blast/smoker/hopper mechanics,
+  full Paper fluid geometry, lava/ultrawarm policy or crash-atomic legacy commits.
+
+## Selected adult mob gameplay consumer
+
+- enable_mobs is default-off, once-only legacy ownership, exclusive with native
+  durable player admission and generic entity writers. Snapshot clones retain no
+  live health/controller authority and refuse before inbox drain. Actual canonical
+  base-only EntityStores own every UUID/wire/type/transform; the pure controller
+  owns only health/brains and never a second transform. Global64 mobs,16pending
+  attempts,64canonical stores/player profiles and256fixed-size events bound work.
+- Separate base-only stores never consume ground-item pending/offered slot or byte
+  credits. UUID/wire uniqueness is checked against ground active/queued restore/
+  offered/identity pools, player profiles and mob pending/live registrations in
+  both admission directions. Driver uses the same global nonreusing Session IDs.
+- Actual movement updates EntityTickContext; cross8x8 migration preflights genuine
+  destination identity, residency and slot reservation before removing source.
+  Same UUID/wire/type/health survive migration. No force-load or raw transform
+  escape exists. Unloaded actors remain registered but stop active walking/attack.
+- App supplies verified resident sky/block/raw light and actual wire/armor player
+  profiles. Natural spawn owner rechecks resident dry collision facts, headroom,
+  floor/light/difficulty, genuine24..128player distance, sharedspawn24 exclusion,
+  border, population and existing mob obstruction. Any intervening funnel block
+  edit after enqueue invalidates the admitted light basis and refuses the spawn.
+  App remains responsible for current relighter residency/generation validation,
+  native biome/category selection and its bounded natural attempt cadence.
+- Pure bounded ground walking/passive wander/zombie chase and20tick melee run
+  every logical owner tick. Movement publication pressure may refuse intentions;
+  positive hostile damage uses current trusted armor plus actual player vitals.
+  Dead/Creative/Spectator/disconnected players are excluded. No guessed player
+  wire IDs or lighting values are minted by this owner.
+- Tracked mob hit checks positive increasing exact App token, actual player
+  strength/reach/mode/residency and controller hurt immunity/armor. Every death
+  stack and regional/native/metadata credit plus final health/remove publication
+  is reserved before zero health commits. Full ground/outbox retains live health
+  and original loot RNG. Successful owned receipt moves actual drops into ground
+  admission once; death removes genuine canonical registration once. Root applies
+  exact weapon wear and credited XP only from accepted MobAttackResolved.
+- Source-reviewed original NaturalSpawner, Monster/Animal spawn rules,
+  MeleeAttackGoal/ZombieAttackGoal and author-pinned JVM attributes/collision/loot
+  evidence support this explicit adult subset. No full goal/pathfinding/travel,
+  breeding/shearing/eggs/riding/equipment/knockback/daylight burn/despawn/Javaevents
+  or complete Paper gameplay differential is claimed. Native capture/restore
+  remains separate from actual sidecar durability, described below.
+
+- Legacy death-drop admission takes one move-owned batch of at most 56 stacks.
+  Complete slot/native/metadata/publication and aggregate regional-claim checks
+  finish before any stack or once-per-life flag changes. Refusal returns all
+  original inputs. Specialized player-death admission requires the real dead
+  actor's exact position, and permits one accepted batch (including empty) per
+  life; actual respawn resets it. This flag is not a durable receipt. App pins
+  the original complete inventory until successful admission and owns clearing
+  its player/cursor/table data; no cross-store crash atomicity is claimed.
+- Withdrawing a trusted mob player profile removes that player from the actual
+  AI target list. Missing armor projections never receive default armor or an
+  AI hit. App uses withdrawal while armor receipts/effect capacity are reserved.
+
+- Legacy mob capture emits the exact canonical owner base plus authoritative
+  controller state into independent FCMB native schema1 (95 bytes per mob,
+  global64/6080 native bytes). UUID/type/scope/chunk, finite canonical transform,
+  positive bounded health, loot/brain RNG and remaining wander/attack/hurt
+  durations are strict; malformed/schema/truncated/trailing records refuse
+  without defaults or mutation. Runtime wire IDs/handles/admissions/leases do
+  not persist. Pending proposals refuse the entire capture; events alone do not
+  duplicate canonical authority. Capture clears no dirty/save ownership fact.
+- Saved mob restores retain at most16 complete decoded proposals and fresh
+  genuine wire IDs, preserving the original UUID, with global64 population
+  admission. An unloaded or full-publication target retains the original queue
+  member; no force-load occurs. Actual tick-context registration precedes fresh
+  controller admission; a controller refusal removes only that new base slot.
+  First real restore tick advances saved remaining logical durations once.
+  App combines item and mob records in one existing identity-bound save/delete
+  barrier; capture alone proves neither durable save nor crash atomicity.
+- Withdrawing a mob profile disables actual AI targeting but retains its genuine
+  player wire reservation until departure. Ordinary set restores targeting with
+  fresh armor stats. Player UUID admission refuses identities reserved by live,
+  queued-natural or queued-restored mobs; all ground/mob reservation checks also
+  include queued-restored identities.
+
+- Legacy pickup completion publishes accepted collect before either partial-stack
+  metadata or final entity removal, retaining the prior wire stack and viewer
+  identity for the client pickup animation. Admission and reserved byte/slot
+  settlement finish first; refused remainder restoration publishes no collect.

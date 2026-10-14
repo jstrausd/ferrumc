@@ -13,14 +13,35 @@
 //! - [`build_command_tree`] exposes the `/spawn` + `/gamemode` command set for
 //!   direct server-side tests.
 
+mod bucket_completion;
+mod bucket_raycast;
 mod chunk_preparation;
 mod cli;
+mod combat;
+mod combat_completion;
+mod combat_wear;
 mod command;
 mod config;
 mod connection;
+mod consumption;
+mod death_inventory;
 mod driver;
+mod furnace_window;
+mod gameplay;
+mod ground_persistence;
+mod ground_runtime;
+mod ground_view;
+mod held_drop;
 mod inventory;
+mod inventory_budget;
 mod java_bridge;
+mod light_view;
+mod lighting;
+mod mining_wear;
+mod mining_witness;
+mod mob_command;
+mod mob_runtime_app;
+mod mob_view;
 mod observe;
 mod operators;
 mod persistence;
@@ -29,6 +50,7 @@ mod player_admission;
 mod player_data;
 mod plugins;
 mod registries;
+mod render_descriptors;
 mod server;
 mod storage_worker;
 mod window;

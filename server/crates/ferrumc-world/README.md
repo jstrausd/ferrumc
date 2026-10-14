@@ -128,7 +128,7 @@ generator:
 - `WorldSeed`, `GenerationIdentity` and `ChunkGenerator` — explicit numeric seed
   and versioned identity for pure, reproducible chunk generation. The current
   identities are Minecraft 1.21.8 / Overworld, with flat revision 1 and natural
-  terrain preview revisions 1 and 2.
+  terrain preview revisions 1 through 4.
 
 ## Generator contract
 
@@ -475,3 +475,20 @@ Overworld biome tree for Carver runs. Each run still starts with independent
 cold selector history, producer sessions, meters and lifecycle. The existing
 public standalone preparation path retains its owned-tree behavior and refusal
 order. No new native tree, cache capacity or generation revision is introduced.
+
+## Normal ore Survival subset (revision 4)
+
+`NaturalWorldGenerator::with_survival_preview(seed)` and
+`RuntimeWorldGenerator::natural_survival(seed)` explicitly combine revision-3
+trees/grass with 18 normal placed-ore variants for coal, iron, copper, gold,
+redstone, lapis and diamond. Earlier identities and baselines remain unchanged.
+Original counts, heights, biome membership, feature seeds and ordered
+stone/deepslate targets are pinned; the ellipsoid kernel and inherited RNG draws
+are checked against 192 complete actual Paper `OreFeature` calls and 80 RNG cases.
+
+Complete source-local 3x3 histories precede canonical target projection. The
+source cache holds at most 32 diffs / 8 MiB; source writes, work and RNG draws are
+bounded. Other placed geology and structures remain omitted, and isolated-source
+merging does not claim Vanilla seed parity or whole-FEATURES acceptance. See
+[the reference helpers](tests/reference/survival_ores/README.md) for reproduction
+and [the contract](INVARIANTS.md) for exact bounds.

@@ -47,9 +47,12 @@ use ferrumc_registry::PROTOCOL_VERSION;
 
 use crate::{driver::SimCommand, observe};
 
+mod bucket;
 mod chunk_stream;
 mod context;
+mod furnace;
 mod handlers;
+mod held_drop;
 mod ingress;
 mod join;
 mod outbound;
@@ -461,7 +464,7 @@ pub(crate) async fn handle_connection(
             let LoginIdentity {
                 safe_label, player, ..
             } = identity;
-            enter_play(conn, safe_label, player, &mut shutdown).await
+            Box::pin(enter_play(conn, safe_label, player, &mut shutdown)).await
         }
         None => Ok(()),
     }

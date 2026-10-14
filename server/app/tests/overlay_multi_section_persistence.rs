@@ -72,10 +72,12 @@ const PLACED: BlockPos = BlockPos::new(9, 64, 8);
 /// Builds a server config that persists to `world_dir` on an ephemeral port with a
 /// small resident spawn area.
 fn persistent_config(world_dir: &Path) -> AppConfig {
-    AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses")
-        .with_world_dir(Some(world_dir.to_path_buf()))
-        .expect("world directory preserves valid config")
+    AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nops = [\"Builder\"]\nspawn_chunk_radius = 1\nview_distance = 1",
+    )
+    .expect("config parses")
+    .with_world_dir(Some(world_dir.to_path_buf()))
+    .expect("world directory preserves valid config")
 }
 
 /// Sends a dig-start `PlayerAction` breaking the block at `pos`, stamped with
@@ -143,6 +145,8 @@ async fn expect_ack(client: &mut TestClient, expected_sequence: i32) -> anyhow::
 /// (section 8) on a later tick, returning once both are acked.
 async fn edit_two_sections(addr: SocketAddr) -> anyhow::Result<()> {
     let mut actor = login_to_play(addr, "Builder").await?;
+    common::make_creative(&mut actor).await?;
+    common::supply_creative_slot(&mut actor, 36, 1, 64).await?;
 
     // Edit 1: break the grass directly under spawn (section 7). Waiting for the ack
     // guarantees this edit was applied — and so flushed by the end-of-tick flush —

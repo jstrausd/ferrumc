@@ -115,5 +115,5 @@ cargo build --manifest-path server/Cargo.toml --release --locked -p ferrumc-app
 Keep the existing world/config directory. Trees and short grass require the
 revision-3 `ferrumc_natural_tree_preview` preset; the launcher does not replace an
 existing preset when an environment setting changes. Full Survival, entities,
-other placed features, full lighting and full Java/Paper compatibility remain
+other placed features, full lighting and Java-plugin world/inventory APIs remain
 separate work.

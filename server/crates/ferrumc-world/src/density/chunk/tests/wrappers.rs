@@ -514,3 +514,84 @@ fn provider_counter_wrap_and_shape_refusal_before_mutation() {
         .is_err());
     assert_eq!(s.work_used(), work);
 }
+
+#[test]
+fn interpolated_cell_group_retains_public_and_wide_budget_boundaries() {
+    use crate::sample_work::{CarverCumulativeMeter, ChargeFault, Unsigned192};
+
+    let mut s = probe(vec![(original(NodeKind::Constant(17.0)), "child")], 0);
+    let root = marker(&mut s, Marker::Interpolated, 0);
+    let id = wrapper_id(&s, root);
+    let corners = [0.25, 1.25, 10.25, 11.25, 100.25, 101.25, 110.25, 111.25];
+    if let Cache::Interpolated(interp) = &mut s.state.wrappers[id].cache {
+        interp.corners = corners;
+    } else {
+        panic!("wrong probe wrapper");
+    }
+    s.state.interpolating = true;
+    s.state.filling_cell = true;
+    s.state.in_x = 2;
+    s.state.in_y = 2;
+    s.state.in_z = 3;
+    let pos = s.state.pos();
+    for prefix in [0, 3] {
+        for remaining in 0..=10 {
+            for wide in [false, true] {
+                let limit = prefix + remaining;
+                let make = || {
+                    if wide {
+                        let mut meter =
+                            CarverCumulativeMeter::new(Unsigned192::from_u64(limit as u64));
+                        meter.test_short_segments();
+                        SampleWork::with_carver_meter(meter)
+                    } else {
+                        SampleWork::new(limit)
+                    }
+                };
+                let mut actual = make();
+                let mut original = make();
+                for _ in 0..prefix {
+                    actual.charge_core().unwrap();
+                    original.charge_core().unwrap();
+                }
+                // One marker entry followed by the original seven consecutive
+                // lerp charges. The independent affine corners yield 78.25.
+                let expected = (0..8)
+                    .try_for_each(|_| original.charge_core())
+                    .map(|()| 78.25_f64.to_bits())
+                    .map_err(|fault| match fault {
+                        ChargeFault::Public { limit, used } => DensitySampleError {
+                            resource: if remaining == 0 {
+                                "wrapper"
+                            } else {
+                                "noise_chunk"
+                            },
+                            field: if remaining == 0 { "noise_chunk" } else { "$" },
+                            position: Some(pos),
+                            batch_index: None,
+                            kind: DensitySampleErrorKind::WorkExceeded { limit, used },
+                        }
+                        .into(),
+                        fault @ ChargeFault::Carver { .. } => NoiseChunkCoreError::Work(fault),
+                    });
+                let result = s
+                    .state
+                    .sample(&s.data, &s.view, root, pos, true, &mut actual)
+                    .map(f64::to_bits);
+                assert_eq!(
+                    result, expected,
+                    "prefix={prefix} remaining={remaining} wide={wide}"
+                );
+                if wide {
+                    assert_eq!(actual.carver_meter(), original.carver_meter());
+                } else {
+                    assert_eq!(actual.used(), original.used());
+                }
+                let Cache::Interpolated(interp) = &s.state.wrappers[id].cache else {
+                    panic!()
+                };
+                assert_eq!(interp.corners, corners);
+            }
+        }
+    }
+}

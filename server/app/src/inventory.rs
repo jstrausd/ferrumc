@@ -13,13 +13,16 @@
 //! is a synchronous, lock-free local read instead of a per-packet driver
 //! round-trip (creative-slot packets are frequent during menu editing).
 
+#[cfg(test)]
 use std::num::NonZeroU8;
 
 use ferrumc_core::GameMode;
-use ferrumc_items::{
-    encode_container_content_payload, left_click_exchange, ComponentPatch, ItemId, ItemStack,
-    ItemValidationError,
-};
+use ferrumc_items::{encode_container_content_payload, ItemStack, ItemValidationError};
+
+#[cfg(test)]
+use ferrumc_items::{left_click_exchange, ComponentPatch, ItemId};
+
+type CraftPostimage = (Vec<ItemStack>, Vec<ItemStack>, ItemStack);
 
 /// The player-inventory window id (window 0 is always open).
 pub(crate) const WINDOW_ID: i32 = 0;
@@ -56,7 +59,7 @@ const LEGGINGS_SLOT: usize = 7;
 /// Inventory index of the worn boots.
 const BOOTS_SLOT: usize = 8;
 /// Inventory index of the off-hand slot.
-const OFFHAND_SLOT: usize = 45;
+pub(crate) const OFFHAND_SLOT: usize = 45;
 
 // Equipment-slot ids carried in the clientbound `SetEquipment` packet: the low 7
 // bits of each entry's slot byte. The high bit (`EQUIPMENT_CONTINUATION_BIT`)
@@ -82,6 +85,7 @@ const EQUIPMENT_CONTINUATION_BIT: u8 = 0x80;
 /// The starter creative kit placed in the hotbar (slots `36..=44`) on join: one
 /// simple, placeable full block per hotbar slot. Every name is a placeable block
 /// item in the pinned 1.21.8 registry.
+#[cfg(test)]
 const HOTBAR_KIT: [&str; HOTBAR_LEN as usize] = [
     "stone",
     "dirt",
@@ -95,6 +99,7 @@ const HOTBAR_KIT: [&str; HOTBAR_LEN as usize] = [
 ];
 
 /// Count of each kit item placed in the hotbar.
+#[cfg(test)]
 const KIT_STACK_COUNT: u8 = 64;
 
 /// The window state id carried by the first `SetContainerContent` on join. It is
@@ -115,11 +120,109 @@ pub(crate) struct PlayerInventory {
     selected: u8,
     /// The connection-local mirror of the player's authoritative game mode.
     game_mode: GameMode,
+    recipes: Option<ferrumc_items::NormalRecipes>,
+    table_inputs: [ItemStack; 9],
+}
+
+/// Immutable prepared inventory state, pinned until a matching food owner ACK.
+pub(crate) struct PreparedConsumption {
+    slots: [ItemStack; SLOT_COUNT],
+    carried: ItemStack,
 }
 
 impl PlayerInventory {
+    /// Checks the complete projected-DAMAGE envelope for the current image.
+    pub(crate) fn admit_budget(&self) -> anyhow::Result<()> {
+        crate::inventory_budget::admit(
+            self.slots
+                .iter()
+                .chain(std::iter::once(&self.carried))
+                .chain(self.table_inputs.iter()),
+        )
+    }
+
+    /// Preflights a container postimage before the world owner can commit.
+    pub(crate) fn admit_container_candidate(
+        &self,
+        window: &[ItemStack],
+        carried: &ItemStack,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            window.len() == PLAYER_WINDOW_END - MAIN_START,
+            "invalid player window shape"
+        );
+        crate::inventory_budget::admit(
+            self.slots
+                .iter()
+                .enumerate()
+                .map(|(index, stack)| {
+                    if (MAIN_START..PLAYER_WINDOW_END).contains(&index) {
+                        &window[index - MAIN_START]
+                    } else {
+                        stack
+                    }
+                })
+                .chain(std::iter::once(carried))
+                .chain(self.table_inputs.iter()),
+        )
+    }
+
+    /// Preflights the exact shared shift/number-key chest postimage before send.
+    pub(crate) fn admit_chest_inventory_candidate(
+        &self,
+        chest: &[ItemStack],
+        slot: usize,
+        hotbar: Option<u8>,
+    ) -> anyhow::Result<()> {
+        let (_, after) =
+            ferrumc_items::plan_chest_inventory_click(chest, self.window_slots(), slot, hotbar)?;
+        self.admit_container_candidate(&after, &self.carried)
+    }
+
+    /// Preflights the exact shared cursor exchange before a chest owner command.
+    pub(crate) fn admit_chest_cursor_candidate(
+        &self,
+        slot: &ItemStack,
+        right: bool,
+    ) -> anyhow::Result<()> {
+        let mut slot = slot.clone();
+        let mut cursor = self.carried.clone();
+        ferrumc_items::exchange_slot(&mut slot, &mut cursor, right)?;
+        self.admit_container_candidate(self.window_slots(), &cursor)
+    }
+
+    // Synchronous local planning cannot publish a candidate to any other lane.
+    // A refusal retains the complete beforeimage, including the state ID.
+    fn stage<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let mut candidate = Self {
+            slots: self.slots.clone(),
+            carried: self.carried.clone(),
+            state_id: self.state_id,
+            selected: self.selected,
+            game_mode: self.game_mode,
+            recipes: self.recipes.take(),
+            table_inputs: self.table_inputs.clone(),
+        };
+        let result = operation(&mut candidate).and_then(|result| {
+            candidate.admit_budget()?;
+            Ok(result)
+        });
+        self.recipes = candidate.recipes.take();
+        if result.is_ok() {
+            self.slots = candidate.slots;
+            self.carried = candidate.carried;
+            self.table_inputs = candidate.table_inputs;
+            self.state_id = candidate.state_id;
+        }
+        result
+    }
+
     /// Builds an inventory seeded with the creative starter kit in the hotbar and
     /// the given game-mode mirror.
+    #[cfg(test)]
     pub(crate) fn with_creative_kit(game_mode: GameMode) -> Self {
         let mut slots: [ItemStack; SLOT_COUNT] = std::array::from_fn(|_| ItemStack::empty());
         let count = NonZeroU8::new(KIT_STACK_COUNT).unwrap_or(NonZeroU8::MIN);
@@ -136,6 +239,8 @@ impl PlayerInventory {
             state_id: INITIAL_STATE_ID,
             selected: 0,
             game_mode,
+            recipes: ferrumc_items::NormalRecipes::builtin().ok(),
+            table_inputs: std::array::from_fn(|_| ItemStack::empty()),
         }
     }
 
@@ -158,6 +263,8 @@ impl PlayerInventory {
             state_id: INITIAL_STATE_ID,
             selected: if selected < HOTBAR_LEN { selected } else { 0 },
             game_mode,
+            recipes: ferrumc_items::NormalRecipes::builtin().ok(),
+            table_inputs: std::array::from_fn(|_| ItemStack::empty()),
         }
     }
 
@@ -201,13 +308,15 @@ impl PlayerInventory {
         &self.carried
     }
 
-    /// Adopts the authoritative carried result of a completed chest transaction.
+    /// Adopts a completed container receipt whose full postimage was admitted
+    /// before its owner command. Restored cursor data enters via `from_persisted`.
     pub(crate) fn set_carried(&mut self, carried: ItemStack) {
         self.carried = carried;
         self.bump_state_id();
     }
 
     /// Conserving exchange between one player slot and its carried stack.
+    #[cfg(test)]
     pub(crate) fn exchange_carried(&mut self, index: usize) {
         if let Some(slot) = self.slots.get_mut(index) {
             left_click_exchange(slot, &mut self.carried);
@@ -217,43 +326,308 @@ impl PlayerInventory {
 
     /// Applies a normal left/right click to window 0 using only server state.
     ///
-    /// The crafting result is read-only until recipes are implemented. Armor
+    /// The crafting result consumes a matching pinned normal recipe. Armor
     /// removal is allowed, but armor insertion is refused until equippable and
     /// binding rules are modeled. Main storage, hotbar, crafting inputs and
     /// offhand accept ordinary exchanges. Spectators cannot mutate any slot.
     /// Returns whether either stack changed, advancing the state ID once.
-    pub(crate) fn normal_click(
-        &mut self,
-        index: usize,
-        button: i8,
-    ) -> Result<bool, ItemValidationError> {
-        if self.game_mode == GameMode::Spectator
-            || index == 0
-            || !matches!(button, 0 | 1)
-            || (HELMET_SLOT..=BOOTS_SLOT).contains(&index) && self.carried.item().is_some()
-        {
+    pub(crate) fn normal_click(&mut self, index: usize, button: i8) -> anyhow::Result<bool> {
+        self.stage(|candidate| candidate.normal_click_inner(index, button))
+    }
+
+    fn normal_click_inner(&mut self, index: usize, button: i8) -> anyhow::Result<bool> {
+        if self.game_mode == GameMode::Spectator || !matches!(button, 0 | 1) {
+            return Ok(false);
+        }
+        if index == 0 {
+            return self.craft_once(false);
+        }
+        if (HELMET_SLOT..=BOOTS_SLOT).contains(&index) && self.carried.item().is_some() {
             return Ok(false);
         }
         let Some(slot) = self.slots.get_mut(index) else {
             return Ok(false);
         };
-        let changed = match (slot.item(), self.carried.item()) {
-            (None, None) => false,
-            (Some(slot_item), Some(cursor_item))
-                if slot_item == cursor_item && slot.components() == self.carried.components() =>
-            {
-                slot.count() < slot_item.max_stack()
-            }
-            _ => true,
+        let changed = ferrumc_items::exchange_slot(slot, &mut self.carried, button == 1)?;
+        if changed {
+            self.refresh_crafting_inner()?;
+            self.bump_state_id();
+        }
+        Ok(changed)
+    }
+
+    /// Recomputes the derived 2×2 result; this preview owns no ingredients.
+    #[cfg(test)]
+    pub(crate) fn refresh_crafting(&mut self) -> anyhow::Result<()> {
+        self.stage(Self::refresh_crafting_inner)
+    }
+
+    fn refresh_crafting_inner(&mut self) -> anyhow::Result<()> {
+        let grid = ferrumc_items::CraftingGrid::new(2, &self.slots[1..5])?;
+        self.slots[0] = self
+            .recipes
+            .as_ref()
+            .and_then(|recipes| recipes.iter().find(|recipe| recipe.matches(&grid)))
+            .map_or_else(ItemStack::empty, |recipe| recipe.output().clone());
+        Ok(())
+    }
+
+    fn craft_once(&mut self, quick: bool) -> anyhow::Result<bool> {
+        let Some((inputs, storage, cursor)) = self.craft_grid(2, &self.slots[1..5], quick)? else {
+            return Ok(false);
         };
-        if !changed {
+        self.slots[1..5].clone_from_slice(&inputs);
+        self.slots[MAIN_START..PLAYER_WINDOW_END].clone_from_slice(&storage);
+        self.carried = cursor;
+        self.refresh_crafting_inner()?;
+        self.bump_state_id();
+        Ok(true)
+    }
+
+    fn craft_grid(
+        &self,
+        side: u8,
+        inputs: &[ItemStack],
+        quick: bool,
+    ) -> anyhow::Result<Option<CraftPostimage>> {
+        self.admit_table_stacks(inputs)?;
+        let grid = ferrumc_items::CraftingGrid::new(side, inputs)?;
+        let Some(recipe) = self
+            .recipes
+            .as_ref()
+            .and_then(|recipes| recipes.iter().find(|recipe| recipe.matches(&grid)))
+        else {
+            return Ok(None);
+        };
+        let Some(plan) = recipe.plan_one(&grid)? else {
+            return Ok(None);
+        };
+        let mut storage = self.window_slots().to_vec();
+        let cursor_after = if quick {
+            let mut output = plan.output().clone();
+            ferrumc_items::transfer_into_slots(&mut output, &mut storage, true)?;
+            if output.item().is_some() {
+                return Ok(None);
+            }
+            self.carried.clone()
+        } else {
+            if self.carried.item().is_some()
+                && !ferrumc_items::same_stack_representation(plan.output(), &self.carried)?
+            {
+                return Ok(None);
+            }
+            let transfer = ferrumc_items::plan_transfer(
+                plan.output(),
+                &self.carried,
+                plan.output().count(),
+                ferrumc_items::stack_capacity(plan.output())?,
+            )?;
+            if transfer.moved() != plan.output().count() {
+                return Ok(None);
+            }
+            transfer.into_stacks().1
+        };
+        let (_, mut inputs, rests) = plan.into_parts();
+        for (input, mut rest) in inputs.iter_mut().zip(rests) {
+            let cap = if input.item().is_some() {
+                ferrumc_items::stack_capacity(input)?
+            } else {
+                ferrumc_items::stack_capacity(&rest)?
+            };
+            let remainder = ferrumc_items::plan_transfer(&rest, input, rest.count(), cap)?;
+            (rest, *input) = remainder.into_stacks();
+            ferrumc_items::transfer_into_slots(&mut rest, &mut storage, false)?;
+            if rest.item().is_some() {
+                return Ok(None);
+            }
+        }
+        Ok(Some((inputs, storage, cursor_after)))
+    }
+
+    fn admit_table_stacks(&self, inputs: &[ItemStack]) -> anyhow::Result<()> {
+        let mut bytes = 0usize;
+        for stack in inputs
+            .iter()
+            .chain(self.window_slots())
+            .chain(std::iter::once(&self.carried))
+        {
+            bytes = bytes
+                .checked_add(ferrumc_items::persisted_stack_size(stack)?)
+                .ok_or_else(|| anyhow::anyhow!("crafting inventory budget overflow"))?;
+            anyhow::ensure!(bytes <= 1024 * 1024, "crafting inventory budget exceeded");
+            ferrumc_items::stack_capacity(stack)?;
+        }
+        Ok(())
+    }
+
+    /// Persisted 3×3 inputs, retained if returning them encounters a full bag.
+    pub(crate) fn table_inputs(&self) -> &[ItemStack; 9] {
+        &self.table_inputs
+    }
+
+    /// Restores the lossless persisted crafting-table inputs.
+    pub(crate) fn restore_table_inputs(&mut self, inputs: [ItemStack; 9]) {
+        self.table_inputs = inputs;
+    }
+
+    /// Builds a 46-slot crafting-table screen, including its derived result.
+    pub(crate) fn table_content_payload(&self) -> anyhow::Result<Vec<u8>> {
+        let grid = ferrumc_items::CraftingGrid::new(3, &self.table_inputs)?;
+        let result = self
+            .recipes
+            .as_ref()
+            .and_then(|recipes| recipes.iter().find(|recipe| recipe.matches(&grid)))
+            .map_or_else(ItemStack::empty, |recipe| recipe.output().clone());
+        let mut slots = Vec::with_capacity(46);
+        slots.push(result);
+        slots.extend_from_slice(&self.table_inputs);
+        slots.extend_from_slice(self.window_slots());
+        Ok(encode_container_content_payload(&slots, &self.carried)?)
+    }
+
+    /// Applies authoritative ordinary/shift/number-key crafting-table clicks.
+    pub(crate) fn table_click(
+        &mut self,
+        slot: usize,
+        button: i8,
+        mode: i32,
+    ) -> anyhow::Result<bool> {
+        self.stage(|candidate| candidate.table_click_inner(slot, button, mode))
+    }
+
+    fn table_click_inner(&mut self, slot: usize, button: i8, mode: i32) -> anyhow::Result<bool> {
+        if self.game_mode == GameMode::Spectator || slot >= 46 {
             return Ok(false);
         }
-        if button == 0 {
-            left_click_exchange(slot, &mut self.carried);
-        } else {
-            right_click_exchange(slot, &mut self.carried)?;
+        if slot == 0 {
+            if !matches!(mode, 0 | 1) || !matches!(button, 0 | 1) {
+                return Ok(false);
+            }
+            let mut changed = false;
+            for _ in 0..if mode == 1 { 64 } else { 1 } {
+                let Some((inputs, storage, cursor)) =
+                    self.craft_grid(3, &self.table_inputs, mode == 1)?
+                else {
+                    break;
+                };
+                self.table_inputs.clone_from_slice(&inputs);
+                self.slots[MAIN_START..PLAYER_WINDOW_END].clone_from_slice(&storage);
+                self.carried = cursor;
+                changed = true;
+            }
+            if changed {
+                self.bump_state_id();
+            }
+            return Ok(changed);
         }
+        self.admit_table_stacks(&self.table_inputs)?;
+        let mut inputs = self.table_inputs.clone();
+        let mut storage = self.window_slots().to_vec();
+        let mut cursor = self.carried.clone();
+        let changed = match mode {
+            0 if matches!(button, 0 | 1) => {
+                let target = if slot <= 9 {
+                    &mut inputs[slot - 1]
+                } else {
+                    &mut storage[slot - 10]
+                };
+                ferrumc_items::exchange_slot(target, &mut cursor, button == 1)?
+            }
+            1 if matches!(button, 0 | 1) => {
+                if slot <= 9 {
+                    ferrumc_items::transfer_into_slots(&mut inputs[slot - 1], &mut storage, false)?
+                } else {
+                    ferrumc_items::transfer_into_slots(&mut storage[slot - 10], &mut inputs, false)?
+                }
+            }
+            2 if (0..9).contains(&button) => {
+                let hotbar = 27 + button as usize;
+                if slot <= 9 {
+                    std::mem::swap(&mut inputs[slot - 1], &mut storage[hotbar]);
+                } else {
+                    storage.swap(slot - 10, hotbar);
+                }
+                true
+            }
+            _ => false,
+        };
+        if changed {
+            self.table_inputs = inputs;
+            self.slots[MAIN_START..PLAYER_WINDOW_END].clone_from_slice(&storage);
+            self.carried = cursor;
+            self.bump_state_id();
+        }
+        Ok(changed)
+    }
+
+    /// Shift-clicks the result repeatedly or transfers an ordinary slot.
+    pub(crate) fn quick_move(&mut self, index: usize) -> anyhow::Result<bool> {
+        self.stage(|candidate| candidate.quick_move_inner(index))
+    }
+
+    fn quick_move_inner(&mut self, index: usize) -> anyhow::Result<bool> {
+        if self.game_mode == GameMode::Spectator || index >= SLOT_COUNT {
+            return Ok(false);
+        }
+        if index == 0 {
+            let mut changed = false;
+            for _ in 0..64 {
+                if !self.craft_once(true)? {
+                    break;
+                }
+                changed = true;
+            }
+            return Ok(changed);
+        }
+        let range = if (MAIN_START..HOTBAR_START).contains(&index) {
+            HOTBAR_START..PLAYER_WINDOW_END
+        } else if (HOTBAR_START..PLAYER_WINDOW_END).contains(&index) {
+            MAIN_START..HOTBAR_START
+        } else {
+            MAIN_START..PLAYER_WINDOW_END
+        };
+        let mut source = self.slots[index].clone();
+        let mut destinations = self.slots[range.clone()].to_vec();
+        if !ferrumc_items::transfer_into_slots(&mut source, &mut destinations, false)? {
+            return Ok(false);
+        }
+        self.slots[index] = source;
+        self.slots[range].clone_from_slice(&destinations);
+        self.refresh_crafting_inner()?;
+        self.bump_state_id();
+        Ok(true)
+    }
+
+    /// Adopts a completed atomic container transaction's player section.
+    /// The full postimage must pass `admit_container_candidate` before owner send.
+    pub(crate) fn set_window_slots(&mut self, slots: Vec<ItemStack>) {
+        if slots.len() == PLAYER_WINDOW_END - MAIN_START {
+            for (destination, stack) in self.slots[MAIN_START..PLAYER_WINDOW_END]
+                .iter_mut()
+                .zip(slots)
+            {
+                *destination = stack;
+            }
+            self.bump_state_id();
+        }
+    }
+
+    /// Number-key swap in writable window-0 slots; cursor is unchanged.
+    pub(crate) fn hotbar_swap(&mut self, index: usize, hotbar: u8) -> anyhow::Result<bool> {
+        self.stage(|candidate| candidate.hotbar_swap_inner(index, hotbar))
+    }
+
+    fn hotbar_swap_inner(&mut self, index: usize, hotbar: u8) -> anyhow::Result<bool> {
+        if self.game_mode == GameMode::Spectator
+            || hotbar >= 9
+            || index == 0
+            || index >= SLOT_COUNT
+            || (HELMET_SLOT..=BOOTS_SLOT).contains(&index)
+        {
+            return Ok(false);
+        }
+        self.slots.swap(index, HOTBAR_START + usize::from(hotbar));
+        self.refresh_crafting_inner()?;
         self.bump_state_id();
         Ok(true)
     }
@@ -262,17 +636,36 @@ impl PlayerInventory {
     /// original input slot because ground-item drops are not implemented yet.
     /// The result slot is never deposited: it has no authoritative recipe.
     pub(crate) fn return_crafting_inputs(&mut self) {
+        let _ = self.stage(|candidate| {
+            candidate.return_crafting_inputs_inner();
+            Ok(())
+        });
+    }
+
+    fn return_crafting_inputs_inner(&mut self) {
+        self.slots[0] = ItemStack::empty();
         for index in 1..=4 {
             let input = std::mem::replace(&mut self.slots[index], ItemStack::empty());
-            self.slots[index] = self.deposit(input);
+            self.slots[index] = self.deposit_inner(input);
         }
     }
 
     /// Returns carried items to storage slots when possible, retaining overflow.
     /// Repeated attempts cannot create or discard a stack, including components.
     pub(crate) fn return_carried(&mut self) {
+        let _ = self.stage(|candidate| {
+            candidate.return_carried_inner();
+            Ok(())
+        });
+    }
+
+    fn return_carried_inner(&mut self) {
+        for index in 0..9 {
+            let input = std::mem::replace(&mut self.table_inputs[index], ItemStack::empty());
+            self.table_inputs[index] = self.deposit_inner(input);
+        }
         let carried = std::mem::replace(&mut self.carried, ItemStack::empty());
-        self.carried = self.deposit(carried);
+        self.carried = self.deposit_inner(carried);
     }
 
     /// The 36-slot main-inventory + hotbar region (`MAIN_START..PLAYER_WINDOW_END`)
@@ -296,35 +689,33 @@ impl PlayerInventory {
     /// stored so the follow-up window-0 resync carries a fresh id. A non-empty
     /// return means the inventory was full; [`Self::return_carried`] retains it.
     #[must_use]
-    pub(crate) fn deposit(&mut self, mut cursor: ItemStack) -> ItemStack {
+    pub(crate) fn deposit(&mut self, cursor: ItemStack) -> ItemStack {
+        let original = cursor.clone();
+        self.stage(|candidate| Ok(candidate.deposit_inner(cursor)))
+            .unwrap_or(original)
+    }
+
+    fn deposit_inner(&mut self, mut cursor: ItemStack) -> ItemStack {
         if cursor.item().is_none() {
             return cursor;
         }
-        // Pass 1: top up existing matching stacks.
-        for index in MAIN_START..PLAYER_WINDOW_END {
-            if cursor.item().is_none() {
-                break;
-            }
-            let slot = &mut self.slots[index];
-            if slot.item().is_some()
-                && slot.item() == cursor.item()
-                && slot.components() == cursor.components()
-            {
-                left_click_exchange(slot, &mut cursor);
-            }
+        if std::iter::once(&cursor)
+            .chain(self.window_slots())
+            .any(|stack| ferrumc_items::stack_capacity(stack).is_err())
+        {
+            return cursor;
         }
-        // Pass 2: drop the remainder into the first empty slots.
-        for index in MAIN_START..PLAYER_WINDOW_END {
-            if cursor.item().is_none() {
-                break;
+        let original = cursor.clone();
+        let mut slots = self.window_slots().to_vec();
+        match ferrumc_items::transfer_into_slots(&mut cursor, &mut slots, false) {
+            Ok(true) => {
+                self.slots[MAIN_START..PLAYER_WINDOW_END].clone_from_slice(&slots);
+                self.bump_state_id();
+                cursor
             }
-            let slot = &mut self.slots[index];
-            if slot.item().is_none() {
-                left_click_exchange(slot, &mut cursor);
-            }
+            Ok(false) => cursor,
+            Err(_) => original,
         }
-        self.bump_state_id();
-        cursor
     }
 
     /// The stack in the currently selected hotbar slot.
@@ -348,16 +739,283 @@ impl PlayerInventory {
         }
     }
 
+    /// Preflights every persisted slot, cursor and table input before owner food
+    /// admission. An overflowed bowl/bottle refuses; no remainder is discarded.
+    pub(crate) fn prepare_consumption(
+        &self,
+        slot: usize,
+        food: ferrumc_items::FoodProperties,
+    ) -> anyhow::Result<Option<PreparedConsumption>> {
+        let Some(stack) = self.slots.get(slot) else {
+            return Ok(None);
+        };
+        if stack.item().is_none() || self.game_mode == GameMode::Spectator {
+            return Ok(None);
+        }
+        let mut slots = self.slots.clone();
+        let carried = self.carried.clone();
+        if self.game_mode != GameMode::Creative {
+            let (source, _) = ferrumc_items::plan_split(stack, 1)?.into_stacks();
+            slots[slot] = source;
+            if let Some(item) = food.remainder() {
+                let mut remainder = ItemStack::new(
+                    item,
+                    std::num::NonZeroU8::MIN,
+                    ferrumc_items::ComponentPatch::empty(),
+                );
+                if slots[slot].item().is_none() {
+                    slots[slot] = remainder;
+                } else {
+                    ferrumc_items::transfer_into_slots(
+                        &mut remainder,
+                        &mut slots[MAIN_START..PLAYER_WINDOW_END],
+                        false,
+                    )?;
+                    if remainder.item().is_some() {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        crate::inventory_budget::admit(
+            slots
+                .iter()
+                .chain(std::iter::once(&carried))
+                .chain(self.table_inputs.iter()),
+        )?;
+        Ok(Some(PreparedConsumption { slots, carried }))
+    }
+
+    /// Prepares the exact one-item placement debit while the connection retains
+    /// exclusive inventory ownership until the tracked world result arrives.
+    pub(crate) fn prepare_placement(
+        &self,
+        hand: i32,
+    ) -> anyhow::Result<Option<PreparedConsumption>> {
+        let slot = match hand {
+            0 => HOTBAR_START + usize::from(self.selected),
+            1 => OFFHAND_SLOT,
+            _ => return Ok(None),
+        };
+        if self.game_mode == GameMode::Spectator || self.slots[slot].item().is_none() {
+            return Ok(None);
+        }
+        let mut slots = self.slots.clone();
+        slots[slot] = ferrumc_items::plan_split(&self.slots[slot], 1)?
+            .into_stacks()
+            .0;
+        let carried = self.carried.clone();
+        crate::inventory_budget::admit(
+            slots
+                .iter()
+                .chain(std::iter::once(&carried))
+                .chain(self.table_inputs.iter()),
+        )?;
+        Ok(Some(PreparedConsumption { slots, carried }))
+    }
+
+    /// Prepares a complete bucket postimage before admitting any fluid change.
+    /// A full destination refuses instead of discarding the filled result. The
+    /// Creative duplicate policy follows ItemUtils.createFilledResult.
+    pub(crate) fn prepare_bucket(
+        &self,
+        hand: i32,
+        fill: bool,
+    ) -> anyhow::Result<Option<PreparedConsumption>> {
+        let slot = match hand {
+            0 => HOTBAR_START + usize::from(self.selected),
+            1 => OFFHAND_SLOT,
+            _ => return Ok(None),
+        };
+        if matches!(self.game_mode, GameMode::Spectator | GameMode::Adventure) {
+            return Ok(None);
+        }
+        let source_name = if fill { "bucket" } else { "water_bucket" };
+        let destination_name = if fill { "water_bucket" } else { "bucket" };
+        let source = ferrumc_items::ItemId::from_name(source_name)
+            .ok_or_else(|| anyhow::anyhow!("missing bucket item"))?;
+        if self.slots[slot].item() != Some(source) {
+            return Ok(None);
+        }
+        // New vanilla bucket results carry default components; the residual
+        // empty bucket stack retains its exact ordered patch via plan_split.
+        let destination = ferrumc_items::ItemId::from_name(destination_name)
+            .ok_or_else(|| anyhow::anyhow!("missing bucket result"))?;
+        let mut result = ItemStack::new(
+            destination,
+            std::num::NonZeroU8::MIN,
+            ferrumc_items::ComponentPatch::empty(),
+        );
+        let mut slots = self.slots.clone();
+        if self.game_mode == GameMode::Creative {
+            if fill
+                && !slots[HELMET_SLOT..SLOT_COUNT].iter().any(|stack| {
+                    stack.item() == result.item() && stack.components() == result.components()
+                })
+            {
+                ferrumc_items::transfer_into_slots(
+                    &mut result,
+                    &mut slots[MAIN_START..PLAYER_WINDOW_END],
+                    false,
+                )?;
+                if result.item().is_some() {
+                    return Ok(None);
+                }
+            }
+        } else {
+            slots[slot] = ferrumc_items::plan_split(&self.slots[slot], 1)?
+                .into_stacks()
+                .0;
+            if slots[slot].item().is_none() {
+                slots[slot] = result;
+            } else {
+                ferrumc_items::transfer_into_slots(
+                    &mut result,
+                    &mut slots[MAIN_START..PLAYER_WINDOW_END],
+                    false,
+                )?;
+                if result.item().is_some() {
+                    return Ok(None);
+                }
+            }
+        }
+        let carried = self.carried.clone();
+        crate::inventory_budget::admit(
+            slots
+                .iter()
+                .chain(std::iter::once(&carried))
+                .chain(self.table_inputs.iter()),
+        )?;
+        Ok(Some(PreparedConsumption { slots, carried }))
+    }
+
+    /// Publishes the exact preflighted snapshot after an accepted owner result.
+    pub(crate) fn commit_consumption(&mut self, prepared: PreparedConsumption) {
+        self.slots = prepared.slots;
+        self.carried = prepared.carried;
+        self.bump_state_id();
+    }
+
+    /// Adopts the already-budgeted held-drop postimage after genuine driver
+    /// acceptance and exact beforeimage comparison in the serial handler.
+    pub(crate) fn commit_held_drop(&mut self, slot: usize, stack: ItemStack) {
+        self.slots[slot] = stack;
+        self.bump_state_id();
+    }
+
+    /// Adopts the complete preflighted empty image after whole death-batch acceptance.
+    pub(crate) fn commit_death(
+        &mut self,
+        cleared: crate::death_inventory::ClearedInventory,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            cleared.matches(self)?,
+            "accepted death batch differs from pinned inventory"
+        );
+        let (slots, carried, table_inputs) = cleared.into_parts();
+        self.slots = slots;
+        self.carried = carried;
+        self.table_inputs = table_inputs;
+        self.bump_state_id();
+        Ok(())
+    }
+
+    /// Applies wear only to the exact FCIS beforeimage retained for this attempt.
+    /// An ambiguous moved stack refuses wear rather than choosing another tool.
+    pub(crate) fn damage_witness(
+        &mut self,
+        witness: &crate::mining_witness::ToolWitness,
+        amount: u32,
+    ) -> anyhow::Result<bool> {
+        let Some(plan) = crate::mining_wear::plan_wear(self, witness, amount)? else {
+            return Ok(false);
+        };
+        self.apply_wear_plan(plan)?;
+        Ok(true)
+    }
+
+    /// Captures combat only after admitting every future DAMAGE postimage.
+    pub(crate) fn combat_snapshot(&self) -> anyhow::Result<crate::combat_wear::CombatWearSnapshot> {
+        self.admit_budget()?;
+        crate::combat_wear::CombatWearSnapshot::capture(self)
+    }
+
+    /// Checks the full persisted budget before adopting one exact wear postimage.
+    pub(crate) fn apply_wear_plan(
+        &mut self,
+        plan: crate::mining_wear::MiningWearPlan,
+    ) -> anyhow::Result<()> {
+        self.apply_wear_plans(vec![plan])
+    }
+
+    /// Adopts all armor postimages only after the complete save budget is admitted.
+    pub(crate) fn apply_armor_wear(
+        &mut self,
+        plan: crate::combat_wear::ArmorWearPlan,
+    ) -> anyhow::Result<bool> {
+        let changed = plan.iter().next().is_some();
+        self.apply_wear_plans(plan.into_postimages().collect())?;
+        Ok(changed)
+    }
+
+    fn apply_wear_plans(
+        &mut self,
+        plans: Vec<crate::mining_wear::MiningWearPlan>,
+    ) -> anyhow::Result<()> {
+        use crate::mining_wear::WearLocation;
+        if plans.is_empty() {
+            return Ok(());
+        }
+        let stacks = self
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (WearLocation::Slot(i), s))
+            .chain(std::iter::once((WearLocation::Cursor, &self.carried)))
+            .chain(
+                self.table_inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| (WearLocation::TableInput(i), s)),
+            );
+        crate::inventory_budget::admit(stacks.map(|(at, stack)| {
+            plans
+                .iter()
+                .find(|p| p.location() == at)
+                .map_or(stack, crate::mining_wear::MiningWearPlan::stack_after)
+        }))?;
+        for plan in plans {
+            let location = plan.location();
+            tracing::trace!(
+                broken = plan.broken(),
+                ?location,
+                "applying committed exact item wear"
+            );
+            let after = plan.into_stack();
+            match location {
+                WearLocation::Slot(index) => self.slots[index] = after,
+                WearLocation::Cursor => self.carried = after,
+                WearLocation::TableInput(index) => self.table_inputs[index] = after,
+            }
+        }
+        self.bump_state_id();
+        Ok(())
+    }
+
     /// Stores the (already-validated) `stack` into slot `index` and bumps the
     /// state id.
     ///
     /// The caller must bounds-check `index` (`0..SLOT_COUNT`) and validate `stack`
     /// through `ferrumc_items` first; an out-of-range index is a no-op.
     pub(crate) fn set_creative_slot(&mut self, index: usize, stack: ItemStack) {
-        if let Some(slot) = self.slots.get_mut(index) {
-            *slot = stack;
-            self.bump_state_id();
+        if index >= SLOT_COUNT {
+            return;
         }
+        let _ = self.stage(|candidate| {
+            candidate.slots[index] = stack;
+            candidate.bump_state_id();
+            Ok(())
+        });
     }
 
     /// Advances the window state id (wrapping), used after a resync so the client
@@ -440,52 +1098,12 @@ impl PlayerInventory {
     }
 }
 
-/// Copies a bounded stack count without discarding its component patch.
-fn with_count(stack: &ItemStack, count: u8) -> Result<ItemStack, ItemValidationError> {
-    let Some(item) = stack.item().filter(|_| count > 0) else {
-        return Ok(ItemStack::empty());
-    };
-    ItemStack::try_new(item, count, stack.components().clone())
-}
-
 /// Normal right-click: pick up the larger half, place one, or swap unlike items.
 /// Both new stacks are built before assigning so even a validation error cannot
 /// partially consume an item. Stack caps follow the existing registry contract.
-fn right_click_exchange(
-    slot: &mut ItemStack,
-    cursor: &mut ItemStack,
-) -> Result<(), ItemValidationError> {
-    let (next_slot, next_cursor) = match (slot.item(), cursor.item()) {
-        (Some(_), None) => {
-            let picked = slot.count().div_ceil(2);
-            (
-                with_count(slot, slot.count() - picked)?,
-                with_count(slot, picked)?,
-            )
-        }
-        (None, Some(_)) => (
-            with_count(cursor, 1)?,
-            with_count(cursor, cursor.count() - 1)?,
-        ),
-        (Some(slot_item), Some(cursor_item))
-            if slot_item == cursor_item && slot.components() == cursor.components() =>
-        {
-            if slot.count() >= slot_item.max_stack() {
-                return Ok(());
-            }
-            (
-                with_count(slot, slot.count() + 1)?,
-                with_count(cursor, cursor.count() - 1)?,
-            )
-        }
-        (None, None) => return Ok(()),
-        _ => {
-            std::mem::swap(slot, cursor);
-            return Ok(());
-        }
-    };
-    *slot = next_slot;
-    *cursor = next_cursor;
+#[cfg(test)]
+fn right_click_exchange(slot: &mut ItemStack, cursor: &mut ItemStack) -> anyhow::Result<()> {
+    ferrumc_items::exchange_slot(slot, cursor, true)?;
     Ok(())
 }
 
@@ -516,6 +1134,114 @@ mod tests {
             ),
         )
         .expect("valid stack")
+    }
+
+    #[test]
+    fn three_by_three_tools_and_bucket_remainders_are_atomic() {
+        let mut inventory = PlayerInventory::from_persisted(
+            GameMode::Survival,
+            0,
+            std::array::from_fn(|_| ItemStack::empty()),
+            ItemStack::empty(),
+        );
+        let make = |name: &str, count| {
+            ItemStack::try_new(
+                ItemId::from_name(name).unwrap(),
+                count,
+                ComponentPatch::empty(),
+            )
+            .unwrap()
+        };
+        inventory.table_inputs[0] = make("iron_ingot", 2);
+        inventory.table_inputs[1] = make("iron_ingot", 2);
+        inventory.table_inputs[2] = make("iron_ingot", 2);
+        inventory.table_inputs[4] = make("stick", 2);
+        inventory.table_inputs[7] = make("stick", 2);
+        inventory.carried = make("stone", 64);
+        let before = inventory.table_inputs.clone();
+        assert!(!inventory.table_click(0, 0, 0).unwrap());
+        assert_eq!(inventory.table_inputs, before);
+        inventory.carried = ItemStack::empty();
+        assert!(inventory.table_click(0, 0, 1).unwrap());
+        assert!(inventory
+            .table_inputs
+            .iter()
+            .all(|item| item.item().is_none()));
+        assert_eq!(
+            inventory
+                .window_slots()
+                .iter()
+                .filter(|item| item.item() == ItemId::from_name("iron_pickaxe"))
+                .count(),
+            2
+        );
+        inventory.table_inputs = [
+            make("milk_bucket", 1),
+            make("milk_bucket", 1),
+            make("milk_bucket", 1),
+            make("sugar", 1),
+            make("egg", 1),
+            make("sugar", 1),
+            make("wheat", 1),
+            make("wheat", 1),
+            make("wheat", 1),
+        ];
+        assert!(inventory.table_click(0, 0, 0).unwrap());
+        assert_eq!(inventory.carried.item(), ItemId::from_name("cake"));
+        for index in 0..3 {
+            assert_eq!(
+                inventory.table_inputs[index].item(),
+                ItemId::from_name("bucket")
+            );
+        }
+        assert!(inventory.table_inputs[3..]
+            .iter()
+            .all(|stack| stack.item().is_none()));
+        for index in MAIN_START..PLAYER_WINDOW_END {
+            inventory.slots[index] = make("stone", 64);
+        }
+        let before = inventory.table_inputs.clone();
+        inventory.return_carried();
+        assert_eq!(inventory.table_inputs, before);
+        assert_eq!(inventory.carried.item(), ItemId::from_name("cake"));
+    }
+
+    #[test]
+    fn two_by_two_crafting_consumes_once_and_refuses_a_full_cursor() {
+        let mut inventory = PlayerInventory::from_persisted(
+            GameMode::Survival,
+            0,
+            std::array::from_fn(|_| ItemStack::empty()),
+            ItemStack::empty(),
+        );
+        let log = ItemStack::try_new(
+            ItemId::from_name("oak_log").unwrap(),
+            2,
+            ComponentPatch::new(vec![ferrumc_items::ComponentValue::Damage(3)], vec![]),
+        )
+        .unwrap();
+        inventory.slots[4] = log.clone();
+        inventory.refresh_crafting().unwrap();
+        assert_eq!(inventory.slots[0].item(), ItemId::from_name("oak_planks"));
+        assert_eq!(inventory.slots[0].count(), 4);
+        assert!(inventory.normal_click(0, 0).unwrap());
+        assert_eq!(inventory.slots[4].count(), 1);
+        assert_eq!(inventory.slots[4].components(), log.components());
+        assert_eq!(inventory.carried.count(), 4);
+        inventory.carried = ItemStack::try_new(
+            ItemId::from_name("oak_planks").unwrap(),
+            64,
+            ComponentPatch::empty(),
+        )
+        .unwrap();
+        let before = inventory.slots.clone();
+        assert!(!inventory.normal_click(0, 1).unwrap());
+        assert_eq!(inventory.slots, before);
+        inventory.carried = ItemStack::empty();
+        assert!(inventory.normal_click(0, 1).unwrap());
+        assert!(inventory.slots[4].item().is_none());
+        assert!(inventory.slots[0].item().is_none());
+        assert_eq!(inventory.carried.count(), 4);
     }
 
     #[test]
@@ -954,5 +1680,368 @@ mod tests {
         assert!(inv.set_selected(4));
         assert!(inv.is_equipment_slot(HOTBAR_START + 4));
         assert!(!inv.is_equipment_slot(HOTBAR_START));
+    }
+}
+
+#[cfg(test)]
+mod bucket_tests {
+    use super::*;
+    fn stack(name: &str, count: u8) -> ItemStack {
+        ItemStack::try_new(
+            ItemId::from_name(name).expect("pinned item"),
+            count,
+            ComponentPatch::empty(),
+        )
+        .expect("valid stack")
+    }
+    fn inventory(mode: GameMode) -> PlayerInventory {
+        PlayerInventory::from_persisted(
+            mode,
+            0,
+            std::array::from_fn(|_| ItemStack::empty()),
+            ItemStack::empty(),
+        )
+    }
+    #[test]
+    fn bucket_postimage_conserves_stacked_empty_buckets_and_offhand_results() {
+        let mut inv = inventory(GameMode::Survival);
+        inv.slots[HOTBAR_START] = stack("bucket", 2);
+        let before = inv.container_content_payload().expect("before");
+        let plan = inv
+            .prepare_bucket(0, true)
+            .expect("plan")
+            .expect("admitted");
+        assert_eq!(
+            inv.container_content_payload().expect("uncommitted"),
+            before
+        );
+        inv.commit_consumption(plan);
+        assert_eq!(inv.slots[HOTBAR_START], stack("bucket", 1));
+        assert_eq!(inv.slots[MAIN_START], stack("water_bucket", 1));
+        inv.slots[OFFHAND_SLOT] = stack("water_bucket", 1);
+        let plan = inv
+            .prepare_bucket(1, false)
+            .expect("pour")
+            .expect("admitted");
+        inv.commit_consumption(plan);
+        assert_eq!(inv.slots[OFFHAND_SLOT], stack("bucket", 1));
+    }
+    #[test]
+    fn full_inventory_refuses_before_world_change_and_single_bucket_can_replace() {
+        let mut inv = inventory(GameMode::Survival);
+        for slot in &mut inv.slots[MAIN_START..PLAYER_WINDOW_END] {
+            *slot = stack("stone", 64);
+        }
+        inv.slots[HOTBAR_START] = stack("bucket", 2);
+        let before = inv.container_content_payload().expect("before");
+        assert!(inv.prepare_bucket(0, true).expect("full").is_none());
+        assert_eq!(inv.container_content_payload().expect("unchanged"), before);
+        inv.slots[HOTBAR_START] = stack("bucket", 1);
+        let plan = inv
+            .prepare_bucket(0, true)
+            .expect("single")
+            .expect("replace");
+        inv.commit_consumption(plan);
+        assert_eq!(inv.slots[HOTBAR_START], stack("water_bucket", 1));
+    }
+    #[test]
+    fn creative_fill_deduplicates_and_pour_preserves_held_bucket() {
+        let mut inv = inventory(GameMode::Creative);
+        inv.slots[HOTBAR_START] = stack("bucket", 16);
+        for _ in 0..2 {
+            let plan = inv
+                .prepare_bucket(0, true)
+                .expect("fill")
+                .expect("accepted");
+            inv.commit_consumption(plan);
+        }
+        assert_eq!(inv.slots[HOTBAR_START], stack("bucket", 16));
+        assert_eq!(
+            inv.slots
+                .iter()
+                .filter(|s| s.item() == ItemId::from_name("water_bucket"))
+                .count(),
+            1
+        );
+        inv.slots[OFFHAND_SLOT] = stack("water_bucket", 1);
+        let plan = inv
+            .prepare_bucket(1, false)
+            .expect("pour")
+            .expect("accepted");
+        inv.commit_consumption(plan);
+        assert_eq!(inv.slots[OFFHAND_SLOT], stack("water_bucket", 1));
+        inv.set_game_mode(GameMode::Adventure);
+        assert!(inv.prepare_bucket(1, false).expect("adventure").is_none());
+    }
+}
+
+/// Actual schema-5 boundary fixture with four pristine armor pieces and hand.
+#[cfg(test)]
+pub(crate) fn budget_boundary_fixture(headroom: usize, hand: bool) -> PlayerInventory {
+    use ferrumc_items::{ComponentPatch, ComponentValue, ItemId, OpaqueComponent};
+    let mut slots = std::array::from_fn(|_| ItemStack::empty());
+    for (index, name) in [
+        (5, "iron_helmet"),
+        (6, "iron_chestplate"),
+        (7, "iron_leggings"),
+        (8, "iron_boots"),
+    ] {
+        slots[index] =
+            ItemStack::try_new(ItemId::from_name(name).unwrap(), 1, ComponentPatch::empty())
+                .unwrap();
+    }
+    if hand {
+        slots[36] = ItemStack::try_new(
+            ItemId::from_name("iron_sword").unwrap(),
+            1,
+            ComponentPatch::empty(),
+        )
+        .unwrap();
+    }
+    let large = |tail| {
+        let components = (6..38)
+            .map(|id| {
+                ComponentValue::Opaque(
+                    OpaqueComponent::new(id, vec![7; if id == 37 { tail } else { 8192 }]).unwrap(),
+                )
+            })
+            .collect();
+        ItemStack::try_new(
+            ItemId::from_name("stone").unwrap(),
+            2,
+            ComponentPatch::new(components, vec![]),
+        )
+        .unwrap()
+    };
+    let mut inventory =
+        PlayerInventory::from_persisted(GameMode::Survival, 0, slots, ItemStack::empty());
+    for stack in &mut inventory.table_inputs[..4] {
+        *stack = large(8192);
+    }
+    let actual = 286
+        + inventory
+            .slots
+            .iter()
+            .chain(std::iter::once(&inventory.carried))
+            .chain(inventory.table_inputs.iter())
+            .map(|stack| ferrumc_items::persisted_stack_size(stack).unwrap())
+            .sum::<usize>();
+    let excess = actual - (ferrumc_storage::MAX_PLAYER_DATA_LEN - headroom);
+    assert!(excess < 8192);
+    inventory.table_inputs[3] = large(8192 - excess);
+    inventory
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    use crate::player_data::PlayerData;
+    use ferrumc_items::{ComponentPatch, ItemId};
+    use ferrumc_math::Vec3;
+
+    fn stack(name: &str, count: u8) -> ItemStack {
+        ItemStack::try_new(
+            ItemId::from_name(name).unwrap(),
+            count,
+            ComponentPatch::empty(),
+        )
+        .unwrap()
+    }
+    fn record(inventory: &PlayerInventory) -> ferrumc_storage::PlayerRecord {
+        PlayerData::capture(Vec3::ZERO, 0.0, 0.0, inventory)
+            .to_record(GameMode::Survival)
+            .unwrap()
+    }
+
+    #[test]
+    fn budget_real_four_armor_and_hand_exact_limits_and_wear() {
+        for (hand, reserve) in [(false, 52), (true, 65)] {
+            let mut inventory = budget_boundary_fixture(reserve, hand);
+            assert_eq!(
+                record(&inventory).data().len(),
+                ferrumc_storage::MAX_PLAYER_DATA_LEN - reserve
+            );
+            let snapshot = inventory.combat_snapshot().unwrap();
+            let armor =
+                crate::combat_wear::plan_armor_wear(&snapshot, &inventory, true, 4.0).unwrap();
+            assert_eq!(armor.iter().count(), 4);
+            inventory.apply_armor_wear(armor).unwrap();
+            assert_eq!(
+                record(&inventory).data().len(),
+                ferrumc_storage::MAX_PLAYER_DATA_LEN - reserve + 52
+            );
+            if hand {
+                let weapon = crate::combat_wear::plan_weapon_wear(&snapshot, &inventory, true)
+                    .unwrap()
+                    .unwrap();
+                inventory.apply_wear_plan(weapon).unwrap();
+            }
+            assert_eq!(
+                record(&inventory).data().len(),
+                ferrumc_storage::MAX_PLAYER_DATA_LEN
+            );
+            inventory.admit_budget().unwrap();
+            // Once DAMAGE exists, further wear cannot consume any new save bytes.
+            let later = inventory.combat_snapshot().unwrap();
+            let armor = crate::combat_wear::plan_armor_wear(&later, &inventory, true, 8.0).unwrap();
+            inventory.apply_armor_wear(armor).unwrap();
+            assert_eq!(
+                record(&inventory).data().len(),
+                ferrumc_storage::MAX_PLAYER_DATA_LEN
+            );
+            let below = budget_boundary_fixture(reserve - 1, hand);
+            assert!(below.combat_snapshot().is_err());
+            assert_eq!(
+                record(&below).data().len(),
+                ferrumc_storage::MAX_PLAYER_DATA_LEN - reserve + 1
+            );
+        }
+    }
+
+    #[test]
+    fn budget_delayed_snapshot_growth_cannot_consume_wear_envelope() {
+        let mut inventory = budget_boundary_fixture(65, true);
+        let snapshot = inventory.combat_snapshot().unwrap();
+        let before = record(&inventory);
+        let state = inventory.state_id();
+        let incoming = stack("stone", 1);
+        // This small pickup fits the actual cap, but would consume wear headroom.
+        let actual_growth = ferrumc_items::persisted_stack_size(&incoming).unwrap() - 7;
+        assert!(actual_growth < 65);
+        assert_eq!(inventory.deposit(incoming.clone()), incoming);
+        inventory.set_creative_slot(9, stack("stone", 1));
+        assert!(inventory.slot(9).unwrap().item().is_none());
+        assert_eq!(inventory.state_id(), state);
+        assert_eq!(record(&inventory).data(), before.data());
+        let armor = crate::combat_wear::plan_armor_wear(&snapshot, &inventory, true, 4.0).unwrap();
+        inventory.apply_armor_wear(armor).unwrap();
+        let weapon = crate::combat_wear::plan_weapon_wear(&snapshot, &inventory, true)
+            .unwrap()
+            .unwrap();
+        inventory.apply_wear_plan(weapon).unwrap();
+        assert_eq!(
+            record(&inventory).data().len(),
+            ferrumc_storage::MAX_PLAYER_DATA_LEN
+        );
+    }
+
+    #[test]
+    fn budget_legacy_maximum_record_loads_but_refuses_combat_and_growth() {
+        let inventory = budget_boundary_fixture(0, true);
+        let saved = record(&inventory);
+        assert_eq!(saved.data().len(), ferrumc_storage::MAX_PLAYER_DATA_LEN);
+        let loaded = PlayerData::from_record(&saved).unwrap();
+        let mut restored = loaded.restore_inventory(GameMode::Survival);
+        assert_eq!(record(&restored).data(), saved.data());
+        assert!(restored.combat_snapshot().is_err());
+        let before = record(&restored);
+        let incoming = stack("stone", 1);
+        assert_eq!(restored.deposit(incoming.clone()), incoming);
+        restored.set_creative_slot(9, stack("stone", 1));
+        assert_eq!(record(&restored).data(), before.data());
+    }
+
+    #[test]
+    fn budget_table_split_is_staged_and_complete_container_previews_refuse() {
+        let mut inventory = budget_boundary_fixture(65, true);
+        let before = record(&inventory);
+        let state = inventory.state_id();
+        assert!(inventory.table_click(1, 1, 0).is_err());
+        assert_eq!(record(&inventory).data(), before.data());
+        assert_eq!(inventory.state_id(), state);
+        let mut window = inventory.window_slots().to_vec();
+        window[0] = stack("stone", 1);
+        assert!(inventory
+            .admit_container_candidate(&window, inventory.carried())
+            .is_err());
+        assert!(inventory
+            .admit_container_candidate(inventory.window_slots(), &stack("stone", 1))
+            .is_err());
+        let slots: [ItemStack; 36] = window.try_into().unwrap();
+        assert!(crate::furnace_window::prepare_player_candidate(
+            &inventory,
+            &slots,
+            inventory.carried(),
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            ferrumc_sim::PlayerVitals::new().snapshot()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn budget_local_split_refuses_but_conserving_moves_and_close_keep_the_envelope() {
+        let mut inventory = budget_boundary_fixture(65, true);
+        inventory.slots[9] = std::mem::replace(&mut inventory.table_inputs[0], ItemStack::empty());
+        let before = record(&inventory);
+        let state = inventory.state_id();
+        assert!(
+            inventory.normal_click(9, 1).is_err(),
+            "split duplicates the complete patch"
+        );
+        assert_eq!(record(&inventory).data(), before.data());
+        assert_eq!(inventory.state_id(), state);
+        assert!(inventory.normal_click(9, 0).unwrap());
+        assert!(inventory.slot(9).unwrap().item().is_none());
+        assert_eq!(inventory.carried().count(), 2);
+        inventory.admit_budget().unwrap();
+        inventory.return_carried();
+        assert!(inventory.carried().item().is_none());
+        inventory.admit_budget().unwrap();
+        assert!(inventory.quick_move(9).unwrap());
+        inventory.admit_budget().unwrap();
+        assert!(inventory.hotbar_swap(9, 0).unwrap());
+        inventory.admit_budget().unwrap();
+        inventory.return_crafting_inputs();
+        inventory.admit_budget().unwrap();
+    }
+
+    #[test]
+    fn budget_prepared_food_bucket_and_placement_do_not_publish_a_refused_image() {
+        let mut inventory = budget_boundary_fixture(0, true);
+        inventory.slots[37] = stack("mushroom_stew", 1);
+        inventory.slots[38] = stack("bucket", 1);
+        inventory.slots[39] = stack("stone", 2);
+        // Retune exactly to the durable ceiling after adding the fixture items.
+        let over = 286
+            + inventory
+                .slots
+                .iter()
+                .chain(std::iter::once(&inventory.carried))
+                .chain(inventory.table_inputs.iter())
+                .map(|s| ferrumc_items::persisted_stack_size(s).unwrap())
+                .sum::<usize>()
+            - ferrumc_storage::MAX_PLAYER_DATA_LEN;
+        let last = &mut inventory.table_inputs[3];
+        let mut added = last.components().added().to_vec();
+        let ferrumc_items::ComponentValue::Opaque(tail) = added.pop().unwrap() else {
+            panic!("tail")
+        };
+        added.push(ferrumc_items::ComponentValue::Opaque(
+            ferrumc_items::OpaqueComponent::new(
+                tail.type_id(),
+                tail.raw()[..tail.raw().len() - over].to_vec(),
+            )
+            .unwrap(),
+        ));
+        *last = ItemStack::try_new(
+            ItemId::from_name("stone").unwrap(),
+            2,
+            ComponentPatch::new(added, vec![]),
+        )
+        .unwrap();
+        let before = record(&inventory);
+        let food = ferrumc_items::food_properties(&inventory.slots[37])
+            .unwrap()
+            .unwrap();
+        assert!(inventory.prepare_consumption(37, food).is_err());
+        inventory.set_selected(2);
+        assert!(inventory.prepare_bucket(0, true).is_err());
+        inventory.set_selected(3);
+        assert!(inventory.prepare_placement(0).is_err());
+        // Preparation changes no item bytes; selected is the only deliberate edit.
+        inventory.set_selected(0);
+        assert_eq!(record(&inventory).data(), before.data());
     }
 }

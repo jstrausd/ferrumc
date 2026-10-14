@@ -344,7 +344,11 @@ async fn run_flow(addr: SocketAddr) -> anyhow::Result<()> {
 
     // A bypassing admin and a non-bypassing griefer also join.
     let mut admin = login_to_play(addr, "Admin").await?;
+    common::make_creative(&mut admin).await?;
+    common::supply_creative_slot(&mut admin, 36, 1, 64).await?;
     let mut griefer = login_to_play(addr, "Griefer").await?;
+    common::make_creative(&mut griefer).await?;
+    common::supply_creative_slot(&mut griefer, 36, 1, 64).await?;
 
     // Point 5: the viewer and admin are mutually visible. Capture the admin's and
     // griefer's entity ids from their spawns so the moves below can be matched
@@ -423,7 +427,7 @@ async fn mvp_end_to_end() {
          builtin_plugins = true\n\
          spawn_protect_radius = {PROTECT_RADIUS}\n\
          spawn_protect_bypass = [\"Admin\"]\n\
-         ops = [\"Admin\"]\n",
+         ops = [\"Admin\", \"Griefer\"]\n",
     ))
     .expect("MVP config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");

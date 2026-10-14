@@ -909,6 +909,7 @@ impl SessionRouter {
         self.supersede_records(player, slot);
         Ok(PlayerSessionHandle {
             player,
+            entity_id: SELF_WIRE_ID,
             shard: binding.home,
             outbound: receiver,
             key: Some(key),

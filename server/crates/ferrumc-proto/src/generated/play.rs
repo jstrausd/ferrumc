@@ -562,6 +562,40 @@ impl ChatMessage {
     }
 }
 
+/// `ClientStatus`: the play serverbound packet (wire id `0x0b`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientStatus {
+    action: i32,
+}
+
+impl ClientStatus {
+    /// The wire packet id for `ClientStatus`.
+    pub const PACKET_ID: i32 = 0x0b;
+
+    /// Creates a new `ClientStatus` from its wire fields.
+    pub fn new(action: i32) -> Self {
+        Self { action }
+    }
+
+    /// Returns the `action` field.
+    pub fn action(&self) -> i32 {
+        self.action
+    }
+
+    /// Decodes a `ClientStatus` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let action = reader.read_var_int()?;
+        Ok(Self { action })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.action);
+        Ok(())
+    }
+}
+
 /// `TabCompleteRequest`: the play serverbound packet (wire id `0x0e`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabCompleteRequest {
@@ -701,6 +735,75 @@ impl CloseContainer {
     pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
         ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
         ferrumc_codec::write_var_int(buf, self.window_id);
+        Ok(())
+    }
+}
+
+/// `InteractEntity`: the play serverbound packet (wire id `0x19`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractEntity {
+    target: i32,
+    action: i32,
+    interaction_raw: ferrumc_codec::BoundedBytes<18>,
+}
+
+impl InteractEntity {
+    /// The wire packet id for `InteractEntity`.
+    pub const PACKET_ID: i32 = 0x19;
+
+    /// Creates a new `InteractEntity` from its wire fields.
+    pub fn new(target: i32, action: i32, interaction_raw: ferrumc_codec::BoundedBytes<18>) -> Self {
+        Self {
+            target,
+            action,
+            interaction_raw,
+        }
+    }
+
+    /// Returns the `target` field.
+    pub fn target(&self) -> i32 {
+        self.target
+    }
+
+    /// Returns the `action` field.
+    pub fn action(&self) -> i32 {
+        self.action
+    }
+
+    /// Returns the `interaction_raw` field.
+    pub fn interaction_raw(&self) -> &ferrumc_codec::BoundedBytes<18> {
+        &self.interaction_raw
+    }
+
+    /// Decodes a `InteractEntity` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let target = reader.read_var_int()?;
+        let action = reader.read_var_int()?;
+        let interaction_raw = {
+            let remaining = reader.remaining();
+            if remaining > 18 {
+                return Err(ferrumc_codec::CodecError::BytesTooLong {
+                    length: remaining,
+                    max: 18,
+                }
+                .into());
+            }
+            let bytes = reader.read_bytes(remaining)?;
+            ferrumc_codec::BoundedBytes::<18>::new(bytes.to_vec())?
+        };
+        Ok(Self {
+            target,
+            action,
+            interaction_raw,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.target);
+        ferrumc_codec::write_var_int(buf, self.action);
+        wire::write_raw(buf, self.interaction_raw.as_slice());
         Ok(())
     }
 }
@@ -935,6 +1038,40 @@ impl SetPlayerRotation {
     }
 }
 
+/// `SetPlayerOnGround`: the play serverbound packet (wire id `0x20`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetPlayerOnGround {
+    flags: u8,
+}
+
+impl SetPlayerOnGround {
+    /// The wire packet id for `SetPlayerOnGround`.
+    pub const PACKET_ID: i32 = 0x20;
+
+    /// Creates a new `SetPlayerOnGround` from its wire fields.
+    pub fn new(flags: u8) -> Self {
+        Self { flags }
+    }
+
+    /// Returns the `flags` field.
+    pub fn flags(&self) -> u8 {
+        self.flags
+    }
+
+    /// Decodes a `SetPlayerOnGround` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let flags = reader.read_u8()?;
+        Ok(Self { flags })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        wire::write_u8(buf, self.flags);
+        Ok(())
+    }
+}
+
 /// `PlayerAction`: the play serverbound packet (wire id `0x28`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerAction {
@@ -1004,6 +1141,40 @@ impl PlayerAction {
         self.location.write(buf);
         wire::write_i8(buf, self.face);
         ferrumc_codec::write_var_int(buf, self.sequence);
+        Ok(())
+    }
+}
+
+/// `PlayerInput`: the play serverbound packet (wire id `0x2a`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerInput {
+    inputs: u8,
+}
+
+impl PlayerInput {
+    /// The wire packet id for `PlayerInput`.
+    pub const PACKET_ID: i32 = 0x2a;
+
+    /// Creates a new `PlayerInput` from its wire fields.
+    pub fn new(inputs: u8) -> Self {
+        Self { inputs }
+    }
+
+    /// Returns the `inputs` field.
+    pub fn inputs(&self) -> u8 {
+        self.inputs
+    }
+
+    /// Decodes a `PlayerInput` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let inputs = reader.read_u8()?;
+        Ok(Self { inputs })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        wire::write_u8(buf, self.inputs);
         Ok(())
     }
 }
@@ -1314,6 +1485,74 @@ impl UseItemOn {
     }
 }
 
+/// `UseItem`: the play serverbound packet (wire id `0x40`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseItem {
+    hand: i32,
+    sequence: i32,
+    yaw: f32,
+    pitch: f32,
+}
+
+impl UseItem {
+    /// The wire packet id for `UseItem`.
+    pub const PACKET_ID: i32 = 0x40;
+
+    /// Creates a new `UseItem` from its wire fields.
+    pub fn new(hand: i32, sequence: i32, yaw: f32, pitch: f32) -> Self {
+        Self {
+            hand,
+            sequence,
+            yaw,
+            pitch,
+        }
+    }
+
+    /// Returns the `hand` field.
+    pub fn hand(&self) -> i32 {
+        self.hand
+    }
+
+    /// Returns the `sequence` field.
+    pub fn sequence(&self) -> i32 {
+        self.sequence
+    }
+
+    /// Returns the `yaw` field.
+    pub fn yaw(&self) -> f32 {
+        self.yaw
+    }
+
+    /// Returns the `pitch` field.
+    pub fn pitch(&self) -> f32 {
+        self.pitch
+    }
+
+    /// Decodes a `UseItem` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let hand = reader.read_var_int()?;
+        let sequence = reader.read_var_int()?;
+        let yaw = reader.read_f32()?;
+        let pitch = reader.read_f32()?;
+        Ok(Self {
+            hand,
+            sequence,
+            yaw,
+            pitch,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.hand);
+        ferrumc_codec::write_var_int(buf, self.sequence);
+        wire::write_f32(buf, self.yaw);
+        wire::write_f32(buf, self.pitch);
+        Ok(())
+    }
+}
+
 /// `SpawnEntity`: the play clientbound packet (wire id `0x01`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpawnEntity {
@@ -1498,6 +1737,64 @@ impl AcknowledgeBlockChange {
     pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
         ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
         ferrumc_codec::write_var_int(buf, self.sequence);
+        Ok(())
+    }
+}
+
+/// `BlockDestruction`: the play clientbound packet (wire id `0x05`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockDestruction {
+    entity_id: i32,
+    position: crate::types::BlockPosition,
+    progress: u8,
+}
+
+impl BlockDestruction {
+    /// The wire packet id for `BlockDestruction`.
+    pub const PACKET_ID: i32 = 0x05;
+
+    /// Creates a new `BlockDestruction` from its wire fields.
+    pub fn new(entity_id: i32, position: crate::types::BlockPosition, progress: u8) -> Self {
+        Self {
+            entity_id,
+            position,
+            progress,
+        }
+    }
+
+    /// Returns the `entity_id` field.
+    pub fn entity_id(&self) -> i32 {
+        self.entity_id
+    }
+
+    /// Returns the `position` field.
+    pub fn position(&self) -> crate::types::BlockPosition {
+        self.position
+    }
+
+    /// Returns the `progress` field.
+    pub fn progress(&self) -> u8 {
+        self.progress
+    }
+
+    /// Decodes a `BlockDestruction` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let entity_id = reader.read_var_int()?;
+        let position = crate::types::BlockPosition::read(reader)?;
+        let progress = reader.read_u8()?;
+        Ok(Self {
+            entity_id,
+            position,
+            progress,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.entity_id);
+        self.position.write(buf);
+        wire::write_u8(buf, self.progress);
         Ok(())
     }
 }
@@ -1859,6 +2156,64 @@ impl SetContainerContent {
     }
 }
 
+/// `SetContainerProperty`: the play clientbound packet (wire id `0x13`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetContainerProperty {
+    window_id: i32,
+    property: i16,
+    value: i16,
+}
+
+impl SetContainerProperty {
+    /// The wire packet id for `SetContainerProperty`.
+    pub const PACKET_ID: i32 = 0x13;
+
+    /// Creates a new `SetContainerProperty` from its wire fields.
+    pub fn new(window_id: i32, property: i16, value: i16) -> Self {
+        Self {
+            window_id,
+            property,
+            value,
+        }
+    }
+
+    /// Returns the `window_id` field.
+    pub fn window_id(&self) -> i32 {
+        self.window_id
+    }
+
+    /// Returns the `property` field.
+    pub fn property(&self) -> i16 {
+        self.property
+    }
+
+    /// Returns the `value` field.
+    pub fn value(&self) -> i16 {
+        self.value
+    }
+
+    /// Decodes a `SetContainerProperty` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let window_id = reader.read_var_int()?;
+        let property = reader.read_i16()?;
+        let value = reader.read_i16()?;
+        Ok(Self {
+            window_id,
+            property,
+            value,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.window_id);
+        wire::write_i16(buf, self.property);
+        wire::write_i16(buf, self.value);
+        Ok(())
+    }
+}
+
 /// `SetContainerSlot`: the play clientbound packet (wire id `0x14`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetContainerSlot {
@@ -1973,6 +2328,48 @@ impl PlayDisconnect {
                 ferrumc_nbt::write_network_root(&self.reason, &ferrumc_nbt::NbtLimits::default())?;
             wire::write_raw(buf, &nbt_bytes);
         }
+        Ok(())
+    }
+}
+
+/// `EntityEvent`: the play clientbound packet (wire id `0x1e`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityEvent {
+    entity_id: i32,
+    event: i8,
+}
+
+impl EntityEvent {
+    /// The wire packet id for `EntityEvent`.
+    pub const PACKET_ID: i32 = 0x1e;
+
+    /// Creates a new `EntityEvent` from its wire fields.
+    pub fn new(entity_id: i32, event: i8) -> Self {
+        Self { entity_id, event }
+    }
+
+    /// Returns the `entity_id` field.
+    pub fn entity_id(&self) -> i32 {
+        self.entity_id
+    }
+
+    /// Returns the `event` field.
+    pub fn event(&self) -> i8 {
+        self.event
+    }
+
+    /// Decodes a `EntityEvent` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let entity_id = reader.read_i32()?;
+        let event = reader.read_i8()?;
+        Ok(Self { entity_id, event })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        wire::write_i32(buf, self.entity_id);
+        wire::write_i8(buf, self.event);
         Ok(())
     }
 }
@@ -2640,6 +3037,187 @@ impl Particle {
     }
 }
 
+/// `UpdateLight`: the play clientbound packet (wire id `0x2a`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateLight {
+    x: i32,
+    z: i32,
+    sky_light_mask: Vec<i64>,
+    block_light_mask: Vec<i64>,
+    empty_sky_light_mask: Vec<i64>,
+    empty_block_light_mask: Vec<i64>,
+    sky_light: Vec<ferrumc_codec::BoundedBytes<2048>>,
+    block_light: Vec<ferrumc_codec::BoundedBytes<2048>>,
+}
+
+impl UpdateLight {
+    /// The wire packet id for `UpdateLight`.
+    pub const PACKET_ID: i32 = 0x2a;
+
+    /// Creates a new `UpdateLight` from its wire fields.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the packet's wire fields"
+    )]
+    pub fn new(
+        x: i32,
+        z: i32,
+        sky_light_mask: Vec<i64>,
+        block_light_mask: Vec<i64>,
+        empty_sky_light_mask: Vec<i64>,
+        empty_block_light_mask: Vec<i64>,
+        sky_light: Vec<ferrumc_codec::BoundedBytes<2048>>,
+        block_light: Vec<ferrumc_codec::BoundedBytes<2048>>,
+    ) -> Self {
+        Self {
+            x,
+            z,
+            sky_light_mask,
+            block_light_mask,
+            empty_sky_light_mask,
+            empty_block_light_mask,
+            sky_light,
+            block_light,
+        }
+    }
+
+    /// Returns the `x` field.
+    pub fn x(&self) -> i32 {
+        self.x
+    }
+
+    /// Returns the `z` field.
+    pub fn z(&self) -> i32 {
+        self.z
+    }
+
+    /// Returns the `sky_light_mask` field.
+    pub fn sky_light_mask(&self) -> &[i64] {
+        &self.sky_light_mask
+    }
+
+    /// Returns the `block_light_mask` field.
+    pub fn block_light_mask(&self) -> &[i64] {
+        &self.block_light_mask
+    }
+
+    /// Returns the `empty_sky_light_mask` field.
+    pub fn empty_sky_light_mask(&self) -> &[i64] {
+        &self.empty_sky_light_mask
+    }
+
+    /// Returns the `empty_block_light_mask` field.
+    pub fn empty_block_light_mask(&self) -> &[i64] {
+        &self.empty_block_light_mask
+    }
+
+    /// Returns the `sky_light` field.
+    pub fn sky_light(&self) -> &[ferrumc_codec::BoundedBytes<2048>] {
+        &self.sky_light
+    }
+
+    /// Returns the `block_light` field.
+    pub fn block_light(&self) -> &[ferrumc_codec::BoundedBytes<2048>] {
+        &self.block_light
+    }
+
+    /// Decodes a `UpdateLight` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let x = reader.read_var_int()?;
+        let z = reader.read_var_int()?;
+        let sky_light_mask = {
+            let count = wire::read_prefixed_len(reader)?;
+            let mut items = Vec::with_capacity(count.min(reader.remaining()));
+            for _ in 0..count {
+                items.push(reader.read_i64()?);
+            }
+            items
+        };
+        let block_light_mask = {
+            let count = wire::read_prefixed_len(reader)?;
+            let mut items = Vec::with_capacity(count.min(reader.remaining()));
+            for _ in 0..count {
+                items.push(reader.read_i64()?);
+            }
+            items
+        };
+        let empty_sky_light_mask = {
+            let count = wire::read_prefixed_len(reader)?;
+            let mut items = Vec::with_capacity(count.min(reader.remaining()));
+            for _ in 0..count {
+                items.push(reader.read_i64()?);
+            }
+            items
+        };
+        let empty_block_light_mask = {
+            let count = wire::read_prefixed_len(reader)?;
+            let mut items = Vec::with_capacity(count.min(reader.remaining()));
+            for _ in 0..count {
+                items.push(reader.read_i64()?);
+            }
+            items
+        };
+        let sky_light = {
+            let count = wire::read_prefixed_len(reader)?;
+            let mut items = Vec::with_capacity(count.min(reader.remaining()));
+            for _ in 0..count {
+                items.push(ferrumc_codec::BoundedBytes::<2048>::read(reader)?);
+            }
+            items
+        };
+        let block_light = {
+            let count = wire::read_prefixed_len(reader)?;
+            let mut items = Vec::with_capacity(count.min(reader.remaining()));
+            for _ in 0..count {
+                items.push(ferrumc_codec::BoundedBytes::<2048>::read(reader)?);
+            }
+            items
+        };
+        Ok(Self {
+            x,
+            z,
+            sky_light_mask,
+            block_light_mask,
+            empty_sky_light_mask,
+            empty_block_light_mask,
+            sky_light,
+            block_light,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.x);
+        ferrumc_codec::write_var_int(buf, self.z);
+        wire::write_prefixed_len(buf, self.sky_light_mask.len());
+        for elem in &self.sky_light_mask {
+            wire::write_i64(buf, *elem);
+        }
+        wire::write_prefixed_len(buf, self.block_light_mask.len());
+        for elem in &self.block_light_mask {
+            wire::write_i64(buf, *elem);
+        }
+        wire::write_prefixed_len(buf, self.empty_sky_light_mask.len());
+        for elem in &self.empty_sky_light_mask {
+            wire::write_i64(buf, *elem);
+        }
+        wire::write_prefixed_len(buf, self.empty_block_light_mask.len());
+        for elem in &self.empty_block_light_mask {
+            wire::write_i64(buf, *elem);
+        }
+        wire::write_prefixed_len(buf, self.sky_light.len());
+        for elem in &self.sky_light {
+            elem.write(buf);
+        }
+        wire::write_prefixed_len(buf, self.block_light.len());
+        for elem in &self.block_light {
+            elem.write(buf);
+        }
+        Ok(())
+    }
+}
+
 /// `JoinGame`: the play clientbound packet (wire id `0x2b`).
 #[allow(
     clippy::struct_excessive_bools,
@@ -3238,6 +3816,61 @@ impl PlayerAbilities {
     }
 }
 
+/// `CombatDeath`: the play clientbound packet (wire id `0x3d`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CombatDeath {
+    player_id: i32,
+    message: ferrumc_nbt::NbtTag,
+}
+
+impl CombatDeath {
+    /// The wire packet id for `CombatDeath`.
+    pub const PACKET_ID: i32 = 0x3d;
+
+    /// Creates a new `CombatDeath` from its wire fields.
+    pub fn new(player_id: i32, message: ferrumc_nbt::NbtTag) -> Self {
+        Self { player_id, message }
+    }
+
+    /// Returns the `player_id` field.
+    pub fn player_id(&self) -> i32 {
+        self.player_id
+    }
+
+    /// Returns the `message` field.
+    pub fn message(&self) -> &ferrumc_nbt::NbtTag {
+        &self.message
+    }
+
+    /// Decodes a `CombatDeath` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let player_id = reader.read_var_int()?;
+        let message = {
+            let available = reader.remaining();
+            let bytes = reader.read_bytes(available)?;
+            let (tag, consumed) = ferrumc_nbt::read_network_root_with_consumed(
+                bytes,
+                &ferrumc_nbt::NbtLimits::default(),
+            )?;
+            *reader = BoundedReader::new(bytes.get(consumed..).unwrap_or_default());
+            tag
+        };
+        Ok(Self { player_id, message })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        ferrumc_codec::write_var_int(buf, self.player_id);
+        {
+            let nbt_bytes =
+                ferrumc_nbt::write_network_root(&self.message, &ferrumc_nbt::NbtLimits::default())?;
+            wire::write_raw(buf, &nbt_bytes);
+        }
+        Ok(())
+    }
+}
+
 /// `RemovePlayerInfo`: the play clientbound packet (wire id `0x3e`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemovePlayerInfo {
@@ -3510,6 +4143,54 @@ impl RemoveEntities {
         for elem in &self.entity_ids {
             ferrumc_codec::write_var_int(buf, *elem);
         }
+        Ok(())
+    }
+}
+
+/// `Respawn`: the play clientbound packet (wire id `0x4b`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Respawn {
+    world_state: SpawnInfo,
+    data_to_keep: u8,
+}
+
+impl Respawn {
+    /// The wire packet id for `Respawn`.
+    pub const PACKET_ID: i32 = 0x4b;
+
+    /// Creates a new `Respawn` from its wire fields.
+    pub fn new(world_state: SpawnInfo, data_to_keep: u8) -> Self {
+        Self {
+            world_state,
+            data_to_keep,
+        }
+    }
+
+    /// Returns the `world_state` field.
+    pub fn world_state(&self) -> &SpawnInfo {
+        &self.world_state
+    }
+
+    /// Returns the `data_to_keep` field.
+    pub fn data_to_keep(&self) -> u8 {
+        self.data_to_keep
+    }
+
+    /// Decodes a `Respawn` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let world_state = SpawnInfo::decode(reader)?;
+        let data_to_keep = reader.read_u8()?;
+        Ok(Self {
+            world_state,
+            data_to_keep,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        self.world_state.encode(buf)?;
+        wire::write_u8(buf, self.data_to_keep);
         Ok(())
     }
 }
@@ -3909,6 +4590,122 @@ impl SetEquipment {
         ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
         ferrumc_codec::write_var_int(buf, self.entity_id);
         wire::write_raw(buf, &self.equipments);
+        Ok(())
+    }
+}
+
+/// `SetExperience`: the play clientbound packet (wire id `0x60`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetExperience {
+    progress: f32,
+    level: i32,
+    total: i32,
+}
+
+impl SetExperience {
+    /// The wire packet id for `SetExperience`.
+    pub const PACKET_ID: i32 = 0x60;
+
+    /// Creates a new `SetExperience` from its wire fields.
+    pub fn new(progress: f32, level: i32, total: i32) -> Self {
+        Self {
+            progress,
+            level,
+            total,
+        }
+    }
+
+    /// Returns the `progress` field.
+    pub fn progress(&self) -> f32 {
+        self.progress
+    }
+
+    /// Returns the `level` field.
+    pub fn level(&self) -> i32 {
+        self.level
+    }
+
+    /// Returns the `total` field.
+    pub fn total(&self) -> i32 {
+        self.total
+    }
+
+    /// Decodes a `SetExperience` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let progress = reader.read_f32()?;
+        let level = reader.read_var_int()?;
+        let total = reader.read_var_int()?;
+        Ok(Self {
+            progress,
+            level,
+            total,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        wire::write_f32(buf, self.progress);
+        ferrumc_codec::write_var_int(buf, self.level);
+        ferrumc_codec::write_var_int(buf, self.total);
+        Ok(())
+    }
+}
+
+/// `UpdateHealth`: the play clientbound packet (wire id `0x61`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateHealth {
+    health: f32,
+    food: i32,
+    saturation: f32,
+}
+
+impl UpdateHealth {
+    /// The wire packet id for `UpdateHealth`.
+    pub const PACKET_ID: i32 = 0x61;
+
+    /// Creates a new `UpdateHealth` from its wire fields.
+    pub fn new(health: f32, food: i32, saturation: f32) -> Self {
+        Self {
+            health,
+            food,
+            saturation,
+        }
+    }
+
+    /// Returns the `health` field.
+    pub fn health(&self) -> f32 {
+        self.health
+    }
+
+    /// Returns the `food` field.
+    pub fn food(&self) -> i32 {
+        self.food
+    }
+
+    /// Returns the `saturation` field.
+    pub fn saturation(&self) -> f32 {
+        self.saturation
+    }
+
+    /// Decodes a `UpdateHealth` body from `reader` (any packet id is already consumed).
+    pub fn decode(reader: &mut BoundedReader<'_>) -> Result<Self, ProtoError> {
+        let health = reader.read_f32()?;
+        let food = reader.read_var_int()?;
+        let saturation = reader.read_f32()?;
+        Ok(Self {
+            health,
+            food,
+            saturation,
+        })
+    }
+
+    /// Encodes this value (packet id, when present, then fields) into `buf`.
+    pub fn encode(&self, buf: &mut BytesMut) -> Result<(), ProtoError> {
+        ferrumc_codec::write_var_int(buf, Self::PACKET_ID);
+        wire::write_f32(buf, self.health);
+        ferrumc_codec::write_var_int(buf, self.food);
+        wire::write_f32(buf, self.saturation);
         Ok(())
     }
 }
@@ -4498,12 +5295,16 @@ pub enum ServerboundPlayPacket {
     ChatCommand(ChatCommand),
     /// The `ChatMessage` packet.
     ChatMessage(ChatMessage),
+    /// The `ClientStatus` packet.
+    ClientStatus(ClientStatus),
     /// The `TabCompleteRequest` packet.
     TabCompleteRequest(TabCompleteRequest),
     /// The `WindowClick` packet.
     WindowClick(WindowClick),
     /// The `CloseContainer` packet.
     CloseContainer(CloseContainer),
+    /// The `InteractEntity` packet.
+    InteractEntity(InteractEntity),
     /// The `ServerboundKeepAlive` packet.
     ServerboundKeepAlive(ServerboundKeepAlive),
     /// The `SetPlayerPosition` packet.
@@ -4512,8 +5313,12 @@ pub enum ServerboundPlayPacket {
     SetPlayerPositionAndRotation(SetPlayerPositionAndRotation),
     /// The `SetPlayerRotation` packet.
     SetPlayerRotation(SetPlayerRotation),
+    /// The `SetPlayerOnGround` packet.
+    SetPlayerOnGround(SetPlayerOnGround),
     /// The `PlayerAction` packet.
     PlayerAction(PlayerAction),
+    /// The `PlayerInput` packet.
+    PlayerInput(PlayerInput),
     /// The `ServerboundSetHeldItem` packet.
     ServerboundSetHeldItem(ServerboundSetHeldItem),
     /// The `SetCreativeSlot` packet.
@@ -4522,6 +5327,8 @@ pub enum ServerboundPlayPacket {
     UpdateSign(UpdateSign),
     /// The `UseItemOn` packet.
     UseItemOn(UseItemOn),
+    /// The `UseItem` packet.
+    UseItem(UseItem),
 }
 
 impl ServerboundPlayPacket {
@@ -4537,11 +5344,13 @@ impl ServerboundPlayPacket {
             )),
             ChatCommand::PACKET_ID => Ok(Self::ChatCommand(ChatCommand::decode(reader)?)),
             ChatMessage::PACKET_ID => Ok(Self::ChatMessage(ChatMessage::decode(reader)?)),
+            ClientStatus::PACKET_ID => Ok(Self::ClientStatus(ClientStatus::decode(reader)?)),
             TabCompleteRequest::PACKET_ID => Ok(Self::TabCompleteRequest(
                 TabCompleteRequest::decode(reader)?,
             )),
             WindowClick::PACKET_ID => Ok(Self::WindowClick(WindowClick::decode(reader)?)),
             CloseContainer::PACKET_ID => Ok(Self::CloseContainer(CloseContainer::decode(reader)?)),
+            InteractEntity::PACKET_ID => Ok(Self::InteractEntity(InteractEntity::decode(reader)?)),
             ServerboundKeepAlive::PACKET_ID => Ok(Self::ServerboundKeepAlive(
                 ServerboundKeepAlive::decode(reader)?,
             )),
@@ -4554,7 +5363,11 @@ impl ServerboundPlayPacket {
             SetPlayerRotation::PACKET_ID => {
                 Ok(Self::SetPlayerRotation(SetPlayerRotation::decode(reader)?))
             }
+            SetPlayerOnGround::PACKET_ID => {
+                Ok(Self::SetPlayerOnGround(SetPlayerOnGround::decode(reader)?))
+            }
             PlayerAction::PACKET_ID => Ok(Self::PlayerAction(PlayerAction::decode(reader)?)),
+            PlayerInput::PACKET_ID => Ok(Self::PlayerInput(PlayerInput::decode(reader)?)),
             ServerboundSetHeldItem::PACKET_ID => Ok(Self::ServerboundSetHeldItem(
                 ServerboundSetHeldItem::decode(reader)?,
             )),
@@ -4563,6 +5376,7 @@ impl ServerboundPlayPacket {
             }
             UpdateSign::PACKET_ID => Ok(Self::UpdateSign(UpdateSign::decode(reader)?)),
             UseItemOn::PACKET_ID => Ok(Self::UseItemOn(UseItemOn::decode(reader)?)),
+            UseItem::PACKET_ID => Ok(Self::UseItem(UseItem::decode(reader)?)),
             other => Err(ProtoError::UnknownPacketId {
                 state: State::Play,
                 direction: Direction::Serverbound,
@@ -4577,18 +5391,23 @@ impl ServerboundPlayPacket {
             Self::ConfirmTeleportation(_) => ConfirmTeleportation::PACKET_ID,
             Self::ChatCommand(_) => ChatCommand::PACKET_ID,
             Self::ChatMessage(_) => ChatMessage::PACKET_ID,
+            Self::ClientStatus(_) => ClientStatus::PACKET_ID,
             Self::TabCompleteRequest(_) => TabCompleteRequest::PACKET_ID,
             Self::WindowClick(_) => WindowClick::PACKET_ID,
             Self::CloseContainer(_) => CloseContainer::PACKET_ID,
+            Self::InteractEntity(_) => InteractEntity::PACKET_ID,
             Self::ServerboundKeepAlive(_) => ServerboundKeepAlive::PACKET_ID,
             Self::SetPlayerPosition(_) => SetPlayerPosition::PACKET_ID,
             Self::SetPlayerPositionAndRotation(_) => SetPlayerPositionAndRotation::PACKET_ID,
             Self::SetPlayerRotation(_) => SetPlayerRotation::PACKET_ID,
+            Self::SetPlayerOnGround(_) => SetPlayerOnGround::PACKET_ID,
             Self::PlayerAction(_) => PlayerAction::PACKET_ID,
+            Self::PlayerInput(_) => PlayerInput::PACKET_ID,
             Self::ServerboundSetHeldItem(_) => ServerboundSetHeldItem::PACKET_ID,
             Self::SetCreativeSlot(_) => SetCreativeSlot::PACKET_ID,
             Self::UpdateSign(_) => UpdateSign::PACKET_ID,
             Self::UseItemOn(_) => UseItemOn::PACKET_ID,
+            Self::UseItem(_) => UseItem::PACKET_ID,
         }
     }
 
@@ -4598,18 +5417,23 @@ impl ServerboundPlayPacket {
             Self::ConfirmTeleportation(packet) => packet.encode(buf),
             Self::ChatCommand(packet) => packet.encode(buf),
             Self::ChatMessage(packet) => packet.encode(buf),
+            Self::ClientStatus(packet) => packet.encode(buf),
             Self::TabCompleteRequest(packet) => packet.encode(buf),
             Self::WindowClick(packet) => packet.encode(buf),
             Self::CloseContainer(packet) => packet.encode(buf),
+            Self::InteractEntity(packet) => packet.encode(buf),
             Self::ServerboundKeepAlive(packet) => packet.encode(buf),
             Self::SetPlayerPosition(packet) => packet.encode(buf),
             Self::SetPlayerPositionAndRotation(packet) => packet.encode(buf),
             Self::SetPlayerRotation(packet) => packet.encode(buf),
+            Self::SetPlayerOnGround(packet) => packet.encode(buf),
             Self::PlayerAction(packet) => packet.encode(buf),
+            Self::PlayerInput(packet) => packet.encode(buf),
             Self::ServerboundSetHeldItem(packet) => packet.encode(buf),
             Self::SetCreativeSlot(packet) => packet.encode(buf),
             Self::UpdateSign(packet) => packet.encode(buf),
             Self::UseItemOn(packet) => packet.encode(buf),
+            Self::UseItem(packet) => packet.encode(buf),
         }
     }
 }
@@ -4621,6 +5445,8 @@ pub enum ClientboundPlayPacket {
     SpawnEntity(SpawnEntity),
     /// The `AcknowledgeBlockChange` packet.
     AcknowledgeBlockChange(AcknowledgeBlockChange),
+    /// The `BlockDestruction` packet.
+    BlockDestruction(BlockDestruction),
     /// The `BlockEntityData` packet.
     BlockEntityData(BlockEntityData),
     /// The `BlockUpdate` packet.
@@ -4633,10 +5459,14 @@ pub enum ClientboundPlayPacket {
     Commands(Commands),
     /// The `SetContainerContent` packet.
     SetContainerContent(SetContainerContent),
+    /// The `SetContainerProperty` packet.
+    SetContainerProperty(SetContainerProperty),
     /// The `SetContainerSlot` packet.
     SetContainerSlot(SetContainerSlot),
     /// The `PlayDisconnect` packet.
     PlayDisconnect(PlayDisconnect),
+    /// The `EntityEvent` packet.
+    EntityEvent(EntityEvent),
     /// The `EntityTeleport` packet.
     EntityTeleport(EntityTeleport),
     /// The `UnloadChunk` packet.
@@ -4649,6 +5479,8 @@ pub enum ClientboundPlayPacket {
     ChunkDataAndLight(ChunkDataAndLight),
     /// The `Particle` packet.
     Particle(Particle),
+    /// The `UpdateLight` packet.
+    UpdateLight(UpdateLight),
     /// The `JoinGame` packet.
     JoinGame(JoinGame),
     /// The `UpdateEntityPosition` packet.
@@ -4663,6 +5495,8 @@ pub enum ClientboundPlayPacket {
     OpenSignEditor(OpenSignEditor),
     /// The `PlayerAbilities` packet.
     PlayerAbilities(PlayerAbilities),
+    /// The `CombatDeath` packet.
+    CombatDeath(CombatDeath),
     /// The `RemovePlayerInfo` packet.
     RemovePlayerInfo(RemovePlayerInfo),
     /// The `PlayerInfoUpdate` packet.
@@ -4671,6 +5505,8 @@ pub enum ClientboundPlayPacket {
     SynchronizePlayerPosition(SynchronizePlayerPosition),
     /// The `RemoveEntities` packet.
     RemoveEntities(RemoveEntities),
+    /// The `Respawn` packet.
+    Respawn(Respawn),
     /// The `SetHeadRotation` packet.
     SetHeadRotation(SetHeadRotation),
     /// The `SetActionBarText` packet.
@@ -4687,6 +5523,10 @@ pub enum ClientboundPlayPacket {
     SetEntityMotion(SetEntityMotion),
     /// The `SetEquipment` packet.
     SetEquipment(SetEquipment),
+    /// The `SetExperience` packet.
+    SetExperience(SetExperience),
+    /// The `UpdateHealth` packet.
+    UpdateHealth(UpdateHealth),
     /// The `ClientboundSetHeldItem` packet.
     ClientboundSetHeldItem(ClientboundSetHeldItem),
     /// The `UpdateObjectives` packet.
@@ -4723,6 +5563,9 @@ impl ClientboundPlayPacket {
             AcknowledgeBlockChange::PACKET_ID => Ok(Self::AcknowledgeBlockChange(
                 AcknowledgeBlockChange::decode(reader)?,
             )),
+            BlockDestruction::PACKET_ID => {
+                Ok(Self::BlockDestruction(BlockDestruction::decode(reader)?))
+            }
             BlockEntityData::PACKET_ID => {
                 Ok(Self::BlockEntityData(BlockEntityData::decode(reader)?))
             }
@@ -4735,10 +5578,14 @@ impl ClientboundPlayPacket {
             SetContainerContent::PACKET_ID => Ok(Self::SetContainerContent(
                 SetContainerContent::decode(reader)?,
             )),
+            SetContainerProperty::PACKET_ID => Ok(Self::SetContainerProperty(
+                SetContainerProperty::decode(reader)?,
+            )),
             SetContainerSlot::PACKET_ID => {
                 Ok(Self::SetContainerSlot(SetContainerSlot::decode(reader)?))
             }
             PlayDisconnect::PACKET_ID => Ok(Self::PlayDisconnect(PlayDisconnect::decode(reader)?)),
+            EntityEvent::PACKET_ID => Ok(Self::EntityEvent(EntityEvent::decode(reader)?)),
             EntityTeleport::PACKET_ID => Ok(Self::EntityTeleport(EntityTeleport::decode(reader)?)),
             UnloadChunk::PACKET_ID => Ok(Self::UnloadChunk(UnloadChunk::decode(reader)?)),
             GameEvent::PACKET_ID => Ok(Self::GameEvent(GameEvent::decode(reader)?)),
@@ -4749,6 +5596,7 @@ impl ClientboundPlayPacket {
                 Ok(Self::ChunkDataAndLight(ChunkDataAndLight::decode(reader)?))
             }
             Particle::PACKET_ID => Ok(Self::Particle(Particle::decode(reader)?)),
+            UpdateLight::PACKET_ID => Ok(Self::UpdateLight(UpdateLight::decode(reader)?)),
             JoinGame::PACKET_ID => Ok(Self::JoinGame(JoinGame::decode(reader)?)),
             UpdateEntityPosition::PACKET_ID => Ok(Self::UpdateEntityPosition(
                 UpdateEntityPosition::decode(reader)?,
@@ -4766,6 +5614,7 @@ impl ClientboundPlayPacket {
             PlayerAbilities::PACKET_ID => {
                 Ok(Self::PlayerAbilities(PlayerAbilities::decode(reader)?))
             }
+            CombatDeath::PACKET_ID => Ok(Self::CombatDeath(CombatDeath::decode(reader)?)),
             RemovePlayerInfo::PACKET_ID => {
                 Ok(Self::RemovePlayerInfo(RemovePlayerInfo::decode(reader)?))
             }
@@ -4776,6 +5625,7 @@ impl ClientboundPlayPacket {
                 SynchronizePlayerPosition::decode(reader)?,
             )),
             RemoveEntities::PACKET_ID => Ok(Self::RemoveEntities(RemoveEntities::decode(reader)?)),
+            Respawn::PACKET_ID => Ok(Self::Respawn(Respawn::decode(reader)?)),
             SetHeadRotation::PACKET_ID => {
                 Ok(Self::SetHeadRotation(SetHeadRotation::decode(reader)?))
             }
@@ -4794,6 +5644,8 @@ impl ClientboundPlayPacket {
                 Ok(Self::SetEntityMotion(SetEntityMotion::decode(reader)?))
             }
             SetEquipment::PACKET_ID => Ok(Self::SetEquipment(SetEquipment::decode(reader)?)),
+            SetExperience::PACKET_ID => Ok(Self::SetExperience(SetExperience::decode(reader)?)),
+            UpdateHealth::PACKET_ID => Ok(Self::UpdateHealth(UpdateHealth::decode(reader)?)),
             ClientboundSetHeldItem::PACKET_ID => Ok(Self::ClientboundSetHeldItem(
                 ClientboundSetHeldItem::decode(reader)?,
             )),
@@ -4826,20 +5678,24 @@ impl ClientboundPlayPacket {
         match self {
             Self::SpawnEntity(_) => SpawnEntity::PACKET_ID,
             Self::AcknowledgeBlockChange(_) => AcknowledgeBlockChange::PACKET_ID,
+            Self::BlockDestruction(_) => BlockDestruction::PACKET_ID,
             Self::BlockEntityData(_) => BlockEntityData::PACKET_ID,
             Self::BlockUpdate(_) => BlockUpdate::PACKET_ID,
             Self::BossBar(_) => BossBar::PACKET_ID,
             Self::TabCompleteResponse(_) => TabCompleteResponse::PACKET_ID,
             Self::Commands(_) => Commands::PACKET_ID,
             Self::SetContainerContent(_) => SetContainerContent::PACKET_ID,
+            Self::SetContainerProperty(_) => SetContainerProperty::PACKET_ID,
             Self::SetContainerSlot(_) => SetContainerSlot::PACKET_ID,
             Self::PlayDisconnect(_) => PlayDisconnect::PACKET_ID,
+            Self::EntityEvent(_) => EntityEvent::PACKET_ID,
             Self::EntityTeleport(_) => EntityTeleport::PACKET_ID,
             Self::UnloadChunk(_) => UnloadChunk::PACKET_ID,
             Self::GameEvent(_) => GameEvent::PACKET_ID,
             Self::ClientboundKeepAlive(_) => ClientboundKeepAlive::PACKET_ID,
             Self::ChunkDataAndLight(_) => ChunkDataAndLight::PACKET_ID,
             Self::Particle(_) => Particle::PACKET_ID,
+            Self::UpdateLight(_) => UpdateLight::PACKET_ID,
             Self::JoinGame(_) => JoinGame::PACKET_ID,
             Self::UpdateEntityPosition(_) => UpdateEntityPosition::PACKET_ID,
             Self::UpdateEntityPositionAndRotation(_) => UpdateEntityPositionAndRotation::PACKET_ID,
@@ -4847,10 +5703,12 @@ impl ClientboundPlayPacket {
             Self::OpenScreen(_) => OpenScreen::PACKET_ID,
             Self::OpenSignEditor(_) => OpenSignEditor::PACKET_ID,
             Self::PlayerAbilities(_) => PlayerAbilities::PACKET_ID,
+            Self::CombatDeath(_) => CombatDeath::PACKET_ID,
             Self::RemovePlayerInfo(_) => RemovePlayerInfo::PACKET_ID,
             Self::PlayerInfoUpdate(_) => PlayerInfoUpdate::PACKET_ID,
             Self::SynchronizePlayerPosition(_) => SynchronizePlayerPosition::PACKET_ID,
             Self::RemoveEntities(_) => RemoveEntities::PACKET_ID,
+            Self::Respawn(_) => Respawn::PACKET_ID,
             Self::SetHeadRotation(_) => SetHeadRotation::PACKET_ID,
             Self::SetActionBarText(_) => SetActionBarText::PACKET_ID,
             Self::SetCenterChunk(_) => SetCenterChunk::PACKET_ID,
@@ -4859,6 +5717,8 @@ impl ClientboundPlayPacket {
             Self::SetEntityData(_) => SetEntityData::PACKET_ID,
             Self::SetEntityMotion(_) => SetEntityMotion::PACKET_ID,
             Self::SetEquipment(_) => SetEquipment::PACKET_ID,
+            Self::SetExperience(_) => SetExperience::PACKET_ID,
+            Self::UpdateHealth(_) => UpdateHealth::PACKET_ID,
             Self::ClientboundSetHeldItem(_) => ClientboundSetHeldItem::PACKET_ID,
             Self::UpdateObjectives(_) => UpdateObjectives::PACKET_ID,
             Self::SetPlayerTeam(_) => SetPlayerTeam::PACKET_ID,
@@ -4878,20 +5738,24 @@ impl ClientboundPlayPacket {
         match self {
             Self::SpawnEntity(packet) => packet.encode(buf),
             Self::AcknowledgeBlockChange(packet) => packet.encode(buf),
+            Self::BlockDestruction(packet) => packet.encode(buf),
             Self::BlockEntityData(packet) => packet.encode(buf),
             Self::BlockUpdate(packet) => packet.encode(buf),
             Self::BossBar(packet) => packet.encode(buf),
             Self::TabCompleteResponse(packet) => packet.encode(buf),
             Self::Commands(packet) => packet.encode(buf),
             Self::SetContainerContent(packet) => packet.encode(buf),
+            Self::SetContainerProperty(packet) => packet.encode(buf),
             Self::SetContainerSlot(packet) => packet.encode(buf),
             Self::PlayDisconnect(packet) => packet.encode(buf),
+            Self::EntityEvent(packet) => packet.encode(buf),
             Self::EntityTeleport(packet) => packet.encode(buf),
             Self::UnloadChunk(packet) => packet.encode(buf),
             Self::GameEvent(packet) => packet.encode(buf),
             Self::ClientboundKeepAlive(packet) => packet.encode(buf),
             Self::ChunkDataAndLight(packet) => packet.encode(buf),
             Self::Particle(packet) => packet.encode(buf),
+            Self::UpdateLight(packet) => packet.encode(buf),
             Self::JoinGame(packet) => packet.encode(buf),
             Self::UpdateEntityPosition(packet) => packet.encode(buf),
             Self::UpdateEntityPositionAndRotation(packet) => packet.encode(buf),
@@ -4899,10 +5763,12 @@ impl ClientboundPlayPacket {
             Self::OpenScreen(packet) => packet.encode(buf),
             Self::OpenSignEditor(packet) => packet.encode(buf),
             Self::PlayerAbilities(packet) => packet.encode(buf),
+            Self::CombatDeath(packet) => packet.encode(buf),
             Self::RemovePlayerInfo(packet) => packet.encode(buf),
             Self::PlayerInfoUpdate(packet) => packet.encode(buf),
             Self::SynchronizePlayerPosition(packet) => packet.encode(buf),
             Self::RemoveEntities(packet) => packet.encode(buf),
+            Self::Respawn(packet) => packet.encode(buf),
             Self::SetHeadRotation(packet) => packet.encode(buf),
             Self::SetActionBarText(packet) => packet.encode(buf),
             Self::SetCenterChunk(packet) => packet.encode(buf),
@@ -4911,6 +5777,8 @@ impl ClientboundPlayPacket {
             Self::SetEntityData(packet) => packet.encode(buf),
             Self::SetEntityMotion(packet) => packet.encode(buf),
             Self::SetEquipment(packet) => packet.encode(buf),
+            Self::SetExperience(packet) => packet.encode(buf),
+            Self::UpdateHealth(packet) => packet.encode(buf),
             Self::ClientboundSetHeldItem(packet) => packet.encode(buf),
             Self::UpdateObjectives(packet) => packet.encode(buf),
             Self::SetPlayerTeam(packet) => packet.encode(buf),

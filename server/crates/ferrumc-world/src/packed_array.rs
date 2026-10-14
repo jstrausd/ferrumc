@@ -62,6 +62,11 @@ impl PackedArray {
         })
     }
 
+    // Native backing capacity, excluding this inline object and allocator overhead.
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        self.words.capacity() * std::mem::size_of::<u64>()
+    }
+
     /// Returns the number of entries.
     #[must_use]
     pub const fn len(&self) -> usize {

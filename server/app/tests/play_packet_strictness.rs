@@ -57,7 +57,14 @@ struct MalformedCase {
 
 /// Builds a server with minimal chunk traffic and returns its bound address.
 async fn start_server() -> anyhow::Result<(RunningServer, SocketAddr)> {
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0")?;
+    let operators: Vec<_> = (0..malformed_cases().len())
+        .map(|index| format!("Strict{index}"))
+        .chain(std::iter::once("Unmodelled".to_owned()))
+        .collect();
+    // Every assertion uses the stationary join, inventory or command channel.
+    let config = AppConfig::from_toml_str(&format!(
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 0\nview_distance = 0\nops = {operators:?}\n"
+    ))?;
     let server = ferrumc_app::run(&config).await?;
     let addr = server.local_addr();
     Ok((server, addr))
@@ -388,6 +395,7 @@ async fn strictness_flow(server: &RunningServer, addr: SocketAddr) -> anyhow::Re
         let name = format!("Strict{index}");
         let player = PlayerId::offline(&name);
         let mut client = login_to_play(addr, &name).await?;
+        common::make_creative(&mut client).await?;
         wait_until_play_loop(&mut client).await?;
         prove_sentinel(&mut client).await?;
         prove_stateful_carrier(&mut client).await?;
@@ -450,6 +458,7 @@ async fn strictness_flow(server: &RunningServer, addr: SocketAddr) -> anyhow::Re
 /// A real protocol-772 packet omitted from the generated slice stays compatible.
 async fn unmodelled_packet_flow(server: &RunningServer, addr: SocketAddr) -> anyhow::Result<()> {
     let mut client = login_to_play(addr, "Unmodelled").await?;
+    common::make_creative(&mut client).await?;
     wait_until_play_loop(&mut client).await?;
     prove_sentinel(&mut client).await?;
 

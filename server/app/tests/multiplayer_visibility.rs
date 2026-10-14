@@ -222,6 +222,8 @@ async fn run_armor_flow(addr: SocketAddr) -> anyhow::Result<()> {
     let notch = PlayerId::offline("Notch").as_uuid();
 
     let mut c1 = login_to_play(addr, "Saad").await?;
+    common::make_creative(&mut c1).await?;
+    common::supply_creative_slot(&mut c1, 36, 1, 64).await?;
     let mut c2 = login_to_play(addr, "Notch").await?;
 
     // Each client sees the other; keep Saad's entity id so Notch can match Saad's
@@ -266,8 +268,10 @@ async fn run_armor_flow(addr: SocketAddr) -> anyhow::Result<()> {
 async fn two_clients_see_each_other_and_movement() {
     // Ephemeral port; radius-1 spawn keeps the chunk payload small. Both players
     // join at the default spawn, so they start in view distance of each other.
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses");
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1\nview_distance = 1",
+    )
+    .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
 
@@ -286,8 +290,10 @@ async fn two_clients_see_each_other_and_movement() {
 async fn worn_armor_is_broadcast_to_viewers() {
     // Two players in view of each other; one wears (then removes) a helmet and the
     // other must see the SetEquipment broadcast carrying it in the helmet slot.
-    let config = AppConfig::from_toml_str("bind = \"127.0.0.1:0\"\nspawn_chunk_radius = 1")
-        .expect("config parses");
+    let config = AppConfig::from_toml_str(
+        "bind = \"127.0.0.1:0\"\nops = [\"Saad\"]\nspawn_chunk_radius = 1\nview_distance = 1",
+    )
+    .expect("config parses");
     let server = ferrumc_app::run(&config).await.expect("server starts");
     let addr = server.local_addr();
 

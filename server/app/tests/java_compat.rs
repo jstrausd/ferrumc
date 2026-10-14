@@ -439,8 +439,16 @@ async fn genuine_paper_api_plugin_commands_events_permissions_restart_and_startu
     let artifacts = Artifacts::configured()?;
     let directory = tempfile::tempdir()?;
     timeout(GUARD, async {
-        socket_lifecycle(&artifacts, &directory.path().join("plugins")).await?;
-        startup_rollback(&artifacts, &directory.path().join("collision")).await
+        Box::pin(socket_lifecycle(
+            &artifacts,
+            &directory.path().join("plugins"),
+        ))
+        .await?;
+        Box::pin(startup_rollback(
+            &artifacts,
+            &directory.path().join("collision"),
+        ))
+        .await
     })
     .await
     .context("genuine Java plugin socket acceptance timed out")?

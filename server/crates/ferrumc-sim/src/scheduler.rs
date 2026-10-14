@@ -1669,17 +1669,144 @@ mod tests {
             MutationCause::Command => bytes.push(1),
             MutationCause::Plugin => bytes.push(2),
             MutationCause::Test => bytes.push(3),
+            MutationCause::Fluid => bytes.push(4),
+            MutationCause::Furnace => bytes.push(5),
         }
     }
 
     /// Encodes every observable output field explicitly, including float bit
     /// patterns, so parity does not depend on `Debug` formatting or Rust memory
     /// layout.
+    #[allow(clippy::too_many_lines)] // one exhaustive, ordered test fingerprint for every output variant
     fn canonical_output_bytes(outputs: &[GameOutput]) -> Vec<u8> {
         let mut bytes = Vec::new();
         append_len(&mut bytes, outputs.len());
         for output in outputs {
             match output {
+                GameOutput::MobAttackResolved {
+                    player,
+                    target,
+                    token,
+                    accepted,
+                    damage,
+                    experience,
+                } => {
+                    bytes.push(24);
+                    append_player(&mut bytes, *player);
+                    bytes.extend_from_slice(&target.get().to_be_bytes());
+                    bytes.extend_from_slice(&token.to_be_bytes());
+                    bytes.push(u8::from(*accepted));
+                    bytes.extend_from_slice(&damage.to_bits().to_be_bytes());
+                    bytes.push(*experience);
+                }
+                GameOutput::MobPlayerHurt {
+                    player,
+                    attacker,
+                    damage,
+                    raw_damage,
+                } => {
+                    bytes.push(25);
+                    append_player(&mut bytes, *player);
+                    bytes.extend_from_slice(&attacker.get().to_be_bytes());
+                    bytes.extend_from_slice(&damage.to_bits().to_be_bytes());
+                    bytes.extend_from_slice(&raw_damage.to_bits().to_be_bytes());
+                }
+
+                GameOutput::PlayerAttackResolved {
+                    player,
+                    target,
+                    token,
+                    accepted,
+                    damage,
+                    raw_damage,
+                } => {
+                    bytes.push(23);
+                    append_player(&mut bytes, *player);
+                    append_player(&mut bytes, *target);
+                    bytes.extend_from_slice(&token.to_be_bytes());
+                    bytes.push(u8::from(*accepted));
+                    bytes.extend_from_slice(&damage.to_bits().to_be_bytes());
+                    bytes.extend_from_slice(&raw_damage.to_bits().to_be_bytes());
+                }
+
+                GameOutput::FurnaceTickDeferred { position, reason } => {
+                    bytes.push(22);
+                    append_block_position(&mut bytes, *position);
+                    bytes.push(*reason as u8);
+                }
+
+                GameOutput::BucketUseResolved {
+                    player,
+                    position,
+                    sequence,
+                    fill,
+                    token,
+                    state,
+                } => {
+                    bytes.push(19);
+                    append_player(&mut bytes, *player);
+                    append_block_position(&mut bytes, *position);
+                    bytes.extend_from_slice(&sequence.to_be_bytes());
+                    bytes.push(u8::from(*fill));
+                    bytes.extend_from_slice(&token.to_be_bytes());
+                    bytes.push(u8::from(state.is_some()));
+                    if let Some(state) = state {
+                        bytes.extend_from_slice(&state.as_u32().to_be_bytes());
+                    }
+                }
+                GameOutput::WaterTickDeferred { position, reason } => {
+                    bytes.push(18);
+                    append_block_position(&mut bytes, *position);
+                    bytes.push(*reason as u8);
+                }
+                GameOutput::MiningReleased { player, tool_token } => {
+                    bytes.push(17);
+                    append_player(&mut bytes, *player);
+                    bytes.extend_from_slice(&tool_token.to_be_bytes());
+                }
+                GameOutput::PlayerVitalsChanged { player, snapshot } => {
+                    bytes.push(12);
+                    append_player(&mut bytes, *player);
+                    for value in [
+                        snapshot.health(),
+                        snapshot.saturation(),
+                        snapshot.exhaustion(),
+                        snapshot.last_hurt(),
+                    ] {
+                        bytes.extend_from_slice(&value.to_bits().to_be_bytes());
+                    }
+                    bytes.extend_from_slice(&[
+                        snapshot.food(),
+                        snapshot.food_tick_timer(),
+                        snapshot.invulnerable_ticks(),
+                        snapshot.hurt_ticks(),
+                        snapshot.peaceful_phase(),
+                    ]);
+                }
+                GameOutput::PlayerDied { player } => {
+                    bytes.push(13);
+                    append_player(&mut bytes, *player);
+                }
+                GameOutput::PlayerHurt { player, amount } => {
+                    bytes.push(14);
+                    append_player(&mut bytes, *player);
+                    bytes.extend_from_slice(&amount.to_bits().to_be_bytes());
+                }
+                GameOutput::FoodConsumptionResolved {
+                    player,
+                    token,
+                    accepted,
+                } => {
+                    bytes.push(15);
+                    append_player(&mut bytes, *player);
+                    bytes.extend_from_slice(&token.to_be_bytes());
+                    bytes.push(u8::from(*accepted));
+                }
+                GameOutput::PlayerRespawned { player, position } => {
+                    bytes.push(16);
+                    append_player(&mut bytes, *player);
+                    append_position(&mut bytes, *position);
+                }
                 GameOutput::PlayerSpawned { player, position } => {
                     bytes.push(0);
                     append_player(&mut bytes, *player);
@@ -1756,6 +1883,49 @@ mod tests {
                     if let Some(state) = state {
                         bytes.extend_from_slice(&state.as_u32().to_be_bytes());
                     }
+                }
+                GameOutput::BlockActionAcknowledged { player, sequence } => {
+                    bytes.push(9);
+                    append_player(&mut bytes, *player);
+                    bytes.extend_from_slice(&sequence.to_be_bytes());
+                }
+                GameOutput::MiningProgress {
+                    player,
+                    position,
+                    stage,
+                } => {
+                    bytes.push(10);
+                    append_player(&mut bytes, *player);
+                    append_block_position(&mut bytes, *position);
+                    bytes.push(*stage as u8);
+                }
+                GameOutput::SurvivalBlockBroken {
+                    player,
+                    position,
+                    sequence,
+                    previous_state,
+                    held_item,
+                    tool_token,
+                    drops,
+                    experience,
+                    tool_damage,
+                } => {
+                    bytes.push(11);
+                    append_player(&mut bytes, *player);
+                    append_block_position(&mut bytes, *position);
+                    bytes.extend_from_slice(&sequence.to_be_bytes());
+                    bytes.extend_from_slice(&previous_state.as_u32().to_be_bytes());
+                    bytes.extend_from_slice(&held_item.unwrap_or(-1).to_be_bytes());
+                    bytes.extend_from_slice(&tool_token.to_be_bytes());
+                    append_len(&mut bytes, drops.len());
+                    for stack in drops {
+                        let body =
+                            ferrumc_items::encode_persisted_stack(stack).expect("checked output");
+                        append_len(&mut bytes, body.len());
+                        bytes.extend_from_slice(&body);
+                    }
+                    bytes.extend_from_slice(&experience.to_be_bytes());
+                    bytes.push(*tool_damage);
                 }
                 GameOutput::OpenSignEditor { player, position } => {
                     bytes.push(7);

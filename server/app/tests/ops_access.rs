@@ -95,9 +95,10 @@ async fn banned_name_is_denied_while_others_join() {
 async fn per_ip_limit_rejects_excess_connections() {
     // Cap concurrent connections per IP at 2. All clients here are loopback, so
     // they share one source IP and contend for the same per-IP budget.
+    // Admission needs nearby join chunks; distant streaming is unrelated.
     let config = AppConfig::from_toml_str(
         "bind = \"127.0.0.1:0\"\n\
-         spawn_chunk_radius = 1\n\
+         spawn_chunk_radius = 1\nview_distance = 1\n\
          [access]\n\
          per_ip_connection_limit = 2\n",
     )

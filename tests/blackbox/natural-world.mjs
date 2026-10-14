@@ -76,7 +76,7 @@ if (process.argv.includes('--self-test')) {
   const viewDistance = Number(process.env.MC_NATURAL_VIEW || 1);
   assert(Number.isInteger(viewDistance) && viewDistance >= 1 && viewDistance <= 8, 'test view distance 1..8');
   const exploreEnabled = process.env.MC_NATURAL_EXPLORE !== '0';
-  const treesEnabled = process.env.MC_NATURAL_PRESET === 'ferrumc_natural_tree_preview';
+  const treesEnabled = ['ferrumc_natural_tree_preview', 'ferrumc_natural_survival_preview'].includes(process.env.MC_NATURAL_PRESET);
   fs.mkdirSync(dir, { recursive: true });
   assert(!fs.existsSync(path.join(dir, 'world')), 'use a fresh MC_RUN_DIR; artifacts are preserved for diagnosis');
   const config = path.join(dir, 'config.toml');
@@ -143,6 +143,9 @@ if (process.argv.includes('--self-test')) {
     client.on('keep_alive', p => client.write('keep_alive', { keepAliveId: p.keepAliveId }));
     client.on('update_time', p => state.timeUpdates.push({ age: p.age.toString(), receivedAt: Date.now() }));
     client.on('login', p => { state.mode = p.worldState?.gamemode; });
+    client.on('game_state_change', p => {
+      if (p.reason === 'change_game_mode') state.mode = ['survival', 'creative', 'adventure', 'spectator'][p.gameMode];
+    });
     client.on('position', p => { state.position = { x: p.x, y: p.y, z: p.z }; state.positionRevision++; client.write('teleport_confirm', { teleportId: p.teleportId }); });
     client.on('map_chunk', p => {
       try { const chunk = new Chunk({ x: p.x, z: p.z }); chunk.load(p.chunkData, true, false); state.columns.set(`${p.x},${p.z}`, chunk); state.receivedColumns.set(`${p.x},${p.z}`, (state.receivedColumns.get(`${p.x},${p.z}`) || 0) + 1); }
@@ -157,6 +160,15 @@ if (process.argv.includes('--self-test')) {
     client.on('window_items', p => { if (p.windowId === 0) for (const [slot, item] of p.items.entries()) state.slots.set(slot, { item, revision: ++state.slotRevision }); });
     client.on('set_slot', p => { if (p.windowId === 0) state.slots.set(p.slot, { item: p.item, revision: ++state.slotRevision }); });
     await until(() => state.position && state.columns.has('0,0') && state.slots.has(36), 'spawn chunk, teleport and inventory', connection);
+    // The edit fixture explicitly earns Creative permission through its configured
+    // operator command; ordinary fresh joins stay empty Survival.
+    if (state.mode !== 'creative') {
+      assert.equal(state.mode, 'survival', 'fresh ordinary mode');
+      assert.equal(state.slots.size, 46, 'complete fresh player inventory');
+      assert([...state.slots.values()].every(({ item }) => item.itemCount === 0), 'fresh inventory has no starter grants');
+      client.write('chat_command', { command: 'gamemode creative' });
+      await until(() => state.mode === 'creative', 'explicit Creative fixture acknowledgement', connection);
+    }
     assert.equal(state.mode, 'creative', 'genuine creative-mode fixture');
     return connection;
   }

@@ -349,12 +349,12 @@ async fn foreign_handle(redb: bool) {
 
 #[tokio::test]
 async fn foreign_handle_produces_no_view_memory() {
-    foreign_handle(false).await;
+    Box::pin(foreign_handle(false)).await;
 }
 
 #[tokio::test]
 async fn foreign_handle_produces_no_view_redb() {
-    foreign_handle(true).await;
+    Box::pin(foreign_handle(true)).await;
 }
 
 /// White-box guard: no writer stores an index above 8, but if one did, view

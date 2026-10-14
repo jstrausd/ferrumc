@@ -51,6 +51,32 @@
 - No unsafe code, production `unwrap`/`expect`, or unbounded input allocation.
   Every public item has rustdoc.
 
+## Normal banner/skull attachment and decorated-pot facing
+
+- The 16 pinned banner colors and seven skull/head families accept either their
+  standing or wall reverse item alias. Top clicks select the standing block;
+  horizontal clicks select the wall block facing the clicked side. The result
+  retains the original requested state and remains one cell with no relocation.
+- Standing rotation follows the original float angle multiplication, Java
+  half-tie rounding towards positive infinity and 16-segment normalization.
+  Banners add180F before conversion; skulls use yaw directly. State encoding
+  continues through registry property maps, without state-id arithmetic.
+- Decorated pots use the context's horizontal look direction, not the furnace
+  family's opposite direction. Fresh cracked/waterlogged properties begin at
+  defaultfalse; the existing source-water post-step still applies.
+- Reference: Paper1.21.8 Build60 commit29c8822d90899c89d2689338e81a98f690bcba12,
+  complete StandingAndWallBlockItem, BannerItem, PlayerHeadItem, BannerBlock,
+  WallBannerBlock, AbstractSkullBlock, SkullBlock, WallSkullBlock,
+  DecoratedPotBlock, RotationSegment, SegmentedAnglePrecision, and Items
+  registrations. Tests freeze independent1.21.8 registry encodings for all23
+  pairs, both reverse aliases, four side faces, yaw turns and signed half ties.
+- This is the normal top/side projection only. PlacementContext has no pitch or
+  nearest-look ordering, proven canSurvive/unobstructed support, neighbor signal,
+  or Java event callback. Downward clicks and nonfinite top yaw retain their
+  previous requested-state fallback. Skull powered placement stays defaultfalse.
+  Support fallback, ceiling placement, BlockCanBuildEvent and full Paper
+  differential behavior are not claimed by these pure helper tests.
+
 ## Placement collision geometry
 
 - `standing_player_body` promotes the original float width/height (0.6F/1.8F)

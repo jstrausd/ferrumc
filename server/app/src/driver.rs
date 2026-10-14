@@ -123,6 +123,15 @@ struct SnapshotCtx {
     /// join and pruned each tick against the router's public connection state.
     roster: BTreeMap<PlayerId, String>,
     placements: PlacementCompletions,
+    buckets: crate::bucket_completion::BucketCompletions,
+    combat_profiles: BTreeMap<PlayerId, Arc<crate::combat_wear::CombatWearSnapshot>>,
+    attacks: crate::combat_completion::AttackCompletions,
+    armor_pending: std::collections::BTreeSet<PlayerId>,
+    mobs: Option<crate::mob_runtime_app::MobRuntime>,
+    raining: bool,
+    relighter: crate::lighting::Relighter,
+    ground: Option<crate::ground_runtime::GroundRuntime>,
+    effects: BTreeMap<PlayerId, mpsc::Sender<crate::gameplay::GameplayEffect>>,
     /// Recent tick timestamps within the last wall-second, used to derive the
     /// effective TPS. Bounded by [`TPS_WINDOW_CAP`].
     tps_window: VecDeque<Instant>,
@@ -150,6 +159,15 @@ impl SnapshotCtx {
             start_instant: Instant::now(),
             roster: BTreeMap::new(),
             placements: PlacementCompletions::new(),
+            buckets: crate::bucket_completion::BucketCompletions::new(),
+            combat_profiles: BTreeMap::new(),
+            attacks: crate::combat_completion::AttackCompletions::new(),
+            armor_pending: std::collections::BTreeSet::new(),
+            mobs: None,
+            raining: false,
+            relighter: crate::lighting::Relighter::new(),
+            ground: None,
+            effects: BTreeMap::new(),
             tps_window: VecDeque::new(),
             net_telemetry,
             block_events,
@@ -220,6 +238,39 @@ type DeliveryReply = oneshot::Sender<Result<(), SessionError>>;
 /// The enum is the only way a connection influences simulation state; it carries
 /// no sockets and no shard handles.
 pub(crate) enum SimCommand {
+    /// Read-only reachable furnace snapshot, including persisted timer fields.
+    ProbeFurnace {
+        player: PlayerId,
+        position: BlockPos,
+        reply: oneshot::Sender<Option<ferrumc_world::FurnaceInventory>>,
+    },
+    /// Exact snapshot checked atomic furnace/player/cursor exchange.
+    FurnaceClick {
+        player: PlayerId,
+        position: BlockPos,
+        expected: [ItemStack; 3],
+        player_slots: Box<[ItemStack; 36]>,
+        cursor: ItemStack,
+        slot: usize,
+        button: i8,
+        mode: i32,
+        reply:
+            oneshot::Sender<Option<(ferrumc_world::FurnaceInventory, [ItemStack; 36], ItemStack)>>,
+    },
+
+    /// Serial prepared-inventory water bucket transaction, using a resident ray.
+    BucketUse {
+        player: PlayerId,
+        position: Vec3,
+        eye_height: f64,
+        yaw: f32,
+        pitch: f32,
+        sequence: i32,
+        fill: bool,
+        token: u64,
+        reply: crate::bucket_completion::BucketReply,
+    },
+
     /// Place a player at `position` and hand back their session handle.
     Join {
         /// The joining player's identity.
@@ -245,6 +296,72 @@ pub(crate) enum SimCommand {
         event: NetEvent,
         /// Optional acceptance reply used when a caller must not publish an
         /// after-event or client preview before bounded shard admission.
+        acceptance: Option<DeliveryReply>,
+    },
+    /// Installs the connection-owned bounded trusted effect inbox after join.
+    RegisterGameplay {
+        player: PlayerId,
+        sender: mpsc::Sender<crate::gameplay::GameplayEffect>,
+        reply: oneshot::Sender<bool>,
+    },
+    /// Removes the effect producer before the connection drains and saves.
+    UnregisterGameplay {
+        player: PlayerId,
+        reply: oneshot::Sender<()>,
+    },
+    /// Bounded immutable equipment facts; absent/unsupported profiles refuse hits.
+    CombatProfile {
+        player: PlayerId,
+        profile: Option<Arc<crate::combat_wear::CombatWearSnapshot>>,
+    },
+    /// Clears an armor reservation only after the sole inventory writer applied its receipt.
+    CombatWearApplied {
+        player: PlayerId,
+        profile: Option<Arc<crate::combat_wear::CombatWearSnapshot>>,
+    },
+    /// Actual entity attack decoded by the connection, never a client stack grant.
+    AttackEntity {
+        player: PlayerId,
+        target: i32,
+        profile: crate::combat::CombatProfile,
+        token: u64,
+        reply: crate::combat_completion::AttackReply,
+    },
+    /// Operator preview request, still checked by natural terrain/light rules.
+    SpawnMob {
+        player: PlayerId,
+        kind: ferrumc_sim::MobKind,
+        position: Vec3,
+    },
+    ReadVitals {
+        player: PlayerId,
+        reply: oneshot::Sender<Option<ferrumc_sim::VitalsSnapshot>>,
+    },
+    /// Entire pinned inventory moves only after actual dead-owner admission.
+    PlayerDeathDrops {
+        player: PlayerId,
+        drops: Vec<ferrumc_sim::GroundItemDrop>,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+    /// Prepared selected-mainhand payload, never a client location or entity.
+    PlayerHeldDrop {
+        player: PlayerId,
+        stack: ItemStack,
+        reply: oneshot::Sender<bool>,
+    },
+    GroundPickupResult {
+        result: ferrumc_sim::GroundItemPickupResult,
+        reply: oneshot::Sender<anyhow::Result<()>>,
+    },
+    GroundChunks {
+        player: PlayerId,
+        added: Vec<ChunkPos>,
+        removed: Vec<ChunkPos>,
+    },
+    /// Trusted gameplay input built from connection-owned inventory facts.
+    GameplayInput {
+        player: PlayerId,
+        input: GameInput,
         acceptance: Option<DeliveryReply>,
     },
     /// Stream chunks around a moving player: release the player tickets on every
@@ -622,6 +739,22 @@ pub(crate) enum SimCommand {
     /// leaves the connection's cursor untouched and triggers a resync.
     /// A conflicting viewer snapshot returns the unchanged cursor and current
     /// chest contents without applying an exchange.
+    /// Conserving shift transfer/number swap of chest and player slots together.
+    /// Authoritative loaded-block/reach probe for a crafting screen.
+    ProbeCrafting {
+        player: PlayerId,
+        position: BlockPos,
+        reply: oneshot::Sender<bool>,
+    },
+    ContainerInventoryClick {
+        player: PlayerId,
+        position: BlockPos,
+        slot: usize,
+        hotbar: Option<u8>,
+        player_slots: Vec<ItemStack>,
+        expected_slots: Vec<ItemStack>,
+        reply: oneshot::Sender<Option<(Vec<ItemStack>, Vec<ItemStack>)>>,
+    },
     ContainerLeftClick {
         /// The clicking player.
         player: PlayerId,
@@ -631,6 +764,7 @@ pub(crate) enum SimCommand {
         slot: usize,
         /// The player's carried item at click time (server-authoritative).
         cursor: ItemStack,
+        right: bool,
         /// The bounded chest snapshot this viewer last received. The driver
         /// compares it while holding the shard, before applying the exchange.
         expected_slots: Vec<ItemStack>,
@@ -647,6 +781,7 @@ impl SimCommand {
         matches!(
             self,
             Self::Event { .. }
+                | Self::GameplayInput { .. }
                 | Self::SetGameMode { .. }
                 | Self::SetBlockExact { .. }
                 | Self::RegionEdit { .. }
@@ -670,6 +805,7 @@ impl SimCommand {
         reply: DeliveryReply,
     ) -> Result<(), DeliveryReply> {
         let (Self::Event { acceptance, .. }
+        | Self::GameplayInput { acceptance, .. }
         | Self::SetGameMode { acceptance, .. }
         | Self::SetBlockExact { acceptance, .. }
         | Self::RegionEdit { acceptance, .. }
@@ -742,6 +878,7 @@ pub(crate) async fn run(
     mut shard: SimShard,
     target: PersistenceTarget,
     generator: RuntimeGeneration,
+    ground: Option<crate::ground_runtime::GroundRuntime>,
     mut shard_rx: mpsc::Receiver<GameInput>,
     mut commands: mpsc::Receiver<SimCommand>,
     tick_period: Duration,
@@ -775,12 +912,29 @@ pub(crate) async fn run(
     // Read-only snapshot publishing state (roster, TPS window, build/start
     // context). Updated only from this task, never holding a lock across a tick.
     let mut snap_ctx = SnapshotCtx::new(snapshots, net_telemetry, block_events);
+    snap_ctx.ground = ground;
+    if snap_ctx.ground.is_some() {
+        let mut mobs = crate::mob_runtime_app::MobRuntime::new(generator.identity().seed().value())
+            .map_err(|e| ServerError::invalid_state(e.to_string()))?;
+        for snapshot in shard
+            .mob_snapshots(None, 64)
+            .map_err(|e| ServerError::invalid_state(e.to_string()))?
+        {
+            mobs.view
+                .snapshot(&snapshot)
+                .map_err(|e| ServerError::invalid_state(e.to_string()))?;
+        }
+        snap_ctx.mobs = Some(mobs);
+    }
     let mut preparation = ChunkPreparation::new(&generator);
     let natural_preview =
         generator.identity().generator_kind() == GeneratorKind::FerrumcNaturalPreview;
 
     let outcome = async {
         loop {
+            if let Some(ground) = snap_ctx.ground.as_mut() {
+                sync_ground_pins(ground, &mut shard, &generator, &target, &storage_tx, tick, &mut next_mutation_id).await?;
+            }
             tokio::select! {
                 biased;
                 _ = shutdown.changed() => break,
@@ -795,6 +949,9 @@ pub(crate) async fn run(
                         &mut world_time,
                         &mut snap_ctx,
                     )?;
+                    if let Some(ground) = snap_ctx.ground.as_mut() {
+                        ground.save_if_due(&shard, tick.get()).await.map_err(|error| ServerError::invalid_state(error.to_string()))?;
+                    }
                     preparation.retain_viewers(&snap_ctx.roster);
                     // End-of-tick flush: hand the tick's player edits to the storage
                     // worker without ever blocking the tick (see the helper).
@@ -815,12 +972,26 @@ pub(crate) async fn run(
                 }
                 maybe_command = commands.recv() => match maybe_command {
                     Some(SimCommand::StreamChunks { viewer, load, load_limit, unload, prefetch, reply }) if natural_preview => {
+                        let before: Vec<_> = load.iter().chain(&unload).map(|pos| (*pos, shard.loaded_chunks().get(*pos).is_some())).collect();
                         if let Err(error) = release_chunks(&mut shard, &target, &storage_tx, tick, &mut next_mutation_id, &unload).await {
                             let _ = fatal_shutdown.send(true);
                             return Err(error);
                         }
                         preparation.request(viewer, load.iter().copied().filter(|pos| shard.loaded_chunks().get(*pos).is_none()), prefetch.into_iter().filter(|pos| shard.loaded_chunks().get(*pos).is_none()));
                         let packets = load_prepared_chunks(&mut shard, target.store(), &generator, &mut preparation, &load, load_limit).await;
+                        for (pos, was_resident) in before {
+                            if was_resident != shard.loaded_chunks().get(pos).is_some() {
+                                snap_ctx.relighter.changed(pos, shard.loaded_chunks());
+                            }
+                        }
+                        {
+                            for column in &packets {
+                                let pos = ChunkPos::new(column.chunk.x(), column.chunk.z());
+                                if let Some(packet) = snap_ctx.relighter.ensure(pos) {
+                                    router.send_play_packet_to(viewer, packet);
+                                }
+                            }
+                        }
                         if let Err(error) = deliver_streamed_chunks(reply, packets, &mut shard, &target, &storage_tx, tick, &mut next_mutation_id).await {
                             let _ = fatal_shutdown.send(true);
                             return Err(error);
@@ -832,7 +1003,127 @@ pub(crate) async fn run(
                     Some(SimCommand::CancelChunkPreparation { viewer }) => {
                         preparation.cancel(viewer);
                     }
+                    Some(SimCommand::BucketUse { player, position, eye_height, yaw, pitch, sequence, fill, token, reply }) => {
+                        if !router.is_player_connected(player) { let _ = reply.send(Ok(None)); continue; }
+                        // Position is the connection's validated admitted movement;
+                        // preceding motion remains FIFO in the same owner inbox.
+                        // The owner rechecks living/mode/reach before mutation.
+                        let reach = if shard.player_game_mode(player) == Some(GameMode::Creative) { 5.0 } else { 4.5 };
+                        let eye = Vec3::new(position.x, position.y + eye_height, position.z);
+                        let target = crate::bucket_raycast::ray_target(eye, yaw, pitch, reach, fill, |at| {
+                            shard.loaded_chunks().get(ChunkPos::new(at.x().div_euclid(16), at.z().div_euclid(16)))?.get_block(at)
+                        }).ok().flatten();
+                        let Some(position) = target else { let _ = reply.send(Ok(None)); continue; };
+                        if let Err(reply) = snap_ctx.buckets.track(player, token, sequence, fill, reply) {
+                            let _ = reply.send(Ok(None)); continue;
+                        }
+                        let input = GameInput::BucketUse { player, position, sequence, fill, token };
+                        if let Err(error) = router.route_game_input(player, input) {
+                            snap_ctx.buckets.fail(player, error);
+                        }
+                    }
+                    Some(SimCommand::SpawnMob { player, kind, position }) => {
+                        let accepted = snap_ctx.mobs.as_mut().is_some_and(|mobs| mobs.request_spawn(player,kind,position,tick.get()));
+                        if !accepted { router.send_play_packet_to(player, ferrumc_session::system_chat(&TextComponent::text("Mob spawn request refused: runtime/capacity"), false)); }
+                    }
+                    Some(SimCommand::CombatProfile { player, profile }) => {
+                        if snap_ctx.roster.contains_key(&player) && !snap_ctx.armor_pending.contains(&player) {
+                            snap_ctx.combat_profiles.remove(&player);
+                            if let Some(profile) = profile.filter(|p| p.encoded_bytes() <= 64 * 1024) {
+                                let total: usize = snap_ctx.combat_profiles.values().map(|p| p.encoded_bytes()).sum();
+                                if total.saturating_add(profile.encoded_bytes()) <= 8 * 1024 * 1024 {
+                                    snap_ctx.combat_profiles.insert(player, profile);
+                                }
+                            }
+                        }
+                    }
+                    Some(SimCommand::CombatWearApplied { player, profile }) => {
+                        tracing::debug!(%player, "armor receipt applied and reservation released");
+                        snap_ctx.armor_pending.remove(&player);
+                        snap_ctx.combat_profiles.remove(&player);
+                        if snap_ctx.roster.contains_key(&player) {
+                            if let Some(profile) = profile.filter(|p| p.encoded_bytes() <= 64 * 1024) {
+                                let total: usize = snap_ctx.combat_profiles.values().map(|p| p.encoded_bytes()).sum();
+                                if total.saturating_add(profile.encoded_bytes()) <= 8 * 1024 * 1024 { snap_ctx.combat_profiles.insert(player, profile); }
+                            }
+                        }
+                    }
+                    Some(SimCommand::AttackEntity { player, target, profile, token, reply }) => {
+                        let wire_target = ferrumc_core::EntityId::new(target);
+                        let target = snap_ctx.roster.keys().copied().find(|target_player|
+                            router.player_entity_id(*target_player) == Some(target));
+                        let Some(target) = target.filter(|target| *target != player) else {
+                            if let Some(mobs) = snap_ctx.mobs.as_mut() {
+                                let present = shard.mob_snapshots(None,64).is_ok_and(|snapshots| snapshots.iter().any(|s| s.base().wire_id() == wire_target));
+                                if present {
+                                    if let Err(reply) = mobs.track_attack(player,wire_target,token,reply) { let _ = reply.send(false); continue; }
+                                    if router.route_game_input(player, GameInput::PlayerMobAttackTracked { player, target:wire_target, damage:profile.attack_damage(), attack_speed:profile.attack_speed(), token }).is_err() { mobs.fail_attack(player); }
+                                    continue;
+                                }
+                            }
+                            let _ = reply.send(false); continue;
+                        };
+                        let Some(armor) = snap_ctx.combat_profiles.get(&target).filter(|_| !snap_ctx.armor_pending.contains(&target)).cloned() else { let _ = reply.send(false); continue; };
+                        let Ok(request) = ferrumc_sim::DamageRequest::new(profile.attack_damage(), armor.profile().armor(), armor.profile().toughness()) else {
+                            let _ = reply.send(false); continue;
+                        };
+                        let Some(sender) = snap_ctx.effects.get(&target).cloned() else { let _ = reply.send(false); continue; };
+                        let Ok(effect) = sender.try_reserve_owned() else { let _ = reply.send(false); continue; };
+                        let pending = crate::combat_completion::PendingAttack { target, armor, reply, effect };
+                        if let Err(pending) = snap_ctx.attacks.track(player, token, pending) { let _ = pending.reply.send(false); continue; }
+                        snap_ctx.armor_pending.insert(target);
+                        if snap_ctx.mobs.is_some() { let _ = shard.clear_mob_player_profile(target); }
+                        if router.route_game_input(player, GameInput::PlayerAttackTracked { player, target, request, attack_speed: profile.attack_speed(), token }).is_err() {
+                            if let Some(target) = snap_ctx.attacks.fail(player) { snap_ctx.armor_pending.remove(&target); }
+                            snap_ctx.armor_pending.remove(&target);
+                        }
+                    }
+                    Some(SimCommand::RegisterGameplay { player, sender, reply }) => {
+                        let accepted = snap_ctx.roster.contains_key(&player) && !snap_ctx.effects.contains_key(&player);
+                        if accepted { snap_ctx.effects.insert(player, sender); }
+                        let _ = reply.send(accepted);
+                    }
+                    Some(SimCommand::UnregisterGameplay { player, reply }) => {
+                        // Earlier commands already own shard inputs. Resolve that
+                        // prefix before the connection closes/drains its effect inbox.
+                        if !shard_rx.is_empty() || shard.inbox_len() != 0 {
+                            run_tick(&mut router, &mut shard, &mut shard_rx, &metrics, &clock, &mut tick, &mut world_time, &mut snap_ctx)?;
+                        }
+                        snap_ctx.effects.remove(&player);
+                        snap_ctx.combat_profiles.remove(&player);
+                        if let Some(target) = snap_ctx.attacks.fail(player) { snap_ctx.armor_pending.remove(&target); }
+                        if let Some(ground) = snap_ctx.ground.as_mut() { ground.view.forget(player); }
+                        if let Some(mobs) = snap_ctx.mobs.as_mut() { mobs.forget(player); }
+                        let _ = reply.send(());
+                    }
+                    Some(SimCommand::GroundChunks { player, added, removed }) => {
+                        if snap_ctx.roster.contains_key(&player) {
+                            if let Some(mobs) = snap_ctx.mobs.as_mut() { mobs.view.update_chunks(player, added.clone(), removed.clone()); }
+                            let mut refused = false;
+                            for pos in &added {
+                                if let Some(packet) = snap_ctx.relighter.ensure(*pos) {
+                                    refused |= router.send_gameplay_packet_to(player, packet).is_err();
+                                }
+                            }
+                            if let Some(ground) = snap_ctx.ground.as_mut() { ground.view.update_chunks(player, added, removed); }
+                            if refused {
+                                if let Err(error) = router.disconnect_player_owned(player) {
+                                    match error.error() {
+                                        SessionError::ShardInboxFull { .. } | SessionError::UnknownPlayer { .. } => {}
+                                        _ => return Err(ServerError::invalid_state(error.to_string())),
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Some(command) => {
+                        if let SimCommand::SetWeather { raining } = &command { snap_ctx.raining = *raining; }
+                        let light_inputs: Vec<_> = match &command {
+                            SimCommand::StreamChunks { load, unload, .. } => load.iter().chain(unload).copied().collect(),
+                            SimCommand::ReleaseChunks { positions, .. } => positions.clone(),
+                            _ => Vec::new(),
+                        };
+                        let before: Vec<_> = light_inputs.iter().map(|pos| (*pos, shard.loaded_chunks().get(*pos).is_some())).collect();
                         if let Err(error) = handle_command(
                             &mut router,
                             &mut shard,
@@ -851,6 +1142,13 @@ pub(crate) async fn run(
                             let _ = fatal_shutdown.send(true);
                             return Err(error);
                         }
+                        for (pos, was_resident) in before {
+                            if was_resident != shard.loaded_chunks().get(pos).is_some() {
+                                snap_ctx.relighter.changed(pos, shard.loaded_chunks());
+                            } else if shard.loaded_chunks().get(pos).is_some() {
+                                snap_ctx.relighter.ensure(pos);
+                            }
+                        }
                     }
                     None => break,
                 },
@@ -864,7 +1162,35 @@ pub(crate) async fn run(
         let _ = fatal_shutdown.send(true);
         return Err(ServerError::invalid_state(error.to_string()));
     }
+    snap_ctx
+        .relighter
+        .drain()
+        .await
+        .map_err(ServerError::invalid_state)?;
     outcome?;
+    if let Some(ground) = snap_ctx.ground.as_mut() {
+        // All connection senders have completed their pickup responses before
+        // normal driver stop. Drain bounded owner work before the final capture.
+        for _ in 0..512 {
+            shard.run_tick();
+            ground
+                .events(&mut router, &mut shard, &snap_ctx.effects)
+                .map_err(|error| ServerError::invalid_state(error.to_string()))?;
+            if let Some(mobs) = snap_ctx.mobs.as_mut() {
+                mobs.events(&mut shard, &mut router)
+                    .map_err(|e| ServerError::invalid_state(e.to_string()))?;
+            }
+            if crate::ground_runtime::GroundRuntime::settled(&shard)
+                .map_err(|e| ServerError::invalid_state(e.to_string()))?
+            {
+                break;
+            }
+        }
+        ground
+            .finish(&shard)
+            .await
+            .map_err(|error| ServerError::invalid_state(error.to_string()))?;
+    }
     // The last connection may drop the command sender before the server task
     // signals the driver. Both stop causes must hand off off-tick edits before
     // dropping `storage_tx`, whose closure lets the worker drain and exit.
@@ -879,6 +1205,61 @@ pub(crate) async fn run(
     {
         let _ = fatal_shutdown.send(true);
         return Err(error);
+    }
+    Ok(())
+}
+
+/// Holds genuine ground payload cells before any player-ticket release. Old
+/// pins are released behind the same block durability barrier as player views.
+#[allow(clippy::too_many_arguments)]
+async fn sync_ground_pins(
+    ground: &mut crate::ground_runtime::GroundRuntime,
+    shard: &mut SimShard,
+    generator: &RuntimeGeneration,
+    target: &PersistenceTarget,
+    storage_tx: &mpsc::Sender<StorageFlushRequest>,
+    tick: Tick,
+    next_mutation_id: &mut u64,
+) -> ServerResult<()> {
+    let desired = crate::ground_runtime::GroundRuntime::entity_chunks(shard)
+        .map_err(|error| ServerError::invalid_state(error.to_string()))?;
+    let ticket = ChunkTicket::new(
+        TicketReason::Forced,
+        ferrumc_sim::TicketLevel::ENTITY_TICKING,
+    );
+    for pos in desired
+        .difference(&ground.pinned)
+        .copied()
+        .collect::<Vec<_>>()
+    {
+        // Live movement and drops require a resident destination already; only
+        // explicit startup restoration generates its saved columns.
+        if !shard.loaded_chunks().is_loaded(pos) {
+            return Err(ServerError::invalid_state(
+                "item/mob entity lost its resident destination before pin admission",
+            ));
+        }
+        generator
+            .acquire(shard.loaded_chunks_mut(), target.store(), pos, ticket)
+            .await
+            .map_err(|error| ServerError::invalid_state(error.to_string()))?;
+        ground.pinned.insert(pos);
+    }
+    let obsolete: Vec<_> = ground.pinned.difference(&desired).copied().collect();
+    if !obsolete.is_empty() {
+        release_ticket_chunks_acked(
+            shard,
+            target,
+            storage_tx,
+            tick,
+            next_mutation_id,
+            &obsolete,
+            ticket,
+        )
+        .await?;
+        for pos in obsolete {
+            ground.pinned.remove(&pos);
+        }
     }
     Ok(())
 }
@@ -959,6 +1340,8 @@ fn build_mutation_record(id: u64, tick: u64, mutation: &PendingMutation) -> Bloc
         ),
         MutationCause::Plugin => (MutationActor::System, MutationLogCause::Plugin),
         MutationCause::Test => (MutationActor::System, MutationLogCause::Test),
+        MutationCause::Fluid => (MutationActor::System, MutationLogCause::Fluid),
+        MutationCause::Furnace => (MutationActor::System, MutationLogCause::Furnace),
         // `MutationCause::Command` and any future (non-exhaustive) source are
         // attributed to the system with a command-like cause rather than dropped.
         _ => (MutationActor::System, MutationLogCause::Command),
@@ -1151,6 +1534,39 @@ async fn handle_command(
     command: SimCommand,
 ) -> ServerResult<()> {
     match command {
+        SimCommand::ProbeFurnace {
+            player,
+            position,
+            reply,
+        } => {
+            let _ = reply.send(shard.furnace_snapshot(player, position));
+        }
+        SimCommand::FurnaceClick {
+            player,
+            position,
+            expected,
+            player_slots,
+            cursor,
+            slot,
+            button,
+            mode,
+            reply,
+        } => {
+            let result = shard.furnace_inventory_click_checked(
+                player,
+                position,
+                &expected,
+                *player_slots,
+                cursor,
+                slot,
+                button,
+                mode,
+            );
+            let _ = reply.send(result);
+        }
+        SimCommand::BucketUse { reply, .. } => {
+            let _ = reply.send(Ok(None));
+        }
         SimCommand::Join {
             player,
             name,
@@ -1189,6 +1605,13 @@ async fn handle_command(
             )?;
             reply_delivery(acceptance, outcome);
         }
+        SimCommand::GameplayInput {
+            player,
+            input,
+            acceptance,
+        } => {
+            route_input_command(router, player, input, acceptance, "gameplay input")?;
+        }
         SimCommand::StreamChunks {
             viewer: _,
             load,
@@ -1212,7 +1635,47 @@ async fn handle_command(
             )
             .await?;
         }
-        SimCommand::PrepareChunks { .. } | SimCommand::CancelChunkPreparation { .. } => {}
+        SimCommand::PrepareChunks { .. }
+        | SimCommand::CancelChunkPreparation { .. }
+        | SimCommand::SpawnMob { .. }
+        | SimCommand::CombatProfile { .. }
+        | SimCommand::CombatWearApplied { .. }
+        | SimCommand::AttackEntity { .. }
+        | SimCommand::GroundChunks { .. } => {}
+        SimCommand::ReadVitals { player, reply } => {
+            let _ = reply.send(shard.player_vitals(player));
+        }
+        SimCommand::PlayerDeathDrops {
+            player,
+            drops,
+            reply,
+        } => {
+            let response = shard
+                .enqueue_player_death_drops(player, drops)
+                .map_err(|refusal| anyhow::anyhow!("death drops refused: {}", refusal.reason()));
+            let _ = reply.send(response);
+        }
+        SimCommand::PlayerHeldDrop {
+            player,
+            stack,
+            reply,
+        } => {
+            let _ = reply.send(crate::held_drop::admit(shard, player, stack));
+        }
+        SimCommand::GroundPickupResult { result, reply } => {
+            let response = shard
+                .enqueue_ground_item_pickup_result(result)
+                .map_err(|refusal| {
+                    anyhow::anyhow!("ground pickup response refused: {}", refusal.reason())
+                });
+            let _ = reply.send(response);
+        }
+        SimCommand::RegisterGameplay { reply, .. } => {
+            let _ = reply.send(false);
+        }
+        SimCommand::UnregisterGameplay { reply, .. } => {
+            let _ = reply.send(());
+        }
         SimCommand::ResendChunks { positions, reply } => {
             // These packets represent existing owned tickets, never a new handoff.
             let packets = resident_chunk_packets(shard, &positions);
@@ -1438,6 +1901,10 @@ async fn handle_command(
                         f32::from(mode.as_id()),
                     )),
                 );
+                router.send_play_packet_to(
+                    target_id,
+                    ClientboundPlayPacket::PlayerAbilities(crate::world::player_abilities(mode)),
+                );
             }
             reply_delivery(acceptance, outcome);
         }
@@ -1514,11 +1981,55 @@ async fn handle_command(
             let snapshot = shard.container_open(player, position);
             let _ = reply.send(snapshot);
         }
+        SimCommand::ProbeCrafting {
+            player,
+            position,
+            reply,
+        } => {
+            let valid = shard.player_game_mode(player) != Some(GameMode::Spectator)
+                && shard.player_position(player).is_some_and(|actor| {
+                    let centre = Vec3::new(
+                        f64::from(position.x()) + 0.5,
+                        f64::from(position.y()) + 0.5,
+                        f64::from(position.z()) + 0.5,
+                    );
+                    (actor - centre).length_squared() <= 36.0
+                })
+                && shard
+                    .loaded_chunks()
+                    .get(position.to_chunk_pos())
+                    .and_then(|chunk| chunk.get_block(position))
+                    .is_some_and(|state| {
+                        ferrumc_registry::block_state::state_id_to_block_name(state.as_u32())
+                            == Some("crafting_table")
+                    });
+            let _ = reply.send(valid);
+        }
+        SimCommand::ContainerInventoryClick {
+            player,
+            position,
+            slot,
+            hotbar,
+            player_slots,
+            expected_slots,
+            reply,
+        } => {
+            let outcome = shard.container_inventory_click_checked(
+                player,
+                position,
+                slot,
+                hotbar,
+                player_slots,
+                &expected_slots,
+            );
+            let _ = reply.send(outcome);
+        }
         SimCommand::ContainerLeftClick {
             player,
             position,
             slot,
             cursor,
+            right,
             expected_slots,
             reply,
         } => {
@@ -1528,7 +2039,7 @@ async fn handle_command(
                 Some(snapshot) if !chest_snapshots_match(&snapshot, &expected_slots) => {
                     Some((cursor, snapshot))
                 }
-                Some(_) => shard.container_left_click(player, position, slot, cursor),
+                Some(_) => shard.container_click(player, position, slot, cursor, right),
                 None => None,
             };
             let _ = reply.send(outcome);
@@ -1751,6 +2262,28 @@ async fn release_chunks_acked(
     next_mutation_id: &mut u64,
     positions: &[ChunkPos],
 ) -> ServerResult<()> {
+    release_ticket_chunks_acked(
+        shard,
+        target,
+        storage_tx,
+        tick,
+        next_mutation_id,
+        positions,
+        ChunkTicket::of(TicketReason::Player),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn release_ticket_chunks_acked(
+    shard: &mut SimShard,
+    target: &PersistenceTarget,
+    storage_tx: &mpsc::Sender<StorageFlushRequest>,
+    tick: Tick,
+    next_mutation_id: &mut u64,
+    positions: &[ChunkPos],
+    ticket: ChunkTicket,
+) -> ServerResult<()> {
     loop {
         // Reserve before capture: no queue slot means no transferred state.
         let permit = storage_tx
@@ -1774,7 +2307,6 @@ async fn release_chunks_acked(
         }
     }
 
-    let ticket = ChunkTicket::of(TicketReason::Player);
     for &pos in positions {
         let _ = shard.loaded_chunks_mut().release(pos, ticket);
     }
@@ -1789,6 +2321,7 @@ async fn release_chunks_acked(
 /// (`ferrumc_block_mutation_total{kind,result}`), advances and publishes the
 /// authoritative tick through `clock`, and emits a structured tick event.
 #[allow(clippy::too_many_arguments)] // the driver threads its per-tick state (tick, world clock, snapshot) through
+#[allow(clippy::too_many_lines)] // one ordered tick pipeline for owner effects and bounded publication
 fn run_tick(
     router: &mut SessionRouter,
     shard: &mut SimShard,
@@ -1807,6 +2340,45 @@ fn run_tick(
     let inputs_drained = drain_shard_inputs(shard, shard_rx)?;
     let inbox_len = shard.inbox_len();
 
+    if snap.ground.is_some() {
+        crate::ground_runtime::GroundRuntime::refill(router, shard)
+            .map_err(|error| ServerError::invalid_state(error.to_string()))?;
+    }
+    // Reserve publication before granting AI a trusted victim profile. Missing
+    // capacity/profile or an unsettled earlier hit excludes that actual target.
+    let mut mob_effects = BTreeMap::new();
+    if snap.mobs.is_some() {
+        for player in snap.roster.keys().copied() {
+            let _ = shard.clear_mob_player_profile(player);
+            if snap.armor_pending.contains(&player) || mob_effects.len() >= 64 {
+                continue;
+            }
+            let Some(snapshot) = snap.combat_profiles.get(&player).cloned() else {
+                continue;
+            };
+            let Some(sender) = snap.effects.get(&player).cloned() else {
+                continue;
+            };
+            let Ok(permit) = sender.try_reserve_owned() else {
+                continue;
+            };
+            let Some(wire) = router.player_entity_id(player) else {
+                continue;
+            };
+            let profile = snapshot.profile();
+            if shard
+                .set_mob_player_profile(
+                    player,
+                    ferrumc_core::EntityId::new(wire),
+                    profile.armor(),
+                    profile.toughness(),
+                )
+                .is_ok()
+            {
+                mob_effects.insert(player, (snapshot, permit));
+            }
+        }
+    }
     let outputs = shard.run_tick();
     // Routing an output may fan out to many viewers; any whose connection has
     // closed — or that overflowed a *mandatory* packet (the slow-client policy) —
@@ -1816,6 +2388,180 @@ fn run_tick(
     let mut closed = Vec::new();
     for output in &outputs {
         snap.placements.resolve(output);
+        snap.buckets.resolve(output);
+        if let Some(mobs) = snap.mobs.as_mut() {
+            mobs.resolve(output);
+        }
+        if let GameOutput::MobPlayerHurt {
+            player, raw_damage, ..
+        } = output
+        {
+            let Some((snapshot, permit)) = mob_effects.remove(player) else {
+                return Err(ServerError::invalid_state(
+                    "mob damage lacks reserved armor publication",
+                ));
+            };
+            snap.combat_profiles.remove(player);
+            snap.armor_pending.insert(*player);
+            let _ = permit.send(crate::gameplay::GameplayEffect::ArmorHurt {
+                snapshot,
+                raw_damage: *raw_damage,
+            });
+        }
+        if let GameOutput::PlayerAttackResolved {
+            player,
+            target,
+            token,
+            accepted: false,
+            ..
+        } = output
+        {
+            if snap.attacks.matches(*player, *target, *token) {
+                snap.armor_pending.remove(target);
+            }
+        }
+        if let Some((player, snapshot, raw_damage, permit)) = snap.attacks.resolve(output) {
+            snap.combat_profiles.remove(&player);
+            snap.armor_pending.insert(player);
+            let effect = crate::gameplay::GameplayEffect::ArmorHurt {
+                snapshot,
+                raw_damage,
+            };
+            let _ = permit.send(effect);
+        }
+        if let GameOutput::PlayerDespawned { player } = output {
+            if let Some(target) = snap.attacks.fail(*player) {
+                snap.armor_pending.remove(&target);
+            }
+            snap.combat_profiles.remove(player);
+            snap.armor_pending.remove(player);
+        }
+        if let GameOutput::PlayerHurt { player, .. } = output {
+            if let (Some(wire), Some(position)) = (
+                router.player_entity_id(*player),
+                shard.player_position(*player),
+            ) {
+                let packet = ClientboundPlayPacket::EntityEvent(
+                    ferrumc_proto::generated::play::EntityEvent::new(wire, 2),
+                );
+                let radius = f64::from(router.view_distance()) * 16.0;
+                for viewer in snap.roster.keys().copied() {
+                    if router
+                        .player_position(viewer)
+                        .is_some_and(|at| (at - position).length_squared() <= radius * radius)
+                        && router
+                            .send_gameplay_packet_to(viewer, packet.clone())
+                            .is_err()
+                    {
+                        closed.push(viewer);
+                    }
+                }
+            }
+        }
+        let (player, effect) = match output {
+            GameOutput::FoodConsumptionResolved {
+                player,
+                token,
+                accepted,
+            } => (
+                Some(*player),
+                Some(crate::gameplay::GameplayEffect::FoodResolved {
+                    token: *token,
+                    accepted: *accepted,
+                }),
+            ),
+            GameOutput::PlayerDied { player } => (
+                Some(*player),
+                Some(crate::gameplay::GameplayEffect::Died {
+                    position: shard.player_position(*player).ok_or_else(|| {
+                        ServerError::invalid_state("death lacks actual owner position")
+                    })?,
+                }),
+            ),
+            GameOutput::PlayerRespawned { player, position } => (
+                Some(*player),
+                Some(crate::gameplay::GameplayEffect::Respawned {
+                    position: *position,
+                }),
+            ),
+            _ => (None, None),
+        };
+        if let (Some(player), Some(effect)) = (player, effect) {
+            if snap
+                .effects
+                .get(&player)
+                .is_none_or(|sender| sender.try_send(effect).is_err())
+            {
+                closed.push(player);
+            }
+        }
+
+        if let GameOutput::MiningReleased { player, tool_token } = output {
+            if snap.effects.get(player).is_some_and(|sender| {
+                sender
+                    .try_send(crate::gameplay::GameplayEffect::MiningReleased {
+                        token: *tool_token,
+                    })
+                    .is_err()
+            }) {
+                closed.push(*player);
+            }
+        }
+        if let GameOutput::SurvivalBlockBroken {
+            player,
+            position,
+            sequence,
+            held_item,
+            experience,
+            tool_damage,
+            tool_token,
+            ..
+        } = output
+        {
+            let effect = crate::gameplay::GameplayEffect::BlockBroken {
+                position: *position,
+                sequence: *sequence,
+                held_item: *held_item,
+                experience: *experience,
+                tool_damage: *tool_damage,
+                tool_token: *tool_token,
+            };
+            if snap
+                .effects
+                .get(player)
+                .is_none_or(|sender| sender.try_send(effect).is_err())
+            {
+                closed.push(*player);
+            }
+        }
+        if let GameOutput::BlockChanged {
+            position,
+            state,
+            sequence,
+            cause: MutationCause::PlayerCreative { player },
+        } = output
+        {
+            let survival = outputs.iter().any(|output| matches!(output,
+                GameOutput::SurvivalBlockBroken { player: actor, position: cell, sequence: action, .. }
+                    if actor == player && cell == position && action == sequence));
+            if state.is_air() && !survival {
+                let effect = crate::gameplay::GameplayEffect::BlockBroken {
+                    position: *position,
+                    sequence: *sequence,
+                    held_item: None,
+                    experience: 0,
+                    tool_damage: 0,
+                    tool_token: 0,
+                };
+                if snap
+                    .effects
+                    .get(player)
+                    .is_some_and(|sender| sender.try_send(effect).is_err())
+                {
+                    closed.push(*player);
+                }
+            }
+        }
         // Classify the block-edit metric from the requested/new state: air means a
         // break, any other state a place. An accepted edit surfaces as BlockChanged;
         // every rejection surfaces as BlockChangeRejected and is counted here — both
@@ -1823,7 +2569,11 @@ fn run_tick(
         // (plugin Deny / spawn-protection veto), which now route through the sim's
         // RejectBlockEdit path rather than being counted at the connection.
         match output {
-            GameOutput::BlockChanged { state, .. } => {
+            GameOutput::BlockChanged {
+                state, position, ..
+            } => {
+                snap.relighter
+                    .changed(position.to_chunk_pos(), shard.loaded_chunks());
                 let kind = if state.is_air() {
                     MutationKind::Break
                 } else {
@@ -1844,6 +2594,51 @@ fn run_tick(
             _ => {}
         }
         closed.extend(router.route_output(output));
+    }
+    if let Some(mobs) = snap.mobs.as_mut() {
+        mobs.events(shard, router)
+            .map_err(|e| ServerError::invalid_state(e.to_string()))?;
+        mobs.view.reconcile(router, &snap.roster);
+        closed.extend(mobs.view.take_failed());
+    }
+    if let Some(ground) = snap.ground.as_mut() {
+        ground
+            .events(router, shard, &snap.effects)
+            .map_err(|error| ServerError::invalid_state(error.to_string()))?;
+        ground.view.reconcile(router, &snap.roster);
+        closed.extend(ground.view.take_failed());
+    }
+    let light = snap
+        .relighter
+        .pump(shard.loaded_chunks())
+        .map_err(ServerError::invalid_state)?;
+    for (pos, packet) in light {
+        for player in snap.roster.keys().copied() {
+            if router.player_position(player).is_some_and(|location| {
+                let center = BlockPos::new(location.x.floor() as i32, 0, location.z.floor() as i32)
+                    .to_chunk_pos();
+                (i64::from(center.x()) - i64::from(pos.x())).abs()
+                    <= i64::from(router.view_distance())
+                    && (i64::from(center.z()) - i64::from(pos.z())).abs()
+                        <= i64::from(router.view_distance())
+            }) && router
+                .send_gameplay_packet_to(player, packet.clone())
+                .is_err()
+            {
+                closed.push(player);
+            }
+        }
+    }
+    if let Some(mobs) = snap.mobs.as_mut() {
+        mobs.spawn_tick(
+            tick.get(),
+            world_time.time_of_day(),
+            snap.raining,
+            &snap.relighter,
+            shard,
+            router,
+        )
+        .map_err(|e| ServerError::invalid_state(e.to_string()))?;
     }
     for player in closed {
         if let Err(error) = router.disconnect_player_owned(player) {
@@ -1875,6 +2670,9 @@ fn run_tick(
             }
         }
     }
+
+    snap.combat_profiles
+        .retain(|player, _| router.is_player_connected(*player));
 
     // Advance and publish the authoritative tick (saturating: it never wraps
     // silently), then record the tick metrics for this shard.
@@ -2054,6 +2852,8 @@ mod tests {
     // The test setup pairs a `router` with a `roster`; the names are deliberately
     // close, mirroring the production `player_roster`.
     #![allow(clippy::similar_names)]
+
+    mod held_drop_tests;
 
     use std::collections::BTreeMap;
     use std::num::NonZeroUsize;
@@ -2476,6 +3276,7 @@ mod tests {
                 .await
                 .expect("driver target"),
                 test_generator(),
+                None,
                 shard_rx,
                 commands_rx,
                 Duration::from_secs(3600),
@@ -2501,6 +3302,7 @@ mod tests {
                     position,
                     slot: 0,
                     cursor: diamonds.clone(),
+                    right: false,
                     expected_slots: vec![ItemStack::empty(); CHEST_SLOTS],
                     reply,
                 })

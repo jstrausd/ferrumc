@@ -1,0 +1,29 @@
+{
+  "inventory_sha256": "3601604cf3ac38611e0b279f0c74f945aa0ded0b2e9fa8940be36250456bcafb",
+  "indices_sha256": "968fa576b34fa232cac3a58898fc2dd3a9623d2c423cf276db67af81b26f33ec",
+  "selected_keys": [
+    "ore_coal_upper",
+    "ore_coal_lower",
+    "ore_iron_upper",
+    "ore_iron_middle",
+    "ore_iron_small",
+    "ore_gold",
+    "ore_gold_lower",
+    "ore_redstone",
+    "ore_redstone_lower",
+    "ore_diamond",
+    "ore_diamond_medium",
+    "ore_diamond_large",
+    "ore_diamond_buried",
+    "ore_lapis",
+    "ore_lapis_buried",
+    "ore_copper_large",
+    "ore_copper",
+    "ore_gold_extra"
+  ],
+  "provenance": "pinned Paper 1.21.8 build60; actual prior GEN06.1 resource export, not GEN06.2 runtime WIP; 18 explicit selected ores only",
+  "inputs": {
+    "inventory": ".codex-tmp/gen06_1/sources/inventory.json",
+    "indices": ".codex-tmp/gen06_1/fixture-normal/paper.tsv"
+  }
+}

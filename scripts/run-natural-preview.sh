@@ -14,9 +14,9 @@ else
   SERVER_BIN="$ROOT/local-natural/ferrumc"
 fi
 PORT="${FERRUMC_NATURAL_PORT:-25566}"
-PRESET="${FERRUMC_NATURAL_PRESET:-ferrumc_natural_preview}"
+PRESET="${FERRUMC_NATURAL_PRESET:-ferrumc_natural_survival_preview}"
 case "$PRESET" in
-  ferrumc_natural_preview|ferrumc_natural_grass_preview|ferrumc_natural_tree_preview) ;;
+  ferrumc_natural_preview|ferrumc_natural_grass_preview|ferrumc_natural_tree_preview|ferrumc_natural_survival_preview) ;;
   *) echo "Unsupported preview preset: $PRESET" >&2; exit 1 ;;
 esac
 

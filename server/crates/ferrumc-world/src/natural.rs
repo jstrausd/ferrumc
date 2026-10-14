@@ -62,8 +62,10 @@ struct Binding {
     source: BiomeSourceIdentity,
     geometry: BiomeQuartGeometry,
     router: SeededRouter,
+    noise_plan: Option<crate::density::NaturalNoisePlan>,
     tree: Arc<BiomeTree>,
     climate: ClimateCache,
+    transitions: TransitionCache,
     temperatures: BuiltinBiomeTemperatures,
     rules: SeededSurfaceRules,
     columns: SeededSurfaceColumns,
@@ -72,7 +74,8 @@ struct Binding {
 // A target column is independent of the biome selector's history. Cache only
 // the complete original fresh-noise targets; every nine-column source traversal
 // still replays its own ordered RTree selection and exact cumulative work.
-const CLIMATE_CACHE_COLUMNS: usize = 64;
+const CLIMATE_CACHE_COLUMNS: usize = 128;
+const CLIMATE_CACHE_BYTES: usize = 10 * 1024 * 1024;
 struct ClimateCache {
     values: Mutex<VecDeque<(ChunkPos, Arc<crate::biome_selection::NaturalClimateSamples>)>>,
     gates: [Mutex<()>; 32],
@@ -83,6 +86,18 @@ impl ClimateCache {
             values: Mutex::new(VecDeque::with_capacity(CLIMATE_CACHE_COLUMNS)),
             gates: std::array::from_fn(|_| Mutex::new(())),
         }
+    }
+    fn native_bytes(
+        values: &VecDeque<(ChunkPos, Arc<crate::biome_selection::NaturalClimateSamples>)>,
+    ) -> usize {
+        std::mem::size_of::<Self>()
+            + values.capacity()
+                * std::mem::size_of::<(ChunkPos, Arc<crate::biome_selection::NaturalClimateSamples>)>(
+                )
+            + values
+                .iter()
+                .map(|(_, value)| value.native_bytes() + 2 * std::mem::size_of::<usize>())
+                .sum::<usize>()
     }
     fn get(
         &self,
@@ -96,6 +111,68 @@ impl ClimateCache {
             .iter()
             .find(|(key, _)| *key == pos)
             .map(|(_, value)| Arc::clone(value)))
+    }
+}
+// Optional bounded memo: cache failure must leave the original producer usable.
+const TRANSITION_CACHE_ENTRIES: usize = 64;
+const TRANSITION_CACHE_BYTES: usize = 128 * 1024;
+struct TransitionCache {
+    values: Mutex<VecDeque<crate::biome_selection::NaturalBiomeTransition>>,
+}
+impl TransitionCache {
+    fn new() -> Self {
+        let mut values = VecDeque::new();
+        let _ = values.try_reserve_exact(TRANSITION_CACHE_ENTRIES);
+        Self {
+            values: Mutex::new(values),
+        }
+    }
+    fn native_bytes(values: &VecDeque<crate::biome_selection::NaturalBiomeTransition>) -> usize {
+        std::mem::size_of::<Self>()
+            + values.capacity()
+                * std::mem::size_of::<crate::biome_selection::NaturalBiomeTransition>()
+            + values
+                .iter()
+                .map(crate::biome_selection::NaturalBiomeTransition::allocation_bytes)
+                .sum::<usize>()
+    }
+    fn sample(
+        &self,
+        source: &mut BiomeSourceSession,
+        climate: &crate::biome_selection::NaturalClimateSamples,
+        pos: ChunkPos,
+    ) -> Result<Arc<crate::biome_selection::ChunkBiomeSamples>, crate::biome_selection::BiomeError>
+    {
+        let key = source.natural_transition_key(pos);
+        if let (Some(key), Ok(values)) = (key, self.values.lock()) {
+            if let Some(saved) = values.iter().find(|saved| saved.key() == key) {
+                if let Some(samples) = source.replay_natural_transition(climate, saved) {
+                    return Ok(samples);
+                }
+            }
+        }
+        let saved = source.sample_natural_transition(climate)?;
+        let samples = saved.samples();
+        if let (Some(key), Ok(mut values)) = (key, self.values.lock()) {
+            if values.capacity() >= TRANSITION_CACHE_ENTRIES
+                && !values.iter().any(|saved| saved.key() == key)
+            {
+                if values.len() == TRANSITION_CACHE_ENTRIES {
+                    values.pop_front();
+                }
+                while !values.is_empty()
+                    && Self::native_bytes(&values) + saved.allocation_bytes()
+                        > TRANSITION_CACHE_BYTES
+                {
+                    values.pop_front();
+                }
+                if Self::native_bytes(&values) + saved.allocation_bytes() <= TRANSITION_CACHE_BYTES
+                {
+                    values.push_back(saved);
+                }
+            }
+        }
+        Ok(samples)
     }
 }
 impl Binding {
@@ -117,7 +194,8 @@ impl Binding {
         }
         let mut noise = self
             .router
-            .fresh_paper_noise_chunk(
+            .fresh_natural_noise_chunk(
+                self.noise_plan.as_ref(),
                 pos,
                 NoiseChunkWorkBudget::new(MAX_NOISE_CHUNK_WORK).map_err(|e| refusal(S, e))?,
             )
@@ -131,8 +209,13 @@ impl Binding {
             .values
             .lock()
             .map_err(|_| refusal(S, "climate cache poisoned"))?;
-        if values.len() == CLIMATE_CACHE_COLUMNS {
-            values.pop_front();
+        let bytes = value.native_bytes() + 2 * std::mem::size_of::<usize>();
+        while values.len() >= CLIMATE_CACHE_COLUMNS
+            || ClimateCache::native_bytes(&values) + bytes > CLIMATE_CACHE_BYTES
+        {
+            if values.pop_front().is_none() {
+                return Ok(value);
+            }
         }
         values.push_back((pos, Arc::clone(&value)));
         Ok(value)
@@ -148,6 +231,7 @@ pub struct NaturalWorldGenerator(
     Arc<Binding>,
     Option<Arc<crate::grass::GrassPreview>>,
     Option<Arc<crate::trees::TreePreview>>,
+    Option<Arc<crate::survival_ores::SurvivalOrePreview>>,
 );
 impl std::fmt::Debug for NaturalWorldGenerator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -208,6 +292,7 @@ impl NaturalWorldGenerator {
             CarverBindBudget::new(90).map_err(|e| refusal(S, e))?,
         )
         .map_err(|e| refusal(S, e))?;
+        let noise_plan = router.compile_natural_noise_plan();
         Ok(Self(
             Arc::new(Binding {
                 seed,
@@ -215,13 +300,16 @@ impl NaturalWorldGenerator {
                 source,
                 geometry,
                 router,
+                noise_plan,
                 tree,
                 climate: ClimateCache::new(),
+                transitions: TransitionCache::new(),
                 temperatures,
                 rules,
                 columns,
                 carvers,
             }),
+            None,
             None,
             None,
         ))
@@ -243,10 +331,24 @@ impl NaturalWorldGenerator {
         generator.2 = Some(Arc::new(crate::trees::TreePreview::new()?));
         Ok(generator)
     }
+    /// Binds revision 4: oak/birch, grass and normal Overworld placed ore subsets.
+    ///
+    /// Coal, iron, copper, gold, redstone, lapis and diamond use pinned counts,
+    /// height distributions, target tags and biome membership. Each source has
+    /// isolated raw-terrain history; omitted geology/structures and the complete
+    /// FEATURES stage prevent a Vanilla seed-parity claim. Revisions 1–3 retain
+    /// their previous output and saved identity.
+    pub fn with_survival_preview(seed: WorldSeed) -> Result<Self, WorldError> {
+        let mut generator = Self::with_tree_preview(seed)?;
+        generator.3 = Some(Arc::new(crate::survival_ores::SurvivalOrePreview::new()?));
+        Ok(generator)
+    }
     /// Returns the selected immutable terrain-preview revision identity.
     #[must_use]
     pub fn identity(&self) -> GenerationIdentity {
-        if self.2.is_some() {
+        if self.3.is_some() {
+            GenerationIdentity::natural_overworld_survival(self.0.seed)
+        } else if self.2.is_some() {
             GenerationIdentity::natural_overworld_with_trees(self.0.seed)
         } else if self.1.is_some() {
             GenerationIdentity::natural_overworld_with_grass(self.0.seed)
@@ -256,21 +358,33 @@ impl NaturalWorldGenerator {
     }
     /// Generates a complete real chunk or returns the refusing producer's error.
     pub fn try_generate_chunk(&self, center: ChunkPos) -> Result<Chunk, WorldError> {
-        if let Some(trees) = &self.2 {
-            return trees.generate(
+        let mut chunk = if let Some(trees) = &self.2 {
+            trees.generate(
                 self,
                 self.0.seed,
                 center,
                 self.1.as_deref().ok_or_else(|| {
                     refusal(NaturalGenerationStage::Features, "missing tree raw binding")
                 })?,
-            );
+            )?
+        } else if let Some(grass) = &self.1 {
+            grass.generate(self, self.0.seed, center)?
+        } else {
+            self.generate_raw_chunk(center)?
+        };
+        if let Some(ores) = &self.3 {
+            ores.apply(
+                self,
+                self.1.as_deref().ok_or_else(|| {
+                    refusal(NaturalGenerationStage::Features, "missing ore raw binding")
+                })?,
+                self.0.seed,
+                &mut chunk,
+            )?;
         }
-        if let Some(grass) = &self.1 {
-            return grass.generate(self, self.0.seed, center);
-        }
-        self.generate_raw_chunk(center)
+        Ok(chunk)
     }
+
     #[cfg(test)]
     pub(crate) fn tree_preview(&self) -> Option<&crate::trees::TreePreview> {
         self.2.as_deref()
@@ -305,8 +419,9 @@ impl NaturalWorldGenerator {
             for dz in -1..=1 {
                 let pos = ChunkPos::new(center.x().wrapping_add(dx), center.z().wrapping_add(dz));
                 let climate = b.climate(pos)?;
-                let array = source
-                    .sample_natural_climate(&climate)
+                let array = b
+                    .transitions
+                    .sample(&mut source, &climate, pos)
                     .map_err(|e| refusal(NaturalGenerationStage::Biomes, e))?;
                 if pos == center {
                     result = Some(array.values().to_vec());
@@ -326,13 +441,21 @@ impl NaturalWorldGenerator {
         let budget = || NoiseChunkWorkBudget::new(MAX_NOISE_CHUNK_WORK);
         let material = b
             .router
-            .fresh_paper_noise_chunk(center, budget().map_err(|e| refusal(S::Material, e))?)
+            .fresh_natural_noise_chunk(
+                b.noise_plan.as_ref(),
+                center,
+                budget().map_err(|e| refusal(S::Material, e))?,
+            )
             .map_err(|e| refusal(S::Material, e))?
             .sample_chunk_materials()
             .map_err(|e| refusal(S::Material, e))?;
         let mut preliminary = b
             .router
-            .fresh_paper_noise_chunk(center, budget().map_err(|e| refusal(S::Material, e))?)
+            .fresh_natural_noise_chunk(
+                b.noise_plan.as_ref(),
+                center,
+                budget().map_err(|e| refusal(S::Material, e))?,
+            )
             .map_err(|e| refusal(S::Material, e))?;
         let mut corner = |dx: i32, dz: i32| {
             preliminary
@@ -359,13 +482,13 @@ impl NaturalWorldGenerator {
                 let pos = ChunkPos::new(center.x().wrapping_add(dx), center.z().wrapping_add(dz));
                 let climate = b.climate(pos)?;
                 arrays.push(
-                    source
-                        .sample_natural_climate(&climate)
+                    b.transitions
+                        .sample(&mut source, &climate, pos)
                         .map_err(|e| refusal(S::Biomes, e))?,
                 );
             }
         }
-        let refs: Vec<_> = arrays.iter().collect();
+        let refs: Vec<_> = arrays.iter().map(Arc::as_ref).collect();
         let resolver = SurfaceBiomeResolver::new(
             StoredBiomeIdentity::new(b.seed, b.settings, b.source, b.geometry),
             center,
@@ -410,7 +533,7 @@ impl NaturalWorldGenerator {
 fn install_chunk(
     center: ChunkPos,
     output: &CarvedChunkBuffer,
-    arrays: &[crate::biome_selection::ChunkBiomeSamples],
+    arrays: &[Arc<crate::biome_selection::ChunkBiomeSamples>],
 ) -> Result<Chunk, WorldError> {
     let mut chunk = Chunk::new(center);
     for y in -64..=319 {
@@ -479,6 +602,12 @@ impl RuntimeWorldGenerator {
     /// Selects the separately versioned oak/birch shape-and-grass preview.
     pub fn natural_with_trees(seed: WorldSeed) -> Result<Self, WorldError> {
         NaturalWorldGenerator::with_tree_preview(seed).map(Self::Natural)
+    }
+    /// Selects revision 4 with the explicit placed ore Survival subset.
+    pub fn natural_survival(seed: WorldSeed) -> Result<Self, WorldError> {
+        Ok(Self::Natural(NaturalWorldGenerator::with_survival_preview(
+            seed,
+        )?))
     }
     /// Returns the selected complete baseline identity.
     #[must_use]
@@ -675,28 +804,206 @@ mod climate_cache_tests {
             (a.join().unwrap(), b.join().unwrap())
         });
         assert!(Arc::ptr_eq(&first, &second));
-        for x in 1..=64 {
+        for x in 1..=i32::try_from(CLIMATE_CACHE_COLUMNS).unwrap() {
             generator.0.climate(ChunkPos::new(x, 0)).unwrap();
         }
         let cache = generator.0.climate.values.lock().unwrap();
-        assert_eq!(cache.len(), 64);
-        assert_eq!(cache.capacity(), 64);
+        assert_eq!(cache.len(), CLIMATE_CACHE_COLUMNS);
+        assert_eq!(cache.capacity(), CLIMATE_CACHE_COLUMNS);
         assert!(cache.iter().all(|(pos, _)| *pos != ChunkPos::ORIGIN));
         let payload: usize = cache.iter().map(|(_, value)| value.native_bytes()).sum();
         assert_eq!(
             payload,
-            64 * (73728 + std::mem::size_of::<crate::biome_selection::NaturalClimateSamples>())
+            CLIMATE_CACHE_COLUMNS
+                * (73728 + std::mem::size_of::<crate::biome_selection::NaturalClimateSamples>())
         );
-        let retained = std::mem::size_of::<ClimateCache>()
-            + cache.capacity()
-                * std::mem::size_of::<(ChunkPos, Arc<crate::biome_selection::NaturalClimateSamples>)>(
-                )
-            + payload
-            + 64 * 2 * std::mem::size_of::<usize>();
-        println!("CLIMATE_NATIVE retained={retained} target_payload=4718592 columns=64 producer_stripes=32; excludes allocator overhead and active worker leases");
+        let retained = ClimateCache::native_bytes(&cache);
+        assert!(retained <= CLIMATE_CACHE_BYTES);
+        println!("CLIMATE_NATIVE retained={retained} target_payload={} columns={} producer_stripes=32 cap={CLIMATE_CACHE_BYTES}; excludes allocator overhead and active worker leases", CLIMATE_CACHE_COLUMNS * 73728, CLIMATE_CACHE_COLUMNS);
         drop(cache);
         let replacement = generator.0.climate(ChunkPos::ORIGIN).unwrap();
         assert!(!Arc::ptr_eq(&first, &replacement));
         assert_eq!(first.targets(), replacement.targets());
+    }
+}
+
+#[cfg(test)]
+mod transition_cache_tests {
+    use super::*;
+    fn source(generator: &NaturalWorldGenerator, allowance: u32) -> BiomeSourceSession {
+        BiomeSourceSession::from_multinoise(BiomeSelectionSession::new(
+            Arc::clone(&generator.0.tree),
+            BiomeWorkBudget::new(allowance).unwrap(),
+        ))
+    }
+    #[test]
+    fn transition_cache_bounds_fifo_eviction_and_concurrent_misses() {
+        let generator = NaturalWorldGenerator::new(WorldSeed::new(-1)).unwrap();
+        let climate = generator.0.climate(ChunkPos::ORIGIN).unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        let run = || {
+            let mut source = source(&generator, MAX_BIOME_SELECTION_WORK);
+            barrier.wait();
+            let samples = generator
+                .0
+                .transitions
+                .sample(&mut source, &climate, ChunkPos::ORIGIN)
+                .unwrap();
+            (samples, source.work_used(), source.last_selection())
+        };
+        let (a, b) = std::thread::scope(|scope| {
+            let a = scope.spawn(run);
+            let b = scope.spawn(run);
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        assert_eq!(a.0.values(), b.0.values());
+        assert_eq!((a.1, a.2), (b.1, b.2));
+        assert_eq!(generator.0.transitions.values.lock().unwrap().len(), 1);
+        let mut replay = source(&generator, MAX_BIOME_SELECTION_WORK);
+        let first = generator
+            .0
+            .transitions
+            .sample(&mut replay, &climate, ChunkPos::ORIGIN)
+            .unwrap();
+        for x in 1..=64 {
+            let pos = ChunkPos::new(x, 0);
+            let climate = generator.0.climate(pos).unwrap();
+            generator
+                .0
+                .transitions
+                .sample(
+                    &mut source(&generator, MAX_BIOME_SELECTION_WORK),
+                    &climate,
+                    pos,
+                )
+                .unwrap();
+        }
+        let values = generator.0.transitions.values.lock().unwrap();
+        assert_eq!(values.len(), 64);
+        assert_eq!(values.capacity(), 64);
+        assert_eq!(values.front().unwrap().key(), (ChunkPos::new(1, 0), None));
+        assert_eq!(values.back().unwrap().key(), (ChunkPos::new(64, 0), None));
+        let bytes = TransitionCache::native_bytes(&values);
+        assert!(bytes <= TRANSITION_CACHE_BYTES);
+        println!("TRANSITION_NATIVE retained={bytes} payload={} entries={} capacity={}; excludes shared binding tree, allocator overhead and active worker leases", 64 * 1536 * std::mem::size_of::<ferrumc_registry::biome::BiomeResourceId>(), values.len(), values.capacity());
+        drop(values);
+        let climate = generator.0.climate(ChunkPos::ORIGIN).unwrap();
+        let replacement = generator
+            .0
+            .transitions
+            .sample(
+                &mut source(&generator, MAX_BIOME_SELECTION_WORK),
+                &climate,
+                ChunkPos::ORIGIN,
+            )
+            .unwrap();
+        assert!(!Arc::ptr_eq(&first, &replacement));
+        assert_eq!(first.values(), replacement.values());
+        assert_eq!(first.initial_selection(), replacement.initial_selection());
+        assert_eq!(first.final_selection(), replacement.final_selection());
+    }
+    #[test]
+    fn memo_hit_budget_fallback_preserves_original_error_work_and_history() {
+        let generator = NaturalWorldGenerator::new(WorldSeed::new(17)).unwrap();
+        let climate = generator.0.climate(ChunkPos::ORIGIN).unwrap();
+        let mut full = source(&generator, MAX_BIOME_SELECTION_WORK);
+        let saved = generator
+            .0
+            .transitions
+            .sample(&mut full, &climate, ChunkPos::ORIGIN)
+            .unwrap();
+        let n = u32::try_from(full.work_used()).unwrap();
+        for allowance in [n - 1, n, n + 1] {
+            let mut actual = source(&generator, allowance);
+            let mut expected = source(&generator, allowance);
+            let actual_result =
+                generator
+                    .0
+                    .transitions
+                    .sample(&mut actual, &climate, ChunkPos::ORIGIN);
+            let original = expected.sample_natural_climate(&climate);
+            assert_eq!(
+                actual_result
+                    .as_ref()
+                    .map(|v| v.values())
+                    .map_err(crate::biome_selection::BiomeError::kind),
+                original
+                    .as_ref()
+                    .map(crate::biome_selection::ChunkBiomeSamples::values)
+                    .map_err(crate::biome_selection::BiomeError::kind)
+            );
+            assert_eq!(actual.work_used(), expected.work_used());
+            assert_eq!(actual.last_selection(), expected.last_selection());
+            assert_eq!(actual.is_poisoned(), expected.is_poisoned());
+            if let Ok(hit) = actual_result {
+                assert!(Arc::ptr_eq(&saved, &hit));
+                assert_eq!(
+                    hit.initial_selection(),
+                    original.as_ref().unwrap().initial_selection()
+                );
+                assert_eq!(
+                    hit.final_selection(),
+                    original.as_ref().unwrap().final_selection()
+                );
+            }
+            assert_eq!(generator.0.transitions.values.lock().unwrap().len(), 1);
+        }
+    }
+    #[test]
+    fn transition_hit_cannot_skip_upstream_climate_poison() {
+        let generator = NaturalWorldGenerator::new(WorldSeed::new(17)).unwrap();
+        generator.sample_center_biomes(ChunkPos::ORIGIN).unwrap();
+        let retained = generator.0.transitions.values.lock().unwrap().len();
+        assert_eq!(retained, 9);
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = generator.0.climate.values.lock().unwrap();
+            panic!("genuine upstream climate cache poisoning");
+        }));
+        assert!(poisoned.is_err());
+        let error = generator
+            .sample_center_biomes(ChunkPos::ORIGIN)
+            .unwrap_err();
+        assert!(matches!(error, WorldError::NaturalGeneration {
+            stage: NaturalGenerationStage::Biomes, detail
+        } if detail == "climate cache poisoned"));
+        assert_eq!(
+            generator.0.transitions.values.lock().unwrap().len(),
+            retained
+        );
+    }
+    #[test]
+    fn transition_failures_and_optional_cache_poison_use_original_producer() {
+        let generator = NaturalWorldGenerator::new(WorldSeed::new(17)).unwrap();
+        let climate = generator.0.climate(ChunkPos::ORIGIN).unwrap();
+        let mut short = source(&generator, 1);
+        assert!(generator
+            .0
+            .transitions
+            .sample(&mut short, &climate, ChunkPos::ORIGIN)
+            .is_err());
+        assert!(short.is_poisoned());
+        assert!(generator.0.transitions.values.lock().unwrap().is_empty());
+        let mut complete = source(&generator, MAX_BIOME_SELECTION_WORK);
+        let original = generator
+            .0
+            .transitions
+            .sample(&mut complete, &climate, ChunkPos::ORIGIN)
+            .unwrap();
+        let used = complete.work_used();
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = generator.0.transitions.values.lock().unwrap();
+            panic!("genuine optional transition cache poisoning");
+        }));
+        assert!(poisoned.is_err());
+        let mut actual = source(&generator, MAX_BIOME_SELECTION_WORK);
+        let replay = generator
+            .0
+            .transitions
+            .sample(&mut actual, &climate, ChunkPos::ORIGIN)
+            .unwrap();
+        assert_eq!(replay.values(), original.values());
+        assert_eq!(actual.work_used(), used);
+        assert_eq!(actual.last_selection(), complete.last_selection());
+        assert!(!actual.is_poisoned());
     }
 }

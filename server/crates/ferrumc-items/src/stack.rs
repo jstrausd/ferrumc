@@ -194,27 +194,8 @@ fn validate_present_count(item: ItemId, count: u8) -> Result<(), ItemValidationE
 ///
 /// [`WindowClick`]: https://minecraft.wiki/w/Java_Edition_protocol/Packets#Click_Container
 pub fn left_click_exchange(slot: &mut ItemStack, cursor: &mut ItemStack) {
-    match (cursor.item, slot.item) {
-        (Some(cursor_item), Some(slot_item))
-            if cursor_item == slot_item && cursor.components == slot.components =>
-        {
-            // Same item: merge the cursor into the slot, capped at the max stack.
-            // `moved` is bounded by both the slot's remaining space and the cursor
-            // count, so neither count can overflow `u8` or exceed the max stack.
-            let space = slot_item.max_stack().saturating_sub(slot.count);
-            let moved = space.min(cursor.count);
-            slot.count += moved;
-            cursor.count -= moved;
-            // Restore the empty-slot invariant (no item => count 0, empty patch)
-            // when the cursor is fully drained.
-            if cursor.count == 0 {
-                *cursor = ItemStack::empty();
-            }
-        }
-        // Pickup (cursor empty), place (slot empty), or swap (different items): a
-        // straight exchange trivially conserves both stacks.
-        _ => std::mem::swap(slot, cursor),
-    }
+    // Invalid gameplay capacities refuse the exchange without rewriting either stack.
+    let _ = crate::container::exchange_slot(slot, cursor, false);
 }
 
 /// Encodes one component as trusted (typed, unprefixed) wire data.

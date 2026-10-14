@@ -53,15 +53,18 @@ async fn expect_closed_without_sentinel(client: &mut TestClient) -> anyhow::Resu
 
 #[tokio::test]
 async fn mismatched_echo_closes_before_the_next_pipelined_packet() {
-    timeout(GUARD, async {
-        let server = start_server().await?;
-        let mut client = login_to_play(server.local_addr(), "WrongEcho").await?;
-        let id = next_keep_alive(&mut client).await?;
-        let wrong = encode(|buf| ServerboundKeepAlive::new(id.wrapping_add(1)).encode(buf));
-        client.send_frames(&[&wrong, &sentinel(SENTINEL)]).await?;
-        expect_closed_without_sentinel(&mut client).await?;
-        server.shutdown().await
-    })
+    timeout(
+        GUARD,
+        Box::pin(async {
+            let server = start_server().await?;
+            let mut client = login_to_play(server.local_addr(), "WrongEcho").await?;
+            let id = next_keep_alive(&mut client).await?;
+            let wrong = encode(|buf| ServerboundKeepAlive::new(id.wrapping_add(1)).encode(buf));
+            client.send_frames(&[&wrong, &sentinel(SENTINEL)]).await?;
+            expect_closed_without_sentinel(&mut client).await?;
+            server.shutdown().await
+        }),
+    )
     .await
     .expect("mismatched echo completed within guard")
     .expect("mismatched echo failed closed");
@@ -69,27 +72,31 @@ async fn mismatched_echo_closes_before_the_next_pipelined_packet() {
 
 #[tokio::test]
 async fn matching_echo_keeps_the_connection_live_but_a_replay_closes_it() {
-    timeout(GUARD, async {
-        let server = start_server().await?;
-        let mut client = login_to_play(server.local_addr(), "ReplayEcho").await?;
-        let id = next_keep_alive(&mut client).await?;
-        let echo = encode(|buf| ServerboundKeepAlive::new(id).encode(buf));
-        // A response to the next packet proves the matching echo was accepted.
-        client
-            .send_frames(&[&echo, &sentinel(SENTINEL - 1)])
-            .await?;
-        loop {
-            if let ClientboundPlayPacket::TabCompleteResponse(response) = client.next_play().await?
-            {
-                if response.transaction_id() == SENTINEL - 1 {
-                    break;
+    timeout(
+        GUARD,
+        Box::pin(async {
+            let server = start_server().await?;
+            let mut client = login_to_play(server.local_addr(), "ReplayEcho").await?;
+            let id = next_keep_alive(&mut client).await?;
+            let echo = encode(|buf| ServerboundKeepAlive::new(id).encode(buf));
+            // A response to the next packet proves the matching echo was accepted.
+            client
+                .send_frames(&[&echo, &sentinel(SENTINEL - 1)])
+                .await?;
+            loop {
+                if let ClientboundPlayPacket::TabCompleteResponse(response) =
+                    client.next_play().await?
+                {
+                    if response.transaction_id() == SENTINEL - 1 {
+                        break;
+                    }
                 }
             }
-        }
-        client.send_frames(&[&echo, &sentinel(SENTINEL)]).await?;
-        expect_closed_without_sentinel(&mut client).await?;
-        server.shutdown().await
-    })
+            client.send_frames(&[&echo, &sentinel(SENTINEL)]).await?;
+            expect_closed_without_sentinel(&mut client).await?;
+            server.shutdown().await
+        }),
+    )
     .await
     .expect("matching/replayed echo completed within guard")
     .expect("matching echo accepted and replay rejected");
@@ -97,22 +104,25 @@ async fn matching_echo_keeps_the_connection_live_but_a_replay_closes_it() {
 
 #[tokio::test]
 async fn timer_wakeups_cannot_renew_an_idle_connections_deadline() {
-    timeout(GUARD, async {
-        let server = start_server().await?;
-        let mut client = login_to_play(server.local_addr(), "SilentPeer").await?;
-        let mut requests = 0;
-        while let Some(packet) = client.next_play_or_closed().await? {
-            if matches!(packet, ClientboundPlayPacket::ClientboundKeepAlive(_)) {
-                requests += 1;
-                anyhow::ensure!(requests == 1, "an unanswered Keep Alive was replaced");
+    timeout(
+        GUARD,
+        Box::pin(async {
+            let server = start_server().await?;
+            let mut client = login_to_play(server.local_addr(), "SilentPeer").await?;
+            let mut requests = 0;
+            while let Some(packet) = client.next_play_or_closed().await? {
+                if matches!(packet, ClientboundPlayPacket::ClientboundKeepAlive(_)) {
+                    requests += 1;
+                    anyhow::ensure!(requests == 1, "an unanswered Keep Alive was replaced");
+                }
             }
-        }
-        anyhow::ensure!(
-            requests == 1,
-            "the peer closed before requesting a Keep Alive"
-        );
-        server.shutdown().await
-    })
+            anyhow::ensure!(
+                requests == 1,
+                "the peer closed before requesting a Keep Alive"
+            );
+            server.shutdown().await
+        }),
+    )
     .await
     .expect("silent peer closed within the configured I/O window despite recurring timers")
     .expect("one unanswered Keep Alive followed by clean teardown");

@@ -172,16 +172,27 @@ fn angle_to_byte(degrees: f32) -> i8 {
 /// the mode this server advertises); every other status yields `None`. The wire
 /// block position is converted to a typed [`BlockPos`].
 fn block_break_input(player: PlayerId, packet: &PlayerAction) -> Option<GameInput> {
-    if packet.status() != START_DESTROY_BLOCK {
-        return None;
+    let position = block_pos(packet.location());
+    let sequence = packet.sequence();
+    match packet.status() {
+        START_DESTROY_BLOCK => Some(GameInput::BlockBreak {
+            player,
+            position,
+            sequence,
+        }),
+        1 => Some(GameInput::MiningAbort {
+            player,
+            position,
+            sequence,
+        }),
+        2 => Some(GameInput::MiningFinish {
+            player,
+            position,
+            sequence,
+            tool: ferrumc_sim::MiningTool::empty(),
+        }),
+        _ => None,
     }
-    Some(GameInput::BlockBreak {
-        player,
-        position: block_pos(packet.location()),
-        // The client stamps each block action with a sequence; carry it so an
-        // accepted break can be acknowledged back to this player.
-        sequence: packet.sequence(),
-    })
 }
 
 /// Resolves the block position a serverbound `UseItemOn` targets: the clicked
@@ -673,8 +684,8 @@ mod tests {
     }
 
     #[test]
-    fn non_dig_start_player_action_has_no_input() {
-        // Status 1 (cancel digging) is not a break in this milestone.
+    fn cancel_digging_player_action_preserves_sequence() {
+        // Cancellation must reach the simulation even after the start was acked.
         let event = NetEvent::play(
             player(),
             ServerboundPlayPacket::PlayerAction(PlayerAction::new(
@@ -684,7 +695,14 @@ mod tests {
                 0,
             )),
         );
-        assert_eq!(net_event_to_input(&event), None);
+        assert_eq!(
+            net_event_to_input(&event),
+            Some(GameInput::MiningAbort {
+                player: player(),
+                position: BlockPos::new(8, 63, 8),
+                sequence: 0
+            })
+        );
     }
 
     #[test]
