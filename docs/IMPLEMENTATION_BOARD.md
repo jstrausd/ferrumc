@@ -19,6 +19,18 @@ enthält 214 Haupttickets mit Status, Crate-Owner, Abhängigkeiten und Abnahmen.
 Inhaltsabnahme verwendet versionsfeste Matrizen,
 damit zusätzliche Block-, Item- und Entityvarianten nicht vergessen werden.
 
+## Gameplay-Korrektur vom 14.10.2026
+
+Die aktuelle Runde verteilt die gemeldeten Fehler auf die drei Child-Agents
+`session_backpressure`, `mining_loot` und `fast_chest_clicks`; Root integriert
+App-Wiring und Leave-Save. Der [nächste Portierungsplan](SURVIVAL_PORT_NEXT_STEPS.md)
+ordnet Laststabilität, Flüssigkeiten, Licht/Chunk-Vorlauf, weitere Items,
+Mobs und Weltfeatures vor Dimensionen und vollständigem Spielfortschritt.
+Geplante Folgeaufträge sind dort ausdrücklich von dieser laufenden Runde getrennt.
+Der [Prüfbericht](SURVIVAL_RUNTIME_CORRECTIONS_20261014.md) dokumentiert die
+konkreten Consumer, privaten Serverproben und verbleibenden Grenzen. Diese
+Korrekturen erklären keine Survival-Gesamtabnahme für bestanden.
+
 ## Vollständiger Arbeitsumfang
 
 | Bereich | Umzusetzender Umfang |
