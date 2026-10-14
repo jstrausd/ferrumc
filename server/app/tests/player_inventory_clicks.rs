@@ -6,9 +6,12 @@ use std::time::Duration;
 
 use ferrumc_app::AppConfig;
 use ferrumc_codec::{write_var_int, BoundedReader, BoundedString};
+use ferrumc_items::ItemId;
 use ferrumc_proto::generated::play::{
-    ChatCommand, ClientboundPlayPacket, CloseContainer, SetCreativeSlot, WindowClick,
+    ChatCommand, ClientboundPlayPacket, CloseContainer, ServerboundSetHeldItem, SetCreativeSlot,
+    UseItemOn, WindowClick,
 };
+use ferrumc_proto::types::BlockPosition;
 use tokio::time::timeout;
 
 use common::{encode, login_to_play, TestClient};
@@ -34,9 +37,13 @@ fn read_slot(reader: &mut BoundedReader<'_>) -> anyhow::Result<Slot> {
 }
 
 async fn content(client: &mut TestClient) -> anyhow::Result<InventoryView> {
+    content_at(client, 0).await
+}
+
+async fn content_at(client: &mut TestClient, window: i32) -> anyhow::Result<InventoryView> {
     loop {
         if let ClientboundPlayPacket::SetContainerContent(packet) = client.next_play().await? {
-            anyhow::ensure!(packet.window_id() == 0, "expected player window");
+            anyhow::ensure!(packet.window_id() == window, "expected active window");
             let mut reader = BoundedReader::new(packet.payload());
             anyhow::ensure!(reader.read_var_int()? == 46, "expected 46 slots");
             let slots = (0..46)
@@ -61,17 +68,19 @@ async fn click(
     button: i8,
     mode: i32,
 ) -> anyhow::Result<InventoryView> {
+    client
+        .send_frame(&click_frame(window, view.state, slot, button, mode))
+        .await?;
+    content(client).await
+}
+
+fn click_frame(window: i32, state: i32, slot: i16, button: i8, mode: i32) -> Vec<u8> {
     let mut rest = slot.to_be_bytes().to_vec();
     rest.push(button.to_be_bytes()[0]);
     write_var_int(&mut rest, mode);
-    write_var_int(&mut rest, 0); // client claims no changed slots
-    write_var_int(&mut rest, 0); // client falsely claims an empty cursor
-    client
-        .send_frame(&encode(|out| {
-            WindowClick::new(window, view.state, rest).encode(out)
-        }))
-        .await?;
-    content(client).await
+    write_var_int(&mut rest, 0); // fabricated predictions grant no item authority
+    write_var_int(&mut rest, 0);
+    encode(|out| WindowClick::new(window, state, rest).encode(out))
 }
 
 async fn game_mode(client: &mut TestClient, mode: i32) -> anyhow::Result<()> {
@@ -230,4 +239,156 @@ async fn close_window_zero_with_a_full_bag_preserves_cursor_and_crafting_input()
     let result = timeout(Duration::from_secs(10), full_bag_flow(addr)).await;
     server.shutdown().await.expect("shutdown");
     result.expect("bounded flow").expect("full bag flow");
+}
+
+async fn crafting_drag_flow(addr: SocketAddr) -> anyhow::Result<()> {
+    let planks = ItemId::from_name("oak_planks").expect("planks").id();
+    let table = ItemId::from_name("crafting_table").expect("table").id();
+    let mut client = login_to_play(addr, "InventoryTester").await?;
+    let initial = content(&mut client).await?;
+    game_mode(&mut client, 1).await?;
+    creative(&mut client, 36, 13, planks).await?;
+    game_mode(&mut client, 0).await?;
+    let mut actions = vec![(36, 0, 0), (-999, 0, 5)];
+    actions.extend([1, 2, 3, 4, 0, 5, 1].map(|slot| (slot, 1, 5)));
+    actions.push((-999, 2, 5));
+    let bodies: Vec<_> = actions
+        .iter()
+        .map(|&(slot, button, mode)| click_frame(0, initial.state, slot, button, mode))
+        .collect();
+    let refs: Vec<_> = bodies.iter().map(Vec::as_slice).collect();
+    // Full vanilla prediction, one TCP write; no round-trip between phases.
+    client.send_frames(&refs).await?;
+    let picked = content(&mut client).await?;
+    anyhow::ensure!(picked.cursor == Some((13, planks)), "pickup before drag");
+    let mut view = content(&mut client).await?;
+    for slot in 1..=4 {
+        anyhow::ensure!(
+            view.slots[slot] == Some((3, planks)),
+            "2x2 drag distribution"
+        );
+    }
+    anyhow::ensure!(
+        view.cursor == Some((1, planks)) && view.slots[0] == Some((1, table)),
+        "derived recipe plus exact left-drag remainder"
+    );
+    anyhow::ensure!(view.slots[5].is_none(), "armor never receives drag");
+    view = click(&mut client, &view, 0, 9, 0, 0).await?;
+    view = click(&mut client, &view, 0, 0, 0, 0).await?;
+    anyhow::ensure!(view.cursor == Some((1, table)), "real result consumed once");
+    for slot in 1..=4 {
+        anyhow::ensure!(view.slots[slot] == Some((2, planks)));
+    }
+    view = close(&mut client).await?;
+    anyhow::ensure!(
+        view.cursor.is_none() && view.slots[0].is_none(),
+        "close retains real ingredients only"
+    );
+
+    table_drag_flow(&mut client, planks, table).await
+}
+
+async fn table_drag_flow(client: &mut TestClient, planks: i32, table: i32) -> anyhow::Result<()> {
+    // Place/open a real crafting-table screen, then right-drag through its
+    // actual 3x3 slot mapping with the same predicted state ID on every phase.
+    game_mode(client, 1).await?;
+    creative(client, 36, 8, planks).await?;
+    creative(client, 37, 1, table).await?;
+    client
+        .send_frame(&encode(|out| ServerboundSetHeldItem::new(1).encode(out)))
+        .await?;
+    client
+        .send_frame(&encode(|out| {
+            UseItemOn::new(
+                0,
+                BlockPosition::new(10, 63, 8),
+                1,
+                0.5,
+                1.0,
+                0.5,
+                false,
+                false,
+                1,
+            )
+            .encode(out)
+        }))
+        .await?;
+    loop {
+        if let ClientboundPlayPacket::BlockUpdate(update) = client.next_play().await? {
+            if update.location() == BlockPosition::new(10, 64, 8) {
+                break;
+            }
+        }
+    }
+    game_mode(client, 0).await?;
+    client
+        .send_frame(&encode(|out| {
+            UseItemOn::new(
+                0,
+                BlockPosition::new(10, 64, 8),
+                1,
+                0.5,
+                0.5,
+                0.5,
+                false,
+                false,
+                2,
+            )
+            .encode(out)
+        }))
+        .await?;
+    let window = loop {
+        if let ClientboundPlayPacket::OpenScreen(screen) = client.next_play().await? {
+            break screen.window_id();
+        }
+    };
+    let view = content_at(client, window).await?;
+    let mut actions = vec![(37, 0, 0), (-999, 4, 5)];
+    actions.extend([1, 2, 4, 5, 0, 1].map(|slot| (slot, 5, 5)));
+    actions.push((-999, 6, 5));
+    let bodies: Vec<_> = actions
+        .iter()
+        .map(|&(slot, button, mode)| click_frame(window, view.state, slot, button, mode))
+        .collect();
+    let refs: Vec<_> = bodies.iter().map(Vec::as_slice).collect();
+    client.send_frames(&refs).await?;
+    let picked = content_at(client, window).await?;
+    anyhow::ensure!(picked.cursor == Some((8, planks)), "table pickup");
+    let view = content_at(client, window).await?;
+    for slot in [1, 2, 4, 5] {
+        anyhow::ensure!(view.slots[slot] == Some((1, planks)), "3x3 right drag");
+    }
+    anyhow::ensure!(
+        view.cursor == Some((4, planks)) && view.slots[0] == Some((1, table)),
+        "table derived recipe and duplicate/result slot protection"
+    );
+    client
+        .send_frame(&click_frame(window, view.state, 10, 0, 0))
+        .await?;
+    let view = content_at(client, window).await?;
+    client
+        .send_frame(&click_frame(window, view.state, 0, 0, 0))
+        .await?;
+    let view = content_at(client, window).await?;
+    anyhow::ensure!(
+        view.cursor == Some((1, table)),
+        "table recipe output committed once"
+    );
+    for slot in [1, 2, 4, 5] {
+        anyhow::ensure!(view.slots[slot].is_none(), "table ingredients consumed");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn rapid_inventory_and_table_drag_derive_and_consume_real_crafting_results() {
+    let (server, addr) = start().await;
+    timeout(Duration::from_secs(10), crafting_drag_flow(addr))
+        .await
+        .expect("craft drag finishes")
+        .expect("craft drag succeeds");
+    timeout(Duration::from_secs(10), server.shutdown())
+        .await
+        .expect("shutdown finishes")
+        .expect("shutdown succeeds");
 }

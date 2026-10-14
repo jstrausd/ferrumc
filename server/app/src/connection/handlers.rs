@@ -1366,11 +1366,7 @@ pub(super) async fn handle_gameplay_effect(
             stack,
         } => {
             tracing::trace!(wire_id = wire_id.get(), "ground item pickup offered");
-            let remainder = if windows.consumption.pending.is_some() {
-                stack
-            } else {
-                inventory.deposit(stack)
-            };
+            let (remainder, held_changed) = deposit_ground_pickup(inventory, windows, stack)?;
             let (reply, applied) = oneshot::channel();
             ctx.commands
                 .send(SimCommand::GroundPickupResult {
@@ -1382,8 +1378,9 @@ pub(super) async fn handle_gameplay_effect(
             applied
                 .await
                 .map_err(|_| anyhow::anyhow!("pickup response admission was lost"))??;
-            windows.mining.changed();
-            notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+            if held_changed {
+                notify_mining_tool_changed(ctx, player, inventory, windows).await?;
+            }
             if windows.has_open() {
                 resync_chest_window(ctx, writer, inventory, windows, debug, compression)?;
             } else {
@@ -1408,6 +1405,30 @@ pub(super) async fn handle_gameplay_effect(
     }
     Ok(())
 }
+
+/// Deposits only through the inventory owner and preserves ongoing mining when
+/// the exact selected stack is unchanged. An unrelated pickup is not a tool change.
+fn deposit_ground_pickup(
+    inventory: &mut PlayerInventory,
+    windows: &mut WindowState,
+    stack: ItemStack,
+) -> anyhow::Result<(ItemStack, bool)> {
+    let before = ferrumc_items::encode_persisted_stack(inventory.held())?;
+    let remainder = if windows.consumption.pending.is_some() {
+        stack
+    } else {
+        inventory.deposit(stack)
+    };
+    let changed = before != ferrumc_items::encode_persisted_stack(inventory.held())?;
+    if changed {
+        // Keep any committed wear beforeimage until its terminal owner receipt.
+        windows.mining.changed();
+    }
+    Ok((remainder, changed))
+}
+
+#[cfg(test)]
+mod pickup_mining_tests;
 
 /// Prepares the complete exact postimage at the original consume duration, then
 /// pins it until the owner's matching result. No item shrinks on a refused food.
@@ -2513,12 +2534,22 @@ async fn handle_window_click(
         let previous_equipment = inventory.equipment_body()?;
         if inventory.game_mode() != GameMode::Spectator && packet.window_id() == open.window_id() {
             if open.is_crafting() {
-                if crafting_accessible(ctx, player, open.position()).await? {
-                    if let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) {
-                        if let Ok(slot) = usize::try_from(slot) {
-                            inventory.table_click(slot, button, mode)?;
+                let accessible = crafting_accessible(ctx, player, open.position()).await?;
+                if accessible {
+                    if decode_click_prefix(packet.rest()).is_some_and(|(_, _, mode)| mode == 5) {
+                        if !apply_local_drag(inventory, window_state, packet, true)? {
+                            return Ok(());
+                        }
+                    } else {
+                        window_state.local_drag = None;
+                        if let Some((slot, button, mode)) = decode_click_prefix(packet.rest()) {
+                            if let Ok(slot) = usize::try_from(slot) {
+                                inventory.table_click(slot, button, mode)?;
+                            }
                         }
                     }
+                } else {
+                    window_state.local_drag = None;
                 }
             } else if decode_click_prefix(packet.rest()).is_some_and(|(_, _, mode)| mode == 5) {
                 if !apply_chest_drag(ctx, player, inventory, window_state, packet).await? {
@@ -2531,6 +2562,7 @@ async fn handle_window_click(
                 apply_chest_window_click(ctx, player, inventory, window_state, packet).await?;
             }
         } else {
+            window_state.local_drag = None;
             if let Some(open) = window_state.open_mut() {
                 open.drag = None;
             }
@@ -2545,6 +2577,27 @@ async fn handle_window_click(
         }
         return resync_chest_window(ctx, writer, inventory, window_state, debug, compression);
     }
+    if packet.window_id() == WINDOW_ID
+        && decode_click_prefix(packet.rest()).is_some_and(|(_, _, mode)| mode == 5)
+    {
+        let before = inventory.state_id();
+        let previous_equipment = inventory.equipment_body()?;
+        if !apply_local_drag(inventory, window_state, packet, false)? {
+            return Ok(());
+        }
+        if inventory.state_id() == before {
+            inventory.bump_state_id();
+        }
+        let equipment = inventory.equipment_body()?;
+        if equipment != previous_equipment {
+            ctx.commands
+                .send(SimCommand::SetEquipment { player, equipment })
+                .await
+                .map_err(|_| anyhow::anyhow!("simulation driver is gone"))?;
+        }
+        return resync_chest_window(ctx, writer, inventory, window_state, debug, compression);
+    }
+    window_state.local_drag = None;
     // Window 0 exchanges use server-owned slots/cursor, never client hashes.
     let changed_slot = apply_player_window_click(inventory, packet)?;
     if changed_slot.is_none() {
@@ -2602,6 +2655,77 @@ fn apply_player_window_click(
         _ => false,
     };
     Ok(changed.then_some(index))
+}
+
+/// Collects ordinary local `QUICK_CRAFT` phases, then publishes a complete staged
+/// inventory postimage. Start/add preserve authoritative items and send no resync.
+fn apply_local_drag(
+    inventory: &mut PlayerInventory,
+    windows: &mut WindowState,
+    packet: &WindowClick,
+    table: bool,
+) -> anyhow::Result<bool> {
+    let Some((slot, button, _)) = decode_click_prefix(packet.rest()) else {
+        windows.local_drag = None;
+        return Ok(true);
+    };
+    if inventory.game_mode() == GameMode::Spectator || !matches!(button, 0 | 1 | 2 | 4 | 5 | 6) {
+        windows.local_drag = None;
+        return Ok(true);
+    }
+    let right = button >= 4;
+    let phase = button & 3;
+    if phase == 0 {
+        windows.local_drag = None;
+        if slot != -999 || inventory.carried().item().is_none() {
+            return Ok(true);
+        }
+        inventory.admit_budget()?;
+        windows.local_drag = Some(crate::window::LocalDrag {
+            window_id: packet.window_id(),
+            right,
+            selection: Vec::with_capacity(crate::inventory::SLOT_COUNT),
+            cursor: inventory.carried().clone(),
+        });
+        return Ok(false);
+    }
+    let Some(mut drag) = windows.local_drag.take() else {
+        return Ok(true);
+    };
+    if drag.window_id != packet.window_id()
+        || drag.right != right
+        || drag.cursor.count() != inventory.carried().count()
+        || !ferrumc_items::same_stack_representation(&drag.cursor, inventory.carried())?
+    {
+        return Ok(true);
+    }
+    if phase == 1 {
+        let Ok(index) = usize::try_from(slot) else {
+            return Ok(true);
+        };
+        let Some(target) = inventory.drag_slot(index, table) else {
+            // Results/armor cannot receive items; ignore them just like full or
+            // incompatible cells while retaining valid selected ingredients.
+            windows.local_drag = Some(drag);
+            return Ok(false);
+        };
+        if !drag.selection.contains(&index)
+            && usize::from(inventory.carried().count()) > drag.selection.len()
+            && (target.item().is_none()
+                || ferrumc_items::same_stack_representation(target, inventory.carried())?)
+            && target.count() <= ferrumc_items::stack_capacity(inventory.carried())?
+        {
+            drag.selection.push(index);
+        }
+        windows.local_drag = Some(drag);
+        return Ok(false);
+    }
+    if slot == -999 {
+        if let Err(error) = inventory.drag_slots(&drag.selection, right, table) {
+            tracing::debug!(%error, "refused complete local drag postimage");
+        }
+    }
+    Ok(true)
 }
 
 /// Applies the SAFE subset of a click on the open chest window to the
@@ -4496,6 +4620,71 @@ mod tests {
         }
         drop(ctx);
         assert_eq!(probe.await.expect("request probe finished"), 4);
+    }
+
+    #[test]
+    fn local_drag_invalid_phases_cursor_changes_and_screens_preserve_every_owned_stack() {
+        let mut inventory = PlayerInventory::with_creative_kit(GameMode::Survival);
+        inventory.set_carried(container_probe_stack(5));
+        let before = inventory.container_content_payload().unwrap();
+        let mut windows = WindowState::new();
+        let packet = |window, slot: i16, button: u8| {
+            let mut rest = slot.to_be_bytes().to_vec();
+            rest.push(button);
+            write_var_int(&mut rest, 5);
+            WindowClick::new(window, 0, rest)
+        };
+        assert!(
+            super::apply_local_drag(&mut inventory, &mut windows, &packet(0, -999, 6), false)
+                .unwrap()
+        );
+        assert!(
+            !super::apply_local_drag(&mut inventory, &mut windows, &packet(0, -999, 4), false)
+                .unwrap()
+        );
+        for slot in [0, 5, 1, 1] {
+            assert!(!super::apply_local_drag(
+                &mut inventory,
+                &mut windows,
+                &packet(0, slot, 5),
+                false
+            )
+            .unwrap());
+        }
+        assert_eq!(windows.local_drag.as_ref().unwrap().selection, vec![1]);
+        assert_eq!(inventory.container_content_payload().unwrap(), before);
+        assert!(
+            super::apply_local_drag(&mut inventory, &mut windows, &packet(0, -999, 2), false)
+                .unwrap()
+        );
+        assert!(windows.local_drag.is_none());
+        assert_eq!(inventory.container_content_payload().unwrap(), before);
+        assert!(
+            !super::apply_local_drag(&mut inventory, &mut windows, &packet(0, -999, 4), false)
+                .unwrap()
+        );
+        assert!(
+            !super::apply_local_drag(&mut inventory, &mut windows, &packet(0, 1, 5), false)
+                .unwrap()
+        );
+        inventory.set_carried(container_probe_stack(4));
+        let changed = inventory.container_content_payload().unwrap();
+        assert!(
+            super::apply_local_drag(&mut inventory, &mut windows, &packet(0, -999, 6), false)
+                .unwrap()
+        );
+        assert_eq!(inventory.container_content_payload().unwrap(), changed);
+        assert!(
+            !super::apply_local_drag(&mut inventory, &mut windows, &packet(0, -999, 4), false)
+                .unwrap()
+        );
+        windows.open_crafting(BlockPos::new(8, 65, 8));
+        assert!(windows.local_drag.is_none());
+        assert!(
+            super::apply_local_drag(&mut inventory, &mut windows, &packet(1, -999, 6), true)
+                .unwrap()
+        );
+        assert_eq!(inventory.container_content_payload().unwrap(), changed);
     }
 
     #[tokio::test]

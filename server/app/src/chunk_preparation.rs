@@ -200,9 +200,7 @@ impl ChunkPreparation {
         self.running.remove(&pos);
         match result {
             Ok(chunk) => {
-                if chunk.block_entity_count() != 0 {
-                    anyhow::bail!("raw terrain baseline contains gameplay block entities");
-                }
+                validate_baseline(&chunk)?;
                 if chunk.pos() != pos {
                     anyhow::bail!("prepared terrain column differs from requested column");
                 }
@@ -240,7 +238,9 @@ impl ChunkPreparation {
                         }
                     }
                     self.ready_bytes += bytes;
-                    self.ready.insert(pos, (Arc::new(chunk), bytes));
+                    // Census below measures the clone's lengths. Cloning removes spare
+                    // producer Vec/String capacity without altering item/component bytes.
+                    self.ready.insert(pos, (Arc::new(chunk.clone()), bytes));
                     self.recent.retain(|old| *old != pos);
                     self.recent.push_back(pos);
                 } else {
@@ -314,16 +314,133 @@ impl ChunkPreparation {
     }
 }
 
-/// The network blob preserves palette representation, including formerly
-/// populated sections that are now all air. Triple its size covers 32-bit direct
-/// arrays (15-bit on wire) and indirect palette capacity growth. Fixed structs,
-/// allocator allowance and biome storage are additional. This is not RSS.
-fn baseline_storage_charge(chunk: &Chunk) -> Result<usize, WorldError> {
+/// A generated chest (including its loot) belongs to an immutable baseline.
+/// Persist-dirty/edited chunks and malformed/mismatched entities do not.
+fn validate_baseline(chunk: &Chunk) -> anyhow::Result<()> {
+    use ferrumc_world::{is_chest_state, is_furnace_state, sign_kind_for_state, BlockEntity};
+    if chunk.persist_dirty_sections().any() || chunk.persist_edited_sections().any() {
+        anyhow::bail!("prepared terrain baseline contains persisted gameplay edits");
+    }
+    if chunk.light().is_some() {
+        anyhow::bail!("prepared terrain baseline contains gameplay lighting");
+    }
+    let mut encoded = Vec::new();
+    for (pos, entity) in chunk.block_entities() {
+        let state = chunk.get_block(pos).ok_or_else(|| {
+            anyhow::anyhow!("prepared baseline block entity is outside its column")
+        })?;
+        let matches = match entity {
+            BlockEntity::Chest(_) => is_chest_state(state.into()),
+            BlockEntity::Furnace(_) => is_furnace_state(state.into()),
+            BlockEntity::Sign(sign) => sign_kind_for_state(state.into()) == Some(sign.kind()),
+            _ => anyhow::bail!("prepared baseline has an unsupported block entity"),
+        };
+        if !matches {
+            anyhow::bail!(
+                "prepared baseline block entity disagrees with its block state at {pos:?}"
+            );
+        }
+        encoded.clear();
+        ferrumc_world::try_encode_block_entity(entity, &mut encoded)?;
+    }
+    Ok(())
+}
+
+/// Palette-preserving wire size ×3 covers cloned direct/indirect arrays; fixed
+/// objects/allocator allowance, biome bytes and complete decoded entity clone
+/// allocations are additional. This is a conservative cache charge, not RSS.
+fn baseline_storage_charge(chunk: &Chunk) -> anyhow::Result<usize> {
     let encoded = ferrumc_world::encode_chunk_section_data(chunk)?;
-    Ok(std::mem::size_of::<Chunk>()
+    let mut bytes = std::mem::size_of::<Chunk>()
         + 4096
         + chunk.biomes().map_or(0, std::mem::size_of_val)
-        + encoded.len() * 3)
+        + encoded.len() * 3;
+    for (_, entity) in chunk.block_entities() {
+        // Conservative single-entry worst BTree node (eleven inline entries,
+        // twelve edges, header+allocator allowance) exceeds the amortized node.
+        charge(
+            &mut bytes,
+            11 * (std::mem::size_of::<ferrumc_math::BlockPos>()
+                + std::mem::size_of::<ferrumc_world::BlockEntity>())
+                + 16 * std::mem::size_of::<usize>()
+                + 64,
+        )?;
+        match entity {
+            ferrumc_world::BlockEntity::Chest(chest) => {
+                charge(&mut bytes, std::mem::size_of_val(chest.slots()) + 32)?;
+                for stack in chest.slots() {
+                    charge_stack_clone(&mut bytes, stack)?;
+                }
+            }
+            ferrumc_world::BlockEntity::Furnace(furnace) => {
+                for stack in furnace.slots() {
+                    charge_stack_clone(&mut bytes, stack)?;
+                }
+            }
+            ferrumc_world::BlockEntity::Sign(sign) => {
+                for face in [sign.front(), sign.back()] {
+                    charge(&mut bytes, face.color().len() + 32)?;
+                    for line in face.lines() {
+                        charge(&mut bytes, line.len() + 32)?;
+                    }
+                }
+            }
+            _ => anyhow::bail!("prepared baseline has an unsupported block entity"),
+        }
+    }
+    Ok(bytes)
+}
+fn charge(bytes: &mut usize, amount: usize) -> anyhow::Result<()> {
+    *bytes = bytes
+        .checked_add(amount)
+        .ok_or_else(|| anyhow::anyhow!("prepared baseline clone charge overflow"))?;
+    Ok(())
+}
+fn charge_stack_clone(bytes: &mut usize, stack: &ferrumc_items::ItemStack) -> anyhow::Result<()> {
+    use ferrumc_items::ComponentValue;
+    charge(
+        bytes,
+        std::mem::size_of_val(stack.components().added())
+            + std::mem::size_of_val(stack.components().removed())
+            + 64,
+    )?;
+    for value in stack.components().added() {
+        match value {
+            ComponentValue::CustomData(tag) | ComponentValue::CustomName(tag) => {
+                charge_nbt_clone(bytes, tag)?;
+            }
+            ComponentValue::Opaque(value) => charge(bytes, value.raw().len() + 32)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+fn charge_nbt_clone(bytes: &mut usize, tag: &ferrumc_nbt::NbtTag) -> anyhow::Result<()> {
+    use ferrumc_nbt::NbtTag;
+    match tag {
+        NbtTag::ByteArray(values) => charge(bytes, values.len() + 32)?,
+        NbtTag::IntArray(values) => charge(bytes, values.len() * 4 + 32)?,
+        NbtTag::LongArray(values) => charge(bytes, values.len() * 8 + 32)?,
+        NbtTag::String(value) => charge(bytes, value.len() + 32)?,
+        NbtTag::List(values) => {
+            charge(bytes, values.len() * std::mem::size_of::<NbtTag>() + 32)?;
+            for value in values {
+                charge_nbt_clone(bytes, value)?;
+            }
+        }
+        NbtTag::Compound(values) => {
+            charge(
+                bytes,
+                values.len() * std::mem::size_of::<(String, NbtTag)>() + 32,
+            )?;
+            for (name, value) in values.iter() {
+                charge(bytes, name.len() + 32)?;
+                charge_nbt_clone(bytes, value)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -355,6 +472,298 @@ mod tests {
 
     fn fixture() -> ChunkPreparation {
         ChunkPreparation::new(&RuntimeGeneration::new(Arc::new(FlatWorldGenerator::new())))
+    }
+
+    fn generated_chest(stack: ferrumc_items::ItemStack) -> Chunk {
+        use ferrumc_world::{BlockEntity, BlockStateId, ChestInventory};
+        let mut chunk = Chunk::new(ChunkPos::ORIGIN);
+        let at = ferrumc_math::BlockPos::new(1, 64, 1);
+        chunk
+            .set_block(
+                at,
+                BlockStateId::new(
+                    ferrumc_registry::block_state::block_default_state("chest").unwrap(),
+                ),
+            )
+            .unwrap();
+        let mut chest = ChestInventory::new();
+        *chest.slot_mut(0).unwrap() = stack;
+        chunk
+            .set_block_entity(at, BlockEntity::Chest(chest))
+            .unwrap();
+        chunk
+    }
+
+    #[test]
+    fn generated_entities_validate_losslessly_but_gameplay_and_malformed_payloads_refuse() {
+        use ferrumc_items::{ComponentPatch, ComponentValue, ItemId, ItemStack};
+        use ferrumc_nbt::NbtTag;
+        use ferrumc_world::{BlockEntity, BlockStateId, Sign, SignKind};
+        let at = ferrumc_math::BlockPos::new(1, 64, 1);
+        let baseline = generated_chest(ItemStack::empty());
+        validate_baseline(&baseline).unwrap();
+        let mut wrong_state = baseline.clone();
+        wrong_state.set_block(at, BlockStateId::AIR).unwrap();
+        assert!(validate_baseline(&wrong_state).is_err());
+        let mut gameplay = baseline.clone();
+        gameplay.mark_persist_dirty(at);
+        assert!(validate_baseline(&gameplay).is_err());
+        gameplay.clear_persist_dirty();
+        assert!(gameplay.persist_edited_sections().any());
+        assert!(validate_baseline(&gameplay).is_err());
+        let malformed_stack = ItemStack::try_new(
+            ItemId::from_name("bread").unwrap(),
+            1,
+            ComponentPatch::new(vec![ComponentValue::CustomData(NbtTag::Int(3))], vec![]),
+        )
+        .unwrap();
+        assert!(validate_baseline(&generated_chest(malformed_stack)).is_err());
+        let mut invalid_sign = Chunk::new(ChunkPos::ORIGIN);
+        invalid_sign
+            .set_block(
+                at,
+                BlockStateId::new(
+                    ferrumc_registry::block_state::block_default_state("oak_sign").unwrap(),
+                ),
+            )
+            .unwrap();
+        let mut sign = Sign::new(SignKind::Sign);
+        sign.set_face_lines(true, std::array::from_fn(|_| "x".repeat(1025)));
+        invalid_sign
+            .set_block_entity(at, BlockEntity::Sign(sign))
+            .unwrap();
+        assert!(validate_baseline(&invalid_sign).is_err());
+    }
+
+    #[tokio::test]
+    async fn cache_charges_decoded_nbt_and_opaque_components_and_preserves_the_complete_clone() {
+        use ferrumc_items::{
+            ComponentPatch, ComponentTypeId, ComponentValue, ItemId, ItemStack, OpaqueComponent,
+        };
+        use ferrumc_nbt::{NbtCompound, NbtTag};
+        let mut data = NbtCompound::new();
+        data.push(
+            "many",
+            NbtTag::List(vec![NbtTag::Compound(NbtCompound::new()); 128]),
+        );
+        data.push("ints", NbtTag::IntArray(vec![7; 256]));
+        data.push("longs", NbtTag::LongArray(vec![13; 128]));
+        let mut label = String::with_capacity(64 * 1024);
+        label.push_str("complete");
+        data.push("label", NbtTag::String(label));
+        let stack = ItemStack::try_new(
+            ItemId::from_name("bread").unwrap(),
+            1,
+            ComponentPatch::new(
+                vec![
+                    ComponentValue::CustomData(NbtTag::Compound(data)),
+                    ComponentValue::Opaque(OpaqueComponent::new(6, vec![0xa5; 512]).unwrap()),
+                ],
+                vec![ComponentTypeId::new(95)],
+            ),
+        )
+        .unwrap();
+        let source = generated_chest(stack);
+        validate_baseline(&source).unwrap();
+        let blank_charge = baseline_storage_charge(&generated_chest(ItemStack::empty())).unwrap();
+        let charge = baseline_storage_charge(&source).unwrap();
+        assert!(charge > blank_charge + 128 * std::mem::size_of::<NbtTag>() + 2048 + 512);
+        let mut preparation = fixture();
+        preparation.targets.insert(
+            PlayerId::offline("components"),
+            ViewerTargets {
+                wanted: BTreeSet::from([source.pos()]),
+                ..ViewerTargets::default()
+            },
+        );
+        preparation
+            .completed(Ok((source.pos(), Ok(source.clone()))), |_| false)
+            .unwrap();
+        let retained = preparation.ready(source.pos()).unwrap();
+        assert_eq!(*retained, source);
+        assert_eq!(preparation.ready_bytes, charge);
+        let ferrumc_world::BlockEntity::Chest(chest) = retained
+            .block_entity(ferrumc_math::BlockPos::new(1, 64, 1))
+            .unwrap()
+        else {
+            panic!("chest")
+        };
+        let ComponentValue::CustomData(NbtTag::Compound(data)) =
+            &chest.slots()[0].components().added()[0]
+        else {
+            panic!("complete data")
+        };
+        let (_, NbtTag::String(label)) = data.iter().find(|(name, _)| *name == "label").unwrap()
+        else {
+            panic!("label")
+        };
+        assert_eq!(
+            label.capacity(),
+            label.len(),
+            "retained clone removes producer spare capacity"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_valid_entity_baseline_is_memoized_without_a_driver_failure() {
+        use ferrumc_math::BlockPos;
+        use ferrumc_world::{BlockEntity, BlockStateId, ChestInventory};
+        let mut source = Chunk::new(ChunkPos::ORIGIN);
+        let chest_state =
+            BlockStateId::new(ferrumc_registry::block_state::block_default_state("chest").unwrap());
+        for index in 0..512 {
+            let at = BlockPos::new(index % 16, 64 + index / 256, (index / 16) % 16);
+            source.set_block(at, chest_state).unwrap();
+            source
+                .set_block_entity(at, BlockEntity::Chest(ChestInventory::new()))
+                .unwrap();
+        }
+        validate_baseline(&source).unwrap();
+        assert!(baseline_storage_charge(&source).unwrap() > MAX_BASELINE_BYTES);
+        let mut preparation = fixture();
+        preparation.targets.insert(
+            PlayerId::offline("oversized"),
+            ViewerTargets {
+                wanted: BTreeSet::from([source.pos()]),
+                ..ViewerTargets::default()
+            },
+        );
+        preparation
+            .completed(Ok((source.pos(), Ok(source))), |_| false)
+            .unwrap();
+        assert!(preparation.ready.is_empty());
+        assert_eq!(preparation.ready_bytes, 0);
+        assert!(preparation.failed.contains(&ChunkPos::ORIGIN));
+        preparation.request(PlayerId::offline("oversized"), [ChunkPos::ORIGIN], []);
+        assert!(!preparation.has_jobs());
+    }
+
+    fn assert_cabin_loot(baseline: &Chunk, at: ferrumc_math::BlockPos) {
+        use ferrumc_items::ItemId;
+        let ferrumc_world::BlockEntity::Chest(chest) = baseline.block_entity(at).unwrap() else {
+            panic!("real seed0 cabin chest")
+        };
+        for (slot, (name, count)) in [
+            ("bread", 1),
+            ("coal", 8),
+            ("iron_nugget", 3),
+            ("wheat", 5),
+            ("oak_sapling", 1),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                chest.slots()[slot].item(),
+                Some(ItemId::from_name(name).unwrap())
+            );
+            assert_eq!(chest.slots()[slot].count(), count);
+        }
+        assert!(chest.slots()[5..].iter().all(|s| s.item().is_none()));
+    }
+
+    #[tokio::test]
+    async fn natural_cabin_warms_admits_and_redb_restart_keeps_edited_loot() {
+        use ferrumc_core::{DimensionId, WorldId};
+        use ferrumc_math::BlockPos;
+        use ferrumc_sim::{ChunkTicket, GenerationBinding, LoadedChunkMap, TicketReason};
+        use ferrumc_storage::{GenerationKey, RedbStore, WorldStore};
+        use ferrumc_world::{BlockEntity, NaturalWorldGenerator, WorldSeed};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cabin.redb");
+        let open = |path| {
+            tokio::task::spawn_blocking(move || {
+                RedbStore::open_with_generation_metadata(path).unwrap()
+            })
+        };
+        let store = open(path.clone()).await.unwrap();
+        let generation = RuntimeGeneration::new(Arc::new(
+            NaturalWorldGenerator::with_playable(WorldSeed::new(0)).unwrap(),
+        ));
+        let key = GenerationKey::new(WorldId::new(0), DimensionId::new(0));
+        store
+            .ensure_generation_identity(key, generation.identity())
+            .await
+            .unwrap();
+        let binding = GenerationBinding::new(key, generation.identity());
+        let mut chunks = LoadedChunkMap::with_generation(binding);
+        let pos = ChunkPos::new(-10, -10);
+        let at = BlockPos::new(-150, 97, -149);
+        let mut preparation = ChunkPreparation::new(&generation);
+        preparation.request(PlayerId::offline("cabin"), [pos], []);
+        let completion = preparation.next_completion().await.unwrap();
+        preparation.completed(completion, |_| false).unwrap();
+        assert_eq!(
+            chunks.ticket_count(pos),
+            0,
+            "warm loot owns no resident ticket"
+        );
+        let baseline = preparation.ready(pos).unwrap();
+        assert_cabin_loot(&baseline, at);
+        generation
+            .acquire_warmed(
+                &mut chunks,
+                &store,
+                Arc::clone(&baseline),
+                ChunkTicket::of(TicketReason::Player),
+            )
+            .await
+            .unwrap();
+        assert_eq!(chunks.ticket_count(pos), 1);
+        assert_eq!(
+            chunks.get(pos).unwrap().block_entity(at),
+            baseline.block_entity(at)
+        );
+        preparation.admitted(&BTreeSet::from([pos]));
+        assert!(preparation.ready(pos).is_none());
+        assert_eq!(preparation.ready_bytes, 0);
+        let edited = chunks.get_mut(pos).unwrap();
+        let Some(BlockEntity::Chest(chest)) = edited.block_entity_mut(at) else {
+            panic!("admitted chest")
+        };
+        *chest.slot_mut(0).unwrap() = ferrumc_items::ItemStack::empty();
+        *chest.slot_mut(1).unwrap() = ferrumc_items::ItemStack::empty();
+        edited.mark_persist_dirty(at);
+        let expected = edited.block_entity(at).unwrap().clone();
+        let batch = chunks
+            .try_take_persist_dirty_bound(&store, 7, std::num::NonZeroUsize::MIN)
+            .await
+            .unwrap();
+        assert_eq!(batch.len(), 1);
+        store.save_chunk_overlays(batch).await.unwrap();
+        drop(store);
+        let store = open(path).await.unwrap();
+        let fresh_generation = RuntimeGeneration::new(Arc::new(
+            NaturalWorldGenerator::with_playable(WorldSeed::new(0)).unwrap(),
+        ));
+        let mut fresh_preparation = ChunkPreparation::new(&fresh_generation);
+        fresh_preparation.request(PlayerId::offline("rejoin"), [pos], []);
+        let completion = fresh_preparation.next_completion().await.unwrap();
+        fresh_preparation.completed(completion, |_| false).unwrap();
+        let fresh_baseline = fresh_preparation.ready(pos).unwrap();
+        assert_eq!(
+            fresh_baseline.block_entity(at),
+            baseline.block_entity(at),
+            "new generator repeats original loot"
+        );
+        let mut restored = LoadedChunkMap::with_generation(binding);
+        fresh_generation
+            .acquire_warmed(
+                &mut restored,
+                &store,
+                fresh_baseline,
+                ChunkTicket::of(TicketReason::Player),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            restored.get(pos).unwrap().block_entity(at),
+            Some(&expected),
+            "persisted complete inventory wins over regenerated loot"
+        );
+        assert_eq!(restored.ticket_count(pos), 1);
+        fresh_preparation.admitted(&BTreeSet::from([pos]));
+        assert_eq!(fresh_preparation.ready_bytes, 0);
     }
 
     #[tokio::test(start_paused = true)]
@@ -696,7 +1105,7 @@ mod tests {
             preparation
                 .completed(Ok((old, Ok(invalid))), |_| false)
                 .is_err(),
-            "obsolete output still rejects gameplay block entities"
+            "obsolete output still rejects mismatched block entities"
         );
         assert!(preparation.ready.is_empty());
     }

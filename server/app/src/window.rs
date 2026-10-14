@@ -53,6 +53,14 @@ pub(crate) struct ChestDrag {
     pub(crate) cursor: ItemStack,
 }
 
+/// One bounded local player/crafting drag tied to its exact active screen.
+pub(crate) struct LocalDrag {
+    pub(crate) window_id: i32,
+    pub(crate) right: bool,
+    pub(crate) selection: Vec<usize>,
+    pub(crate) cursor: ItemStack,
+}
+
 /// A container window the player currently has open.
 pub(crate) struct OpenContainer {
     window_id: i32,
@@ -156,6 +164,7 @@ pub(crate) struct WindowState {
     open: Option<OpenContainer>,
     pub(crate) furnace: Option<crate::furnace_window::FurnaceWindow>,
     pub(crate) furnace_poll: u64,
+    pub(crate) local_drag: Option<LocalDrag>,
     next_window_id: i32,
     next_bucket_token: u64,
     next_attack_token: u64,
@@ -177,6 +186,7 @@ impl WindowState {
             open: None,
             furnace: None,
             furnace_poll: 0,
+            local_drag: None,
             next_window_id: 1,
             next_bucket_token: 0,
             next_attack_token: 0,
@@ -239,12 +249,14 @@ impl WindowState {
     /// carried item; the caller resynchronizes that same item into the new screen.
     pub(crate) fn open_chest(&mut self, position: BlockPos, slots: Vec<ItemStack>) -> i32 {
         let window_id = self.allocate_window_id();
+        self.local_drag = None;
         self.open = Some(OpenContainer::new(window_id, position, slots));
         window_id
     }
 
     /// Opens a crafting-table screen over its validated world position.
     pub(crate) fn open_crafting(&mut self, position: BlockPos) -> i32 {
+        self.local_drag = None;
         let window_id = self.allocate_window_id();
         let mut open = OpenContainer::new(window_id, position, Vec::new());
         open.crafting = true;
@@ -277,6 +289,7 @@ impl WindowState {
 
     /// Takes (closes) the open container window, if any.
     pub(crate) fn take(&mut self) -> Option<OpenContainer> {
+        self.local_drag = None;
         self.furnace = None;
         self.open.take()
     }

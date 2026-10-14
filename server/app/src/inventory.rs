@@ -560,6 +560,144 @@ impl PlayerInventory {
         Ok(changed)
     }
 
+    /// Reads an insertable ordinary player/crafting slot for drag admission.
+    /// Results and armor are derived/restricted; they never receive drag items.
+    pub(crate) fn drag_slot(&self, slot: usize, table: bool) -> Option<&ItemStack> {
+        if table {
+            match slot {
+                1..=9 => self.table_inputs.get(slot - 1),
+                10..=45 => self.window_slots().get(slot - 10),
+                _ => None,
+            }
+        } else if (1..=4).contains(&slot) || (MAIN_START..SLOT_COUNT).contains(&slot) {
+            self.slots.get(slot)
+        } else {
+            None
+        }
+    }
+
+    /// Publishes one complete bounded ordinary crafting/player drag postimage.
+    /// Input/output components and the complete projected-save budget pass before
+    /// staging; any invalid selection or derived result refusal preserves every
+    /// slot and cursor. Left distributes evenly, right deposits one per slot.
+    pub(crate) fn drag_slots(
+        &mut self,
+        selection: &[usize],
+        right: bool,
+        table: bool,
+    ) -> anyhow::Result<bool> {
+        if self.game_mode == GameMode::Spectator
+            || self.carried.item().is_none()
+            || selection.is_empty()
+        {
+            return Ok(false);
+        }
+        anyhow::ensure!(selection.len() <= SLOT_COUNT, "too many drag slots");
+        let mut selected = [false; SLOT_COUNT];
+        let mut remaining = self.carried.count();
+        let share = if right {
+            1
+        } else {
+            remaining / selection.len() as u8
+        };
+        let mut receives = [false; SLOT_COUNT];
+        for &index in selection {
+            let prior = selected
+                .get_mut(index)
+                .ok_or_else(|| anyhow::anyhow!("drag slot outside screen"))?;
+            anyhow::ensure!(!*prior, "duplicate drag selection");
+            *prior = true;
+            let target = self
+                .drag_slot(index, table)
+                .ok_or_else(|| anyhow::anyhow!("restricted drag slot"))?;
+            let capacity = ferrumc_items::stack_capacity(&self.carried)?;
+            ferrumc_items::stack_capacity(target)?;
+            if target.item().is_none()
+                || ferrumc_items::same_stack_representation(target, &self.carried)?
+            {
+                let moved = share
+                    .min(remaining)
+                    .min(capacity.saturating_sub(target.count()));
+                receives[index] = moved != 0 && target.item().is_none();
+                remaining -= moved;
+            }
+        }
+        self.admit_drag_output(&receives, remaining, table)?;
+        self.stage(|candidate| {
+            let mut changed = false;
+            for &index in selection {
+                let target = if table && index <= 9 {
+                    &mut candidate.table_inputs[index - 1]
+                } else if table {
+                    &mut candidate.slots[index - 10 + MAIN_START]
+                } else {
+                    &mut candidate.slots[index]
+                };
+                let capacity = if target.item().is_none() {
+                    ferrumc_items::stack_capacity(&candidate.carried)?
+                } else {
+                    ferrumc_items::stack_capacity(target)?
+                };
+                let transfer =
+                    ferrumc_items::plan_transfer(&candidate.carried, target, share, capacity)?;
+                changed |= transfer.moved() != 0;
+                let (remaining, destination) = transfer.into_stacks();
+                candidate.carried = remaining;
+                *target = destination;
+            }
+            if changed {
+                candidate.refresh_crafting_inner()?;
+                if table {
+                    candidate.admit_table_stacks(&candidate.table_inputs)?;
+                }
+                candidate.bump_state_id();
+            }
+            Ok(changed)
+        })
+    }
+
+    fn admit_drag_output(
+        &self,
+        receives: &[bool; SLOT_COUNT],
+        remaining: u8,
+        table: bool,
+    ) -> anyhow::Result<()> {
+        let empty = ItemStack::empty();
+        // Counts have fixed FCIS width. Borrowing the original cursor predicts
+        // each copied component image without allocating the output replicas.
+        crate::inventory_budget::admit(
+            self.slots
+                .iter()
+                .enumerate()
+                .map(|(index, stack)| {
+                    let screen = if table && (MAIN_START..PLAYER_WINDOW_END).contains(&index) {
+                        Some(index - MAIN_START + 10)
+                    } else if !table {
+                        Some(index)
+                    } else {
+                        None
+                    };
+                    if screen.is_some_and(|slot| receives[slot]) {
+                        &self.carried
+                    } else {
+                        stack
+                    }
+                })
+                .chain(std::iter::once(if remaining == 0 {
+                    &empty
+                } else {
+                    &self.carried
+                }))
+                .chain(self.table_inputs.iter().enumerate().map(|(index, stack)| {
+                    if table && receives[index + 1] {
+                        &self.carried
+                    } else {
+                        stack
+                    }
+                })),
+        )
+    }
+
     /// Shift-clicks the result repeatedly or transfers an ordinary slot.
     pub(crate) fn quick_move(&mut self, index: usize) -> anyhow::Result<bool> {
         self.stage(|candidate| candidate.quick_move_inner(index))
@@ -678,21 +816,63 @@ impl PlayerInventory {
         &self.slots[MAIN_START..PLAYER_WINDOW_END]
     }
 
-    /// Deposits `cursor` back into the main inventory + hotbar, returning whatever
-    /// could not fit. The sole cursor owner must retain this remainder.
-    ///
-    /// Used when a container window closes so a carried item is never lost: it
-    /// first merges into matching stacks, then fills empty slots, applying the
-    /// item-count-conserving [`left_click_exchange`] only to slots that are empty
-    /// or hold the same item (never a different-item slot, which would swap an
-    /// unrelated item onto the cursor). Bumps the window state id when anything was
-    /// stored so the follow-up window-0 resync carries a fresh id. A non-empty
-    /// return means the inventory was full; [`Self::return_carried`] retains it.
+    /// Deposits one offered pickup, returning its exact unaccepted remainder.
+    /// Existing exact stacks merge before empty hotbar slots 0..8, then the main
+    /// grid. A complete staged save-budget refusal retains the original pickup
+    /// and every inventory slot; ground ownership receives the remainder.
     #[must_use]
     pub(crate) fn deposit(&mut self, cursor: ItemStack) -> ItemStack {
         let original = cursor.clone();
-        self.stage(|candidate| Ok(candidate.deposit_inner(cursor)))
+        self.stage(|candidate| candidate.deposit_pickup_inner(cursor))
             .unwrap_or(original)
+    }
+
+    // Minecraft inventory storage order is hotbar first, unlike GUI window
+    // order. Merge selected/offhand matches before other matches, then choose
+    // empty hotbar slots in ascending order and only afterward the main grid.
+    fn deposit_pickup_inner(&mut self, mut stack: ItemStack) -> anyhow::Result<ItemStack> {
+        ferrumc_items::stack_capacity(&stack)?;
+        let selected = HOTBAR_START + usize::from(self.selected);
+        let mut changed = false;
+        for empty in [false, true] {
+            let order = std::iter::once(selected)
+                .chain(std::iter::once(OFFHAND_SLOT))
+                .filter(|_| !empty)
+                .chain(HOTBAR_START..PLAYER_WINDOW_END)
+                .chain(MAIN_START..HOTBAR_START);
+            for index in order {
+                if stack.item().is_none() {
+                    break;
+                }
+                if self.slots[index].item().is_none() != empty {
+                    continue;
+                }
+                // Offhand accepts a pickup only into an existing matching stack.
+                // Empty-slot selection is always 0..8 then the main inventory.
+                if empty && index == OFFHAND_SLOT {
+                    continue;
+                }
+                let capacity = if empty {
+                    ferrumc_items::stack_capacity(&stack)?
+                } else {
+                    ferrumc_items::stack_capacity(&self.slots[index])?
+                };
+                let plan = ferrumc_items::plan_transfer(
+                    &stack,
+                    &self.slots[index],
+                    stack.count(),
+                    capacity,
+                )?;
+                changed |= plan.moved() != 0;
+                let (remaining, after) = plan.into_stacks();
+                stack = remaining;
+                self.slots[index] = after;
+            }
+        }
+        if changed {
+            self.bump_state_id();
+        }
+        Ok(stack)
     }
 
     fn deposit_inner(&mut self, mut cursor: ItemStack) -> ItemStack {
@@ -1134,6 +1314,162 @@ mod tests {
             ),
         )
         .expect("valid stack")
+    }
+
+    fn empty_survival() -> PlayerInventory {
+        PlayerInventory::from_persisted(
+            GameMode::Survival,
+            0,
+            std::array::from_fn(|_| ItemStack::empty()),
+            ItemStack::empty(),
+        )
+    }
+
+    fn ordinary_stack(name: &str, count: u8) -> ItemStack {
+        ItemStack::try_new(
+            ItemId::from_name(name).unwrap(),
+            count,
+            ComponentPatch::empty(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn local_drag_crafting_inputs_derive_result_atomically_and_keep_remainders() {
+        let mut inventory = empty_survival();
+        inventory.carried = ordinary_stack("oak_planks", 13);
+        assert!(inventory.drag_slots(&[1, 2, 3, 4], false, false).unwrap());
+        for index in 1..=4 {
+            assert_eq!(inventory.slots[index], ordinary_stack("oak_planks", 3));
+        }
+        assert_eq!(inventory.carried, ordinary_stack("oak_planks", 1));
+        assert_eq!(inventory.slots[0], ordinary_stack("crafting_table", 1));
+        inventory.carried = ItemStack::empty();
+        assert!(inventory.normal_click(0, 0).unwrap());
+        assert_eq!(inventory.carried, ordinary_stack("crafting_table", 1));
+        for index in 1..=4 {
+            assert_eq!(inventory.slots[index], ordinary_stack("oak_planks", 2));
+        }
+        inventory.carried = ordinary_stack("oak_planks", 9);
+        assert!(inventory
+            .drag_slots(&[1, 2, 3, 4, 5, 6, 7, 8, 9], true, true)
+            .unwrap());
+        assert!(inventory.carried.item().is_none());
+        for slot in &inventory.table_inputs {
+            assert_eq!(slot, &ordinary_stack("oak_planks", 1));
+        }
+        let before = inventory.table_content_payload().unwrap();
+        assert!(!inventory.table_click(0, 0, 0).unwrap()); // full 3x3 planks is not a normal recipe
+        assert_eq!(inventory.table_content_payload().unwrap(), before);
+    }
+
+    #[test]
+    fn local_drag_caps_incompatible_and_restricted_slots_preserve_complete_inventory() {
+        let mut inventory = empty_survival();
+        inventory.slots[9] = named_stack(63, "same");
+        inventory.slots[10] = named_stack(3, "different");
+        inventory.carried = named_stack(8, "same");
+        assert!(inventory.drag_slots(&[9, 10, 11, 45], true, false).unwrap());
+        assert_eq!(inventory.slots[9], named_stack(64, "same"));
+        assert_eq!(inventory.slots[10], named_stack(3, "different"));
+        assert_eq!(inventory.slots[11], named_stack(1, "same"));
+        assert_eq!(inventory.slots[45], named_stack(1, "same"));
+        assert_eq!(inventory.carried, named_stack(5, "same"));
+        for selection in [vec![0], vec![5], vec![46], vec![1, 1]] {
+            let before = inventory.container_content_payload().unwrap();
+            let state = inventory.state_id();
+            assert!(inventory.drag_slots(&selection, true, false).is_err());
+            assert_eq!(inventory.container_content_payload().unwrap(), before);
+            assert_eq!(inventory.state_id(), state);
+        }
+    }
+
+    #[test]
+    fn local_drag_component_replication_save_budget_refuses_before_mutation() {
+        let mut inventory = empty_survival();
+        let components = [6, 7, 8, 9]
+            .into_iter()
+            .map(|id| {
+                ferrumc_items::ComponentValue::Opaque(
+                    ferrumc_items::OpaqueComponent::new(id, vec![0; 8192]).unwrap(),
+                )
+            })
+            .collect();
+        inventory.carried = ItemStack::try_new(
+            ItemId::from_name("stone").unwrap(),
+            64,
+            ComponentPatch::new(components, vec![]),
+        )
+        .unwrap();
+        inventory.admit_budget().unwrap();
+        let before = inventory.container_content_payload().unwrap();
+        let state = inventory.state_id();
+        let selection: Vec<_> = (1..=4).chain(MAIN_START..HOTBAR_START + 2).collect();
+        assert!(inventory.drag_slots(&selection, true, false).is_err());
+        assert_eq!(inventory.container_content_payload().unwrap(), before);
+        assert_eq!(inventory.state_id(), state);
+    }
+
+    #[test]
+    fn pickup_empty_order_hotbar_then_main_and_selected_tool_stays_exact() {
+        let mut inventory = empty_survival();
+        for (offset, name) in [
+            "stone",
+            "glass",
+            "dirt",
+            "oak_planks",
+            "cobblestone",
+            "sand",
+            "gravel",
+            "coal",
+            "iron_ingot",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(inventory.deposit(ordinary_stack(name, 1)).item().is_none());
+            assert_eq!(
+                inventory.slots[HOTBAR_START + offset],
+                ordinary_stack(name, 1)
+            );
+        }
+        assert!(inventory.slots[MAIN_START].item().is_none());
+        assert!(inventory
+            .deposit(ordinary_stack("gold_ingot", 1))
+            .item()
+            .is_none());
+        assert_eq!(inventory.slots[MAIN_START], ordinary_stack("gold_ingot", 1));
+        let mut inventory = empty_survival();
+        inventory.slots[HOTBAR_START] = ordinary_stack("iron_pickaxe", 1);
+        let tool = ferrumc_items::encode_persisted_stack(inventory.held()).unwrap();
+        assert!(inventory
+            .deposit(ordinary_stack("cobblestone", 7))
+            .item()
+            .is_none());
+        assert_eq!(
+            ferrumc_items::encode_persisted_stack(inventory.held()).unwrap(),
+            tool
+        );
+        assert_eq!(
+            inventory.slots[HOTBAR_START + 1],
+            ordinary_stack("cobblestone", 7)
+        );
+    }
+
+    #[test]
+    fn pickup_merges_selected_then_offhand_and_existing_main_before_empty_hotbar() {
+        let mut inventory = empty_survival();
+        inventory.selected = 2;
+        inventory.slots[HOTBAR_START + 2] = named_stack(62, "picked");
+        inventory.slots[OFFHAND_SLOT] = named_stack(62, "picked");
+        inventory.slots[MAIN_START] = named_stack(62, "picked");
+        inventory.slots[HOTBAR_START] = named_stack(1, "other");
+        assert!(inventory.deposit(named_stack(7, "picked")).item().is_none());
+        assert_eq!(inventory.slots[HOTBAR_START + 2], named_stack(64, "picked"));
+        assert_eq!(inventory.slots[OFFHAND_SLOT], named_stack(64, "picked"));
+        assert_eq!(inventory.slots[MAIN_START], named_stack(64, "picked"));
+        assert_eq!(inventory.slots[HOTBAR_START + 1], named_stack(1, "picked"));
+        assert_eq!(inventory.slots[HOTBAR_START], named_stack(1, "other"));
     }
 
     #[test]

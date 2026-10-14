@@ -32,8 +32,14 @@
   are shape-validated and discarded when no active viewer still requests them,
   and own no tickets. At most 64 baselines and 8 MiB
   conservatively charged storage remain cached; each result is at most 512 KiB.
-  Charge includes triple the palette-preserving section encoding, fixed
-  Chunk/allocator allowance and biomes. Worker scratch and resident gameplay chunks are additional; these
+  Clean generated block entities (including complete cabin loot) are allowed;
+  their real block state and lossless native codec must validate before stale
+  output is discarded or retained. Persist-dirty, persist-edited and lit
+  gameplay chunks are refused. Charge includes triple the palette-preserving
+  section encoding, fixed Chunk/allocator allowance, biomes, conservative
+  block-entity BTree nodes and every decoded item/component/NBT/string allocation.
+  The retained clone removes excess producer Vec/String capacity without changing
+  payload contents. Worker scratch and resident gameplay chunks are additional; these
   are allocation charges, not an RSS guarantee. At most 128 refused columns are
   memoized. Successful owner admission releases its exact raw cache copy and
   removes only those resident columns from viewer preparation queues. Late
@@ -389,3 +395,21 @@
   viewer or resource refusal leaves the inventory parts unchanged. Left/right
   distribution is supported; Creative middle-fill and Java drag events remain
   separate behavior.
+
+- Ordinary window-0 and crafting-table QUICK_CRAFT also retain a bounded drag
+  selection tied to the active screen. Start/add mutate no items and send no
+  correction; finish forecasts the complete 56-stack save and future-DAMAGE
+  budget before staging component replicas. Results and armor cannot receive
+  drag items. The single local stage derives recipe output and publishes all
+  inputs/storage/cursor together; actual output clicks consume ingredients.
+  Invalid phases, changed cursor or screen replacement cancel the selection.
+- Ground pickup merges exact existing stacks in selected-hotbar, offhand and
+  raw-inventory order, then fills empty hotbar indices 0..8 before the main grid.
+  Cursor-return/close policy and chest shift-transfer ordering are unchanged.
+  The player save-budget refusal returns the entire offered stack; pickup in an
+  unrelated slot preserves the held tool's exact FCIS beforeimage.
+
+- A ground pickup invalidates active mining only when the exact selected FCIS
+  stack changes. Unrelated deposits and whole pickup refusals retain the active
+  token and terminal wear beforeimage; changed selection cancels work without
+  retiring an unsettled committed receipt. This does not relax receipt ordering.
