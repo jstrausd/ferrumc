@@ -132,6 +132,7 @@ struct SnapshotCtx {
     relighter: crate::lighting::Relighter,
     ground: Option<crate::ground_runtime::GroundRuntime>,
     effects: BTreeMap<PlayerId, mpsc::Sender<crate::gameplay::GameplayEffect>>,
+    departure_vitals: crate::departure_vitals::DepartureVitals,
     /// Recent tick timestamps within the last wall-second, used to derive the
     /// effective TPS. Bounded by [`TPS_WINDOW_CAP`].
     tps_window: VecDeque<Instant>,
@@ -168,6 +169,7 @@ impl SnapshotCtx {
             relighter: crate::lighting::Relighter::new(),
             ground: None,
             effects: BTreeMap::new(),
+            departure_vitals: crate::departure_vitals::DepartureVitals::default(),
             tps_window: VecDeque::new(),
             net_telemetry,
             block_events,
@@ -1090,9 +1092,26 @@ pub(crate) async fn run(
                         }
                     }
                     Some(SimCommand::RegisterGameplay { player, sender, reply }) => {
-                        let accepted = snap_ctx.roster.contains_key(&player) && !snap_ctx.effects.contains_key(&player);
-                        if accepted { snap_ctx.effects.insert(player, sender); }
+                        let accepted = snap_ctx.roster.contains_key(&player)
+                            && !snap_ctx.effects.contains_key(&player)
+                            && snap_ctx.departure_vitals.register(player);
+                        if accepted {
+                            snap_ctx.departure_vitals.capture(&shard);
+                            snap_ctx.effects.insert(player, sender);
+                        }
                         let _ = reply.send(accepted);
+                    }
+                    Some(SimCommand::ReadVitals { player, reply }) => {
+                        let _ = reply.send(snap_ctx.departure_vitals.read(&shard, player));
+                    }
+                    Some(SimCommand::Event { event: event @ NetEvent::Disconnected { .. }, acceptance: Some(reply) }) => {
+                        let player = event.player();
+                        let delivery = router.route_event_owned(&event);
+                        let outcome = enforce_input_delivery(&mut router, player, delivery, true, "network event")?;
+                        if outcome.is_ok() || matches!(&outcome, Err(SessionError::UnknownPlayer { player: absent }) if *absent == player) {
+                            snap_ctx.departure_vitals.remove(player);
+                        }
+                        let _ = reply.send(outcome);
                     }
                     Some(SimCommand::UnregisterGameplay { player, reply }) => {
                         // Earlier commands already own shard inputs. Resolve that
@@ -2112,6 +2131,14 @@ fn resident_chunk_packets(shard: &SimShard, positions: &[ChunkPos]) -> Vec<Strea
         .collect()
 }
 
+/// Residency wakeup is additional physics work, never a reason to lose an
+/// already acquired chunk ticket. The owner resumes discovery under pressure.
+fn wake_loaded_water(shard: &mut SimShard, position: ChunkPos) {
+    if let Err(error) = shard.wake_water_chunk(position) {
+        tracing::warn!(%error, x = position.x(), z = position.z(), "resident water discovery refused");
+    }
+}
+
 /// Cold terrain remains outside the shard until a completed raw baseline exists.
 async fn load_prepared_chunks(
     shard: &mut SimShard,
@@ -2134,7 +2161,8 @@ async fn load_prepared_chunks(
         if acquired.contains(&pos) {
             continue;
         }
-        let result = if shard.loaded_chunks().get(pos).is_some() {
+        let was_loaded = shard.loaded_chunks().get(pos).is_some();
+        let result = if was_loaded {
             generator
                 .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
                 .await
@@ -2147,6 +2175,9 @@ async fn load_prepared_chunks(
         };
         match result {
             Ok(()) => {
+                if !was_loaded {
+                    wake_loaded_water(shard, pos);
+                }
                 acquired.insert(pos);
                 ordered.push(pos);
             }
@@ -2195,12 +2226,16 @@ async fn load_chunks(
         if acquired.contains(&pos) {
             continue;
         }
+        let was_loaded = shard.loaded_chunks().is_loaded(pos);
         if let Err(err) = generator
             .acquire(shard.loaded_chunks_mut(), store, pos, ticket)
             .await
         {
             tracing::warn!(%err, x = pos.x(), z = pos.z(), "failed to acquire streamed chunk");
             continue;
+        }
+        if !was_loaded {
+            wake_loaded_water(shard, pos);
         }
         acquired.insert(pos);
         // `acquire` just made the chunk resident, so the lookup cannot miss; the
@@ -2411,7 +2446,12 @@ fn run_tick(
             }
         }
     }
+    // A forced Session leave can already be queued. Capture before it removes
+    // the actor, then use genuine same-boundary outputs and final timer state.
+    snap.departure_vitals.capture(shard);
     let outputs = shard.run_tick();
+    snap.departure_vitals.observe_outputs(&outputs);
+    snap.departure_vitals.capture(shard);
     // Routing an output may fan out to many viewers; any whose connection has
     // closed — or that overflowed a *mandatory* packet (the slow-client policy) —
     // are returned so we can schedule a clean despawn for each. Each
@@ -2672,7 +2712,16 @@ fn run_tick(
         )
         .map_err(|e| ServerError::invalid_state(e.to_string()))?;
     }
-    for player in closed {
+    for player in closed.into_iter().collect::<BTreeSet<_>>() {
+        if let Some(queued) = router.player_outbound_queue_len(player) {
+            tracing::warn!(
+                %player,
+                tick = tick.get(),
+                session_outbound_queue_len = queued,
+                session_outbound_capacity = router.outbound_capacity(),
+                "mandatory outbound delivery failed; disconnecting session"
+            );
+        }
         if let Err(error) = router.disconnect_player_owned(player) {
             match error.error() {
                 SessionError::ShardInboxFull { .. } | SessionError::UnknownPlayer { .. } => {
@@ -2885,6 +2934,7 @@ mod tests {
     // close, mirroring the production `player_roster`.
     #![allow(clippy::similar_names)]
 
+    mod departure_tests;
     mod held_drop_tests;
 
     use std::collections::BTreeMap;

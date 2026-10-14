@@ -61,6 +61,14 @@ pub(crate) struct LocalDrag {
     pub(crate) cursor: ItemStack,
 }
 
+/// One validated next mining action awaiting the prior exact wear receipt.
+/// No inventory snapshot or elapsed work is owned until it actually starts.
+pub(crate) struct PendingMining {
+    pub(crate) position: BlockPos,
+    pub(crate) start_sequence: i32,
+    pub(crate) finish_sequence: Option<i32>,
+}
+
 /// A container window the player currently has open.
 pub(crate) struct OpenContainer {
     window_id: i32,
@@ -174,6 +182,7 @@ pub(crate) struct WindowState {
     pub(crate) consumption: crate::consumption::Consumption,
     pub(crate) sprinting: bool,
     pub(crate) mining: crate::mining_witness::MiningWitnesses,
+    pub(crate) pending_mining: Option<PendingMining>,
     pub(crate) combat_profile: Option<crate::combat::CombatProfile>,
     pub(crate) combat_revision: Option<(i32, u8, ferrumc_core::GameMode)>,
 }
@@ -195,6 +204,7 @@ impl WindowState {
             consumption: crate::consumption::Consumption::new(),
             sprinting: false,
             mining: crate::mining_witness::MiningWitnesses::new(),
+            pending_mining: None,
             combat_profile: None,
             combat_revision: None,
         }

@@ -306,7 +306,7 @@ pub(super) async fn handle_play_body_inner(
             )
             .await?;
         }
-        window_state.set_on_ground(ground);
+        update_mining_ground(ctx, player, window_state, ground).await?;
         if let Some(position) = movement.position {
             chunk_stream.observe(position);
             // Fire the observe-only PlayerMove plugin event only for a validated,
@@ -402,7 +402,7 @@ pub(super) async fn handle_play_body_inner(
                     )
                     .await?;
                 }
-                window_state.set_on_ground(p.flags() & 1 != 0);
+                update_mining_ground(ctx, player, window_state, p.flags() & 1 != 0).await?;
             }
             return Ok(());
         }
@@ -748,12 +748,20 @@ pub(super) async fn handle_play_body_inner(
                 position, sequence, ..
             } => {
                 if window_state.mining.has_unsettled() {
-                    // Cancel still-active work, but retain any committed wear
-                    // witness until its positive terminal owner receipt arrives.
-                    // A second old-FCIS witness could otherwise lose its wear.
+                    if window_state.pending_mining.is_some() {
+                        reject_block_edit(ctx, player, position, sequence, BlockStateId::AIR)
+                            .await?;
+                        return Ok(());
+                    }
+                    // Preserve one next action, then capture its tool only after
+                    // the prior receipt applies wear. No second old-FCIS witness.
+                    window_state.pending_mining = Some(crate::window::PendingMining {
+                        position,
+                        start_sequence: sequence,
+                        finish_sequence: None,
+                    });
                     window_state.mining.changed();
                     notify_mining_tool_changed(ctx, player, inventory, window_state).await?;
-                    reject_block_edit(ctx, player, position, sequence, BlockStateId::AIR).await?;
                     return Ok(());
                 }
                 // Creative commits never charge mining tool wear. Token zero
@@ -788,6 +796,12 @@ pub(super) async fn handle_play_body_inner(
             GameInput::MiningFinish {
                 position, sequence, ..
             } => {
+                if let Some(pending) = window_state.pending_mining.as_mut() {
+                    if pending.position == position && pending.finish_sequence.is_none() {
+                        pending.finish_sequence = Some(sequence);
+                        return Ok(());
+                    }
+                }
                 return send_sim_command_accepted(
                     ctx,
                     SimCommand::GameplayInput {
@@ -806,6 +820,15 @@ pub(super) async fn handle_play_body_inner(
             GameInput::MiningAbort {
                 position, sequence, ..
             } => {
+                if window_state
+                    .pending_mining
+                    .as_ref()
+                    .is_some_and(|pending| pending.position == position)
+                {
+                    if let Some(pending) = window_state.pending_mining.take() {
+                        reject_pending_mining(ctx, player, pending).await?;
+                    }
+                }
                 return send_sim_command_accepted(
                     ctx,
                     SimCommand::GameplayInput {
@@ -1366,7 +1389,9 @@ pub(super) async fn handle_gameplay_effect(
             stack,
         } => {
             tracing::trace!(wire_id = wire_id.get(), "ground item pickup offered");
+            let offered_count = stack.count();
             let (remainder, held_changed) = deposit_ground_pickup(inventory, windows, stack)?;
+            let changed = remainder.count() < offered_count;
             let (reply, applied) = oneshot::channel();
             ctx.commands
                 .send(SimCommand::GroundPickupResult {
@@ -1378,6 +1403,11 @@ pub(super) async fn handle_gameplay_effect(
             applied
                 .await
                 .map_err(|_| anyhow::anyhow!("pickup response admission was lost"))??;
+            // A full or pinned inventory still owes the owner its complete
+            // remainder receipt, but creates no client inventory change.
+            if !changed {
+                return Ok(());
+            }
             if held_changed {
                 notify_mining_tool_changed(ctx, player, inventory, windows).await?;
             }
@@ -1482,6 +1512,120 @@ pub(super) async fn advance_consumption(
         windows.consumption.pending = None;
         return Err(error);
     }
+    Ok(())
+}
+
+/// Starts the one retained next action after genuine terminal tool wear settles.
+pub(super) async fn resume_pending_mining(
+    ctx: &ConnContext,
+    player: PlayerId,
+    writer: &mut PlayWriter,
+    inventory: &PlayerInventory,
+    windows: &mut WindowState,
+    debug: &mut SessionDebug,
+    compression: &CompressionState,
+) -> anyhow::Result<()> {
+    if windows.mining.has_unsettled() || windows.consumption.pending.is_some() {
+        return Ok(());
+    }
+    let Some(pending) = windows.pending_mining.take() else {
+        return Ok(());
+    };
+    if windows.has_open() {
+        return reject_pending_mining(ctx, player, pending).await;
+    }
+    let token = if inventory.game_mode() == GameMode::Creative {
+        0
+    } else {
+        windows.mining.start(inventory)?
+    };
+    let tool = MiningTool::new(
+        inventory.held().item().map(ferrumc_items::ItemId::id),
+        windows.on_ground(),
+        false,
+    )
+    .ok_or_else(|| anyhow::anyhow!("invalid authoritative held item"))?
+    .with_token(token);
+    let admitted = handle_block_break(
+        ctx,
+        player,
+        writer,
+        pending.position,
+        pending.start_sequence,
+        GameInput::MiningStart {
+            player,
+            position: pending.position,
+            sequence: pending.start_sequence,
+            tool,
+        },
+        debug,
+        compression,
+    )
+    .await?;
+    if admitted {
+        if let Some(sequence) = pending.finish_sequence {
+            send_sim_command_accepted(
+                ctx,
+                SimCommand::GameplayInput {
+                    player,
+                    input: GameInput::MiningFinish {
+                        player,
+                        position: pending.position,
+                        sequence,
+                        tool,
+                    },
+                    acceptance: None,
+                },
+            )
+            .await?;
+        }
+    } else {
+        windows.mining.release(token);
+        if let Some(sequence) = pending.finish_sequence {
+            reject_block_edit(ctx, player, pending.position, sequence, BlockStateId::AIR).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn reject_pending_mining(
+    ctx: &ConnContext,
+    player: PlayerId,
+    pending: crate::window::PendingMining,
+) -> anyhow::Result<()> {
+    reject_block_edit(
+        ctx,
+        player,
+        pending.position,
+        pending.start_sequence,
+        BlockStateId::AIR,
+    )
+    .await?;
+    if let Some(sequence) = pending.finish_sequence {
+        reject_block_edit(ctx, player, pending.position, sequence, BlockStateId::AIR).await?;
+    }
+    Ok(())
+}
+
+/// Ground-flag refresh retains the selected-stack witness and elapsed tick work.
+async fn update_mining_ground(
+    ctx: &ConnContext,
+    player: PlayerId,
+    windows: &mut WindowState,
+    on_ground: bool,
+) -> anyhow::Result<()> {
+    if windows.on_ground() != on_ground {
+        send_sim_command_accepted(
+            ctx,
+            SimCommand::GameplayInput {
+                player,
+                input: GameInput::MiningEnvironmentChanged { player, on_ground },
+                acceptance: None,
+            },
+        )
+        .await?;
+    }
+    windows.set_on_ground(on_ground);
     Ok(())
 }
 
@@ -3893,8 +4037,12 @@ mod tests {
             .join_player(player, "PumpProbe", Vec3::new(8.0, 64.0, 8.0))
             .expect("join");
         let output = ClientboundPlayPacket::GameEvent(GameEvent::new(1, 0.0));
-        for _ in 0..DEFAULT_OUTBOUND_CAPACITY {
-            router.send_play_packet_to(player, output.clone());
+        // Mandatory control traffic can fill all slots, including the tail
+        // now reserved from droppable producers. Exercise the maximum fence.
+        for _ in router.player_outbound_queue_len(player).unwrap()..DEFAULT_OUTBOUND_CAPACITY {
+            router
+                .send_gameplay_packet_to(player, output.clone())
+                .expect("fill actual complete FIFO");
         }
         let mut decoder = ferrumc_net::InboundDecoder::new(ctx.limits);
         decoder
@@ -3930,7 +4078,9 @@ mod tests {
             assert!(ingress.pop_outbound().is_some(), "prefix turn {turn}");
             // Replace each consumed message with a new one in the live channel.
             // A drain-until-empty strategy could never reach the buffered echo.
-            router.send_play_packet_to(player, output.clone());
+            router
+                .send_gameplay_packet_to(player, output.clone())
+                .expect("continuously replenish the producer");
             Box::pin(pump_probe(
                 &ctx,
                 &mut decoder,
@@ -5348,7 +5498,7 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::too_many_lines)] // one ordered trust-boundary transaction and its spies
     async fn movement_handler_rejects_before_every_observable_side_effect() {
-        // At most two sequential positive controls are emitted. Eight slots keep
+        // Valid motion emits routing, fall and mining-environment controls. Eight slots keep
         // diagnostic headroom while the active receiver makes queue saturation
         // impossible, and the capacity remains explicitly bounded.
         const COMMAND_CAPACITY: usize = 8;
@@ -5364,6 +5514,14 @@ mod tests {
                 | SimCommand::TeleportPlayer { acceptance, .. }
                 | SimCommand::GameplayInput {
                     input: ferrumc_sim::GameInput::FallMovement { .. },
+                    acceptance,
+                    ..
+                }
+                | SimCommand::GameplayInput {
+                    input:
+                        ferrumc_sim::GameInput::MiningEnvironmentChanged {
+                            on_ground: false, ..
+                        },
                     acceptance,
                     ..
                 }) = command
@@ -5442,8 +5600,8 @@ mod tests {
         assert_eq!((yaw, pitch), (15.0, -10.0));
         assert_eq!(writer.total_queued(), 0);
 
-        // The probe is not vacuous: a valid admitted crossing reaches exactly one
-        // driver event and one plugin notification, and updates every local mirror.
+        // A valid crossing reaches routing and both owner contexts, fires one
+        // plugin notification, and updates every local mirror.
         let accepted = Vec3::new(9.5, 64.0, 8.5);
         let packet =
             SetPlayerPositionAndRotation::new(accepted.x, accepted.y, accepted.z, 45.0, -25.0, 0);
@@ -5468,7 +5626,7 @@ mod tests {
         )
         .await
         .expect("admit valid movement");
-        assert_eq!(command_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(command_calls.load(Ordering::Relaxed), 3);
         assert_eq!(move_calls.load(Ordering::Relaxed), 1);
         assert_eq!(chunk_stream.last_position(), Some(accepted));
         assert_eq!(chunk_stream.pending_position_for_test(), Some(accepted));
@@ -5500,7 +5658,7 @@ mod tests {
         )
         .await
         .expect("reject later hostile movement");
-        assert_eq!(command_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(command_calls.load(Ordering::Relaxed), 3);
         assert_eq!(move_calls.load(Ordering::Relaxed), 1);
         assert_eq!(chunk_stream.last_position(), Some(accepted));
         assert_eq!(chunk_stream.pending_position_for_test(), Some(accepted));
@@ -5525,7 +5683,7 @@ mod tests {
         }
         assert_eq!(
             command_calls.load(Ordering::Relaxed),
-            2,
+            3,
             "unsafe plugin teleports never reach the driver"
         );
 
@@ -5545,7 +5703,7 @@ mod tests {
         .expect("route a safe plugin teleport");
         assert_eq!(
             command_calls.load(Ordering::Relaxed),
-            3,
+            4,
             "the plugin teleport gate is not vacuously dropping every intent"
         );
 
@@ -5583,7 +5741,7 @@ mod tests {
         );
         assert_eq!(
             command_calls.load(Ordering::Relaxed),
-            3,
+            4,
             "a dropped centre cannot proceed into chunk ticket work"
         );
 
@@ -6327,7 +6485,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsettled_mining_start_cancels_live_work_and_routes_authoritative_rejection() {
+    async fn unsettled_mining_retains_one_next_start_and_finish_without_second_witness() {
         for selection_changed in [false, true] {
             let (commands, mut inbox) = mpsc::channel(1);
             let ctx = handler_context(commands, PluginHost::in_memory()).await;
@@ -6354,20 +6512,6 @@ mod tests {
                     panic!("cancel, never a second owner start")
                 };
                 reply.send(Ok(())).expect("cancel admitted");
-                let Some(SimCommand::RejectBlockEdit {
-                    position,
-                    sequence,
-                    requested_state,
-                    acceptance: Some(reply),
-                    ..
-                }) = inbox.recv().await
-                else {
-                    panic!("authoritative rejection and ACK")
-                };
-                assert_eq!(position, BlockPos::new(9, 63, 8));
-                assert_eq!(sequence, 17);
-                assert_eq!(requested_state, ferrumc_sim::BlockStateId::AIR);
-                reply.send(Ok(())).expect("reject admitted");
                 assert!(inbox.try_recv().is_err());
             };
             let handler = handle_container_packet(
@@ -6392,9 +6536,232 @@ mod tests {
             );
             assert!(windows.mining.has_unsettled());
             assert_eq!(windows.mining.active(), 0);
+            let pending = windows.pending_mining.as_ref().expect("one retained start");
+            assert_eq!(pending.position, BlockPos::new(9, 63, 8));
+            assert_eq!(pending.start_sequence, 17);
+            assert_eq!(pending.finish_sequence, None);
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::PlayerAction(
+                    ferrumc_proto::generated::play::PlayerAction::new(
+                        2,
+                        ferrumc_proto::types::BlockPosition::new(9, 63, 8),
+                        1,
+                        18,
+                    ),
+                ),
+            )
+            .await
+            .expect("finish retained behind earlier receipt");
+            assert_eq!(
+                windows.pending_mining.as_ref().unwrap().finish_sequence,
+                Some(18)
+            );
+            assert!(inbox.try_recv().is_err());
             assert!(windows.mining.release(token).is_some());
             assert!(!windows.mining.has_unsettled());
         }
+    }
+
+    #[tokio::test]
+    async fn retained_mining_capacity_refuses_third_start_and_abort_acks_both_retained_actions() {
+        use ferrumc_sim::GameInput;
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let mut inventory = PlayerInventory::from_persisted(
+            GameMode::Survival,
+            0,
+            std::array::from_fn(|_| ItemStack::empty()),
+            ItemStack::empty(),
+        );
+        let mut windows = WindowState::new();
+        let old = windows.mining.start(&inventory).unwrap();
+        let target = BlockPos::new(9, 64, 8);
+        windows.pending_mining = Some(crate::window::PendingMining {
+            position: target,
+            start_sequence: 17,
+            finish_sequence: Some(18),
+        });
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let owner = async {
+            let Some(SimCommand::RejectBlockEdit {
+                sequence: 19,
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("full next-action slot must heal third start")
+            };
+            reply.send(Ok(())).unwrap();
+        };
+        let (result, ()) = tokio::join!(
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::PlayerAction(
+                    ferrumc_proto::generated::play::PlayerAction::new(
+                        0,
+                        ferrumc_proto::types::BlockPosition::new(10, 64, 8),
+                        1,
+                        19,
+                    ),
+                ),
+            ),
+            owner,
+        );
+        result.unwrap();
+        assert_eq!(windows.pending_mining.as_ref().unwrap().position, target);
+        assert_eq!(windows.mining.active(), old);
+        let owner = async {
+            for expected in [17, 18] {
+                let Some(SimCommand::RejectBlockEdit {
+                    position,
+                    sequence,
+                    acceptance: Some(reply),
+                    ..
+                }) = inbox.recv().await
+                else {
+                    panic!("retained prediction needs healing")
+                };
+                assert_eq!((position, sequence), (target, expected));
+                reply.send(Ok(())).unwrap();
+            }
+            let Some(SimCommand::GameplayInput {
+                input:
+                    GameInput::MiningAbort {
+                        position,
+                        sequence: 20,
+                        ..
+                    },
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("actual abort must still reach owner")
+            };
+            assert_eq!(position, target);
+            reply.send(Ok(())).unwrap();
+        };
+        let (result, ()) = tokio::join!(
+            handle_container_packet(
+                &ctx,
+                &mut inventory,
+                &mut windows,
+                &mut writer,
+                ServerboundPlayPacket::PlayerAction(
+                    ferrumc_proto::generated::play::PlayerAction::new(
+                        1,
+                        ferrumc_proto::types::BlockPosition::new(9, 64, 8),
+                        1,
+                        20,
+                    ),
+                ),
+            ),
+            owner,
+        );
+        result.unwrap();
+        assert!(windows.pending_mining.is_none());
+        assert!(windows.mining.has_unsettled());
+        assert!(windows.mining.release(old).is_some());
+    }
+
+    #[tokio::test]
+    async fn retained_mining_start_captures_post_wear_stack_and_routes_early_finish_in_order() {
+        use ferrumc_sim::GameInput;
+        let (commands, mut inbox) = mpsc::channel(1);
+        let ctx = handler_context(commands, PluginHost::in_memory()).await;
+        let player = PlayerId::offline("ContainerProbe");
+        let mut inventory = PlayerInventory::from_persisted(
+            GameMode::Survival,
+            0,
+            std::array::from_fn(|_| ItemStack::empty()),
+            ItemStack::empty(),
+        );
+        inventory.set_creative_slot(
+            36,
+            ItemStack::try_new(
+                ItemId::from_name("shears").unwrap(),
+                1,
+                ComponentPatch::empty(),
+            )
+            .unwrap(),
+        );
+        let mut windows = WindowState::new();
+        let old = windows.mining.start(&inventory).unwrap();
+        windows.mining.changed();
+        windows.pending_mining = Some(crate::window::PendingMining {
+            position: BlockPos::new(9, 64, 8),
+            start_sequence: 17,
+            finish_sequence: Some(18),
+        });
+        let settled = windows.mining.release(old).unwrap();
+        assert!(inventory.damage_witness(&settled, 1).unwrap());
+        let fresh_bytes = ferrumc_items::encode_persisted_stack(inventory.held()).unwrap();
+        let owner = async {
+            let Some(SimCommand::GameplayInput {
+                input:
+                    GameInput::MiningStart {
+                        sequence: 17, tool, ..
+                    },
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("fresh start first")
+            };
+            assert_ne!(tool.token(), old);
+            assert_eq!(tool.held_item(), inventory.held().item().map(ItemId::id));
+            reply.send(Ok(())).unwrap();
+            let Some(SimCommand::GameplayInput {
+                input:
+                    GameInput::MiningFinish {
+                        sequence: 18,
+                        tool: finish,
+                        ..
+                    },
+                acceptance: Some(reply),
+                ..
+            }) = inbox.recv().await
+            else {
+                panic!("early finish follows admitted start")
+            };
+            assert_eq!(finish.token(), tool.token());
+            reply.send(Ok(())).unwrap();
+            assert!(inbox.try_recv().is_err());
+        };
+        let mut writer = PlayWriter::with_defaults(ctx.limits);
+        let compression = CompressionState::disabled();
+        let mut debug = SessionDebug::new("retained-mining");
+        let (result, ()) = tokio::join!(
+            super::resume_pending_mining(
+                &ctx,
+                player,
+                &mut writer,
+                &inventory,
+                &mut windows,
+                &mut debug,
+                &compression,
+            ),
+            owner,
+        );
+        result.unwrap();
+        assert!(windows.pending_mining.is_none());
+        let new = windows.mining.active();
+        let second = windows.mining.release(new).unwrap();
+        assert_eq!(second.bytes, fresh_bytes);
+        assert!(inventory.damage_witness(&second, 1).unwrap());
+        assert_eq!(
+            ferrumc_items::durability(inventory.held())
+                .unwrap()
+                .unwrap()
+                .damage(),
+            2
+        );
     }
 
     #[tokio::test]

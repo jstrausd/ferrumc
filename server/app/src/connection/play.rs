@@ -34,7 +34,7 @@ use crate::window::WindowState;
 
 use super::chunk_stream::{apply_chunk_stream, mirror_server_teleport, ChunkStream};
 use super::context::ConnContext;
-use super::handlers::{handle_gameplay_effect, handle_play_body};
+use super::handlers::{handle_gameplay_effect, handle_play_body, resume_pending_mining};
 use super::ingress::{is_exact_keep_alive, IngressFence};
 use super::join::send_join_kit;
 use super::outbound::{
@@ -471,6 +471,22 @@ pub(super) async fn enter_play(
         // disconnect takes.
         if let Some(err) = deferred_break.take() {
             break Err(err);
+        }
+        if let Err(error) = guard_play_work(
+            liveness.next_deadline(),
+            resume_pending_mining(
+                ctx,
+                player,
+                &mut writer,
+                &inventory,
+                &mut window_state,
+                &mut debug,
+                &compression,
+            ),
+        )
+        .await
+        {
+            break Err(error);
         }
         let Some(deadline) = liveness.next_deadline() else {
             break Err(anyhow::anyhow!(

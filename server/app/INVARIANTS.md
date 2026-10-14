@@ -413,3 +413,26 @@
   stack changes. Unrelated deposits and whole pickup refusals retain the active
   token and terminal wear beforeimage; changed selection cancels work without
   retiring an unsettled committed receipt. This does not relax receipt ordering.
+
+- One validated next mining start and optional matching finish may wait behind
+  the prior exact tool-wear receipt. No second FCIS witness or elapsed work is
+  captured before that receipt settles. Replay captures the actual post-wear
+  selected stack and rechecks ordinary plugin/owner admission; overflow and
+  abort heal their predictions. Pinned food or an open container still guards it.
+- Driver departure observations reserve at most1024 connection lifetime slots.
+  Only actual owner snapshots and complete pre-removal `PlayerDepartureVitals`
+  refresh them, including silent exhaustion and all timers. Current owner state
+  wins on read. Unregister/drain retains the observation for the current inventory
+  save; acknowledged Leave or exact absent-player acknowledgment retires it.
+  Fresh registration resets it to unknown, never default or old-incarnation health.
+- Ground/Mob views coalesce transforms until reconcile. A viewer's delivered
+  pose advances only after real FIFO admission; a refused final pose retries
+  without another owner Move. Identical encoded metadata makes no new mandatory
+  send. At most16 new entities per view/viewer/boundary enter as atomic
+  Spawn→Metadata pairs, preserving the global FIFO mandatory reserve. Unseen
+  pairs defer; known Metadata/Remove/Pickup retain their mandatory refusal policy.
+
+- A ground pickup always returns its complete remainder and waits for actual
+  owner admission, even when a full or pinned inventory accepts zero items.
+  Zero transfer does not publish unchanged container contents or equipment;
+  positive and partial transfers retain mandatory synchronization.

@@ -25,6 +25,7 @@ mod config;
 mod connection;
 mod consumption;
 mod death_inventory;
+mod departure_vitals;
 mod driver;
 mod furnace_window;
 mod gameplay;
