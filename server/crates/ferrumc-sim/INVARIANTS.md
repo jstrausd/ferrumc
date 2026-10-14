@@ -810,3 +810,27 @@
   with unchanged player slots/cursor and no partial slot or dirty mutation.
   Absent/dead/spectator actors, reach/residency and native ownership refuse.
   App must admit its complete hidden player/table save budget before calling.
+
+- Legacy PlayerLeave publishes the complete actual nine-field vitals before
+  actor removal, including silent same-boundary exhaustion changes. This is a
+  save observation, never another mutable player owner or a client health packet.
+- Mining environment refresh preserves exact held-tool token and elapsed work.
+  With water enabled, progress reads current resident standing-eye fluid states;
+  it never force-loads. Zero hardness remains instant under air/water penalties.
+  Plant chance uses the existing owner RNG and commits it only with the full
+  admitted block/drop postimage. Paired plants validate and preflight both cells.
+- Explicit water enable seeds already-resident columns through a resumable owner
+  sweep. App marks each newly resident acquisition with `wake_water_chunk`, also
+  waking resident cardinal borders. Discovery changes no tickets and never loads
+  columns. Snapshot clones retain no live discovery/tick authority.
+- Water discovery keeps at most4096 scalar column cursors and one sweep/resweep
+  state. Ordered resident-map range lookups admit at most4sweep keys/tick. Wake
+  overflow retains work rather than failing a successful acquisition. Each tick
+  probes at most8192cells/empty-section skips, with at most5additional reads per
+  source; round-robin slices are at most256cells. Queue pressure preserves the
+  exact unadmitted cell and leaves up to42credits for complete flow admission.
+  Enclosed sources stay asleep; flowing cells re-evaluate their resident basis.
+- Eye-water uses original f32 amount/9 widened to double, fullheight1 only with
+  resident water above, and strict surface>eye. Pose/boat policy, native fluid
+  persistence, lava, entity travel/forces, Java events and exact imported due
+  times remain separate ports.

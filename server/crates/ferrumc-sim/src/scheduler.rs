@@ -1764,8 +1764,15 @@ mod tests {
                     append_player(&mut bytes, *player);
                     bytes.extend_from_slice(&tool_token.to_be_bytes());
                 }
-                GameOutput::PlayerVitalsChanged { player, snapshot } => {
-                    bytes.push(12);
+                GameOutput::PlayerVitalsChanged { player, snapshot }
+                | GameOutput::PlayerDepartureVitals { player, snapshot } => {
+                    bytes.push(
+                        if matches!(output, GameOutput::PlayerDepartureVitals { .. }) {
+                            23
+                        } else {
+                            12
+                        },
+                    );
                     append_player(&mut bytes, *player);
                     for value in [
                         snapshot.health(),

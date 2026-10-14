@@ -45,6 +45,18 @@ impl MiningTool {
         self.held_item
     }
 
+    /// Refreshes environment facts without changing the exact held-stack witness.
+    #[must_use]
+    pub const fn with_environment(mut self, on_ground: bool, submerged: bool) -> Self {
+        self.on_ground = on_ground;
+        self.submerged = submerged;
+        self
+    }
+
+    pub(crate) const fn on_ground(self) -> bool {
+        self.on_ground
+    }
+
     /// Associates an immutable caller witness without transferring inventory authority.
     #[must_use]
     pub const fn with_token(mut self, token: u64) -> Self {
@@ -108,32 +120,27 @@ impl MiningTool {
             return None;
         }
         let (family, tier, speed) = self.family_and_tier();
-        let correct =
-            harvest == 0 || family == 1 && tier.is_some_and(|tier| harvest & (1 << tier) != 0);
-        let speed = if family & families != 0 {
-            speed
-        } else if name == "cobweb" && family == 16
-            || family == 32 && (name == "cobweb" || name.ends_with("_leaves"))
-        {
-            15.0
+        let correct = if name == "cobweb" {
+            matches!(family, 16 | 32)
         } else {
-            1.0
+            harvest == 0 || family == 1 && tier.is_some_and(|tier| harvest & (1 << tier) != 0)
         };
-        let mut progress = if hardness == 0.0 {
-            1.0
-        } else {
-            speed / hardness / if correct { 30.0 } else { 100.0 }
-        };
+        let mut speed = mining_speed(name, family, families, speed);
         if self.submerged {
-            progress /= 5.0;
+            speed /= 5.0;
         }
         if !self.on_ground {
-            progress /= 5.0;
+            speed /= 5.0;
         }
+        // Original positive-speed / zero-hardness progress is infinite. Applying
+        // an artificial 1.0 cap before environment penalties delayed grass mining.
+        let progress = speed / hardness / if correct { 30.0 } else { 100.0 };
         Some(MiningProfile {
             progress,
             correct,
-            tool_damage: if hardness == 0.0 || family == 0 {
+            tool_damage: if family == 32 && !matches!(name, "fire" | "soul_fire") {
+                1
+            } else if hardness == 0.0 || family == 0 {
                 0
             } else if family == 16 {
                 2
@@ -141,6 +148,38 @@ impl MiningTool {
                 1
             },
         })
+    }
+}
+
+fn mining_speed(name: &str, family: u8, families: u8, material_speed: f32) -> f32 {
+    // Ordered special rules come from the complete 1.21.8 Tool components,
+    // sword tags and ShearsItem, rather than material suffixes alone.
+    match family {
+        16 if name == "cobweb" => 15.0,
+        16 if matches!(name, "bamboo" | "bamboo_sapling") => f32::MAX,
+        16 if name.ends_with("_leaves")
+            || matches!(
+                name,
+                "vine"
+                    | "glow_lichen"
+                    | "pumpkin"
+                    | "carved_pumpkin"
+                    | "jack_o_lantern"
+                    | "melon"
+                    | "cocoa"
+                    | "big_dripleaf"
+                    | "big_dripleaf_stem"
+                    | "chorus_plant"
+                    | "chorus_flower"
+            ) =>
+        {
+            1.5
+        }
+        32 if name == "cobweb" || name.ends_with("_leaves") => 15.0,
+        32 if name.ends_with("_wool") => 5.0,
+        32 if matches!(name, "vine" | "glow_lichen") => 2.0,
+        _ if family & families != 0 => material_speed,
+        _ => 1.0,
     }
 }
 
@@ -152,8 +191,59 @@ pub(crate) struct MiningProfile {
 }
 
 pub(crate) fn ordinary_drop(state: crate::BlockStateId, random: &mut u64) -> Option<ItemStack> {
+    mined_drop(state, MiningTool::empty(), false, random)
+}
+
+/// Plans one ordinary unenchanted drop, using the intact pair before either edit.
+#[allow(clippy::too_many_lines)] // One bounded original loot dispatch keeps each alternative explicit.
+pub(crate) fn mined_drop(
+    state: crate::BlockStateId,
+    tool: MiningTool,
+    intact_double_plant: bool,
+    random: &mut u64,
+) -> Option<ItemStack> {
     let name = block_state::state_id_to_block_name(state.as_u32())?;
+    let shears = tool.family_and_tier().0 == 32;
     let (drop, count) = match name {
+        "short_grass" | "fern" => {
+            if shears {
+                (name, 1)
+            } else if sample(random, 0, 7) == 0 {
+                ("wheat_seeds", 1)
+            } else {
+                return None;
+            }
+        }
+        "tall_grass" | "large_fern" => {
+            if !intact_double_plant {
+                return None;
+            }
+            if shears {
+                (
+                    if name == "tall_grass" {
+                        "short_grass"
+                    } else {
+                        "fern"
+                    },
+                    2,
+                )
+            } else if sample(random, 0, 7) == 0 {
+                ("wheat_seeds", 1)
+            } else {
+                return None;
+            }
+        }
+        "dead_bush" if shears => (name, 1),
+        "dead_bush" => ("stick", sample(random, 0, 2)),
+        "cobweb" => (if shears { "cobweb" } else { "string" }, 1),
+        "vine" | "glow_lichen" => {
+            if shears {
+                (name, 1)
+            } else {
+                return None;
+            }
+        }
+        _ if name.ends_with("_leaves") && shears => (name, 1),
         "stone" => ("cobblestone", 1),
         "deepslate" => ("cobbled_deepslate", 1),
         "grass_block" | "podzol" | "mycelium" | "dirt_path" | "farmland" => ("dirt", 1),
@@ -187,14 +277,7 @@ pub(crate) fn ordinary_drop(state: crate::BlockStateId, random: &mut u64) -> Opt
                 || property_value(metadata, state.as_u32(), "half") == Some("upper")
                 || matches!(
                     name,
-                    "cobweb"
-                        | "snow"
-                        | "fire"
-                        | "soul_fire"
-                        | "wheat"
-                        | "carrots"
-                        | "potatoes"
-                        | "beetroots"
+                    "snow" | "fire" | "soul_fire" | "wheat" | "carrots" | "potatoes" | "beetroots"
                 )
             {
                 return None;
@@ -202,6 +285,9 @@ pub(crate) fn ordinary_drop(state: crate::BlockStateId, random: &mut u64) -> Opt
             (name, 1)
         }
     };
+    if count == 0 {
+        return None;
+    }
     ItemStack::try_new(ItemId::from_name(drop)?, count, ComponentPatch::empty()).ok()
 }
 
@@ -299,7 +385,7 @@ mod tests {
         let airborne = MiningTool::new(tool("wooden_pickaxe").held_item(), false, true).unwrap();
         assert_eq!(
             airborne.profile(state("stone")).unwrap().progress,
-            profile.progress / 5.0 / 5.0
+            2.0_f32 / 5.0 / 5.0 / 1.5 / 30.0
         );
         assert!(MiningTool::empty().profile(state("bedrock")).is_none());
     }
@@ -320,5 +406,130 @@ mod tests {
             assert!((2..=5).contains(&drop.count()));
             assert!((3..=7).contains(&ore_experience(state("diamond_ore"), &mut random)));
         }
+    }
+
+    #[test]
+    fn mining_original_special_tools_and_zero_hardness_rules() {
+        let shears = tool("shears");
+        assert_eq!(
+            shears.profile(state("white_wool")).unwrap().progress,
+            5.0 / 0.8 / 30.0
+        );
+        assert_eq!(
+            shears.profile(state("vine")).unwrap().progress,
+            2.0 / 0.2 / 30.0
+        );
+        assert_eq!(
+            tool("wooden_sword")
+                .profile(state("oak_leaves"))
+                .unwrap()
+                .progress,
+            1.5 / 0.2 / 30.0
+        );
+        assert!(
+            tool("wooden_sword")
+                .profile(state("bamboo"))
+                .unwrap()
+                .progress
+                >= 1.0
+        );
+        assert!(
+            !MiningTool::empty()
+                .profile(state("cobweb"))
+                .unwrap()
+                .correct
+        );
+        assert!(
+            !tool("diamond_pickaxe")
+                .profile(state("cobweb"))
+                .unwrap()
+                .correct
+        );
+        for name in ["wooden_sword", "shears"] {
+            let profile = tool(name).profile(state("cobweb")).unwrap();
+            assert!(profile.correct);
+            assert_eq!(profile.progress, 15.0 / 4.0 / 30.0);
+        }
+        for grounded in [false, true] {
+            for submerged in [false, true] {
+                let bare = MiningTool::new(None, grounded, submerged)
+                    .unwrap()
+                    .profile(state("short_grass"))
+                    .unwrap();
+                assert!(bare.progress.is_infinite());
+                assert_eq!(bare.tool_damage, 0);
+                let sheared = shears
+                    .with_environment(grounded, submerged)
+                    .profile(state("short_grass"))
+                    .unwrap();
+                assert!(sheared.progress.is_infinite());
+                assert_eq!(sheared.tool_damage, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn mining_original_tool_conditioned_plant_and_web_loot() {
+        let mut random = 1;
+        assert!(mined_drop(
+            state("short_grass"),
+            MiningTool::empty(),
+            false,
+            &mut random
+        )
+        .is_none());
+        random = 8;
+        assert_eq!(
+            mined_drop(state("fern"), MiningTool::empty(), false, &mut random)
+                .unwrap()
+                .item(),
+            ItemId::from_name("wheat_seeds")
+        );
+        let unchanged = random;
+        for (name, expected, count, paired) in [
+            ("short_grass", "short_grass", 1, false),
+            ("fern", "fern", 1, false),
+            ("tall_grass", "short_grass", 2, true),
+            ("large_fern", "fern", 2, true),
+            ("oak_leaves", "oak_leaves", 1, false),
+            ("vine", "vine", 1, false),
+            ("glow_lichen", "glow_lichen", 1, false),
+            ("dead_bush", "dead_bush", 1, false),
+            ("cobweb", "cobweb", 1, false),
+        ] {
+            let drop = mined_drop(state(name), tool("shears"), paired, &mut random).unwrap();
+            assert_eq!(drop.item(), ItemId::from_name(expected));
+            assert_eq!(drop.count(), count);
+            assert_eq!(
+                random, unchanged,
+                "shears take the first alternative without an RNG roll"
+            );
+        }
+        assert!(mined_drop(state("tall_grass"), tool("shears"), false, &mut random).is_none());
+        assert_eq!(random, unchanged);
+        assert_eq!(
+            mined_drop(state("cobweb"), tool("wooden_sword"), false, &mut random)
+                .unwrap()
+                .item(),
+            ItemId::from_name("string")
+        );
+        assert!(mined_drop(state("vine"), MiningTool::empty(), false, &mut random).is_none());
+        assert!(mined_drop(
+            state("glow_lichen"),
+            MiningTool::empty(),
+            false,
+            &mut random
+        )
+        .is_none());
+        let mut counts = [false; 3];
+        for _ in 0..64 {
+            let count = mined_drop(state("dead_bush"), MiningTool::empty(), false, &mut random)
+                .map_or(0, |s| {
+                    assert_eq!(s.item(), ItemId::from_name("stick"));
+                    s.count()
+                });
+            counts[usize::from(count)] = true;
+        }
+        assert_eq!(counts, [true; 3]);
     }
 }

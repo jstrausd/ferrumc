@@ -145,6 +145,12 @@ impl WaterTickQueue {
     pub fn is_empty(&self) -> bool {
         self.by_pos.is_empty()
     }
+    // Discovery leaves room for the complete next flow neighborhood; otherwise
+    // filling every credit with initial sources can prevent any source spreading.
+    pub(crate) fn discovery_room(&self, pos: BlockPos) -> bool {
+        self.by_pos.contains_key(&pos)
+            || self.by_pos.len() < self.cap - (self.cap / 2).min(MAX_WRITES * 7)
+    }
     /// Schedule exactly one cell; retain an earlier due time on duplicate admission.
     pub fn schedule_at(&mut self, due: u64, pos: BlockPos) -> Result<(), WaterError> {
         let old = self.by_pos.get(&pos).copied();
@@ -322,6 +328,66 @@ impl WaterRules {
     /// Recognize source/flowing/falling and waterlogged cells without guessing IDs.
     pub fn is_water(&self, state: BlockStateId) -> Result<bool, WaterError> {
         Ok(Self::facts(state)?.has(WATER))
+    }
+    /// Checks the eye against the original water surface in its enclosing cell.
+    /// `local_eye_y` is finite and in `0..1`. Water above makes the height one;
+    /// otherwise the original float amount/9 height is widened to double. Source,
+    /// flowing, falling and waterlogged states use their frozen actual amounts.
+    /// A missing above cell is not loaded. Boat/pose policy belongs to the caller.
+    pub fn eye_in_water(
+        &self,
+        state: BlockStateId,
+        above: Option<BlockStateId>,
+        local_eye_y: f64,
+    ) -> Result<bool, WaterError> {
+        if !local_eye_y.is_finite() || !(0.0..1.0).contains(&local_eye_y) {
+            return Err(WaterError::UnknownState);
+        }
+        let current = Self::facts(state)?;
+        if !current.has(WATER) {
+            return Ok(false);
+        }
+        let height = if above
+            .map(Self::facts)
+            .transpose()?
+            .is_some_and(|state| state.has(WATER))
+        {
+            1.0
+        } else {
+            f64::from(f32::from(current.liquid.amount) / 9.0)
+        };
+        Ok(height > local_eye_y)
+    }
+    /// Determines whether resident water needs an initial or arrival tick.
+    /// Flowing water always re-evaluates its upstream basis. Fully enclosed
+    /// sources stay asleep; a resident non-water passage wakes a source. This
+    /// admission hint performs no edits and never reads unavailable columns.
+    pub fn needs_initial_tick(
+        &self,
+        pos: BlockPos,
+        state: BlockStateId,
+        mut read: impl FnMut(BlockPos) -> Option<BlockStateId>,
+    ) -> Result<bool, WaterError> {
+        let current = Self::facts(state)?;
+        if !current.has(WATER) {
+            return Ok(false);
+        }
+        if !current.liquid.source {
+            return Ok(true);
+        }
+        for direction in [0, 2, 5, 3, 4] {
+            let Some(state) = read(offset(pos, direction)?) else {
+                continue;
+            };
+            let target = Self::facts(state)?;
+            if !target.has(WATER)
+                && target.has(HOLD_ANY)
+                && WaterRules::wall(current, target, direction)?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
     /// Resolves one ordinary water bucket target without mutating the block.
     /// Filling requires exact source water; pouring admits air, short grass,
@@ -911,5 +977,41 @@ mod tests {
             rules.plan_tick(p, true, |pos| ground(&cells, pos)),
             Err(WaterError::UnknownState)
         ));
+    }
+    #[test]
+    fn eye_surface_matches_original_float_height_and_strict_above_comparison() {
+        let rules = WaterRules::builtin().unwrap();
+        // Original float heights widened to double; equality is above the fluid.
+        let source_height = 0.888_888_895_511_627_2;
+        let shallow_height = 0.111_111_111_938_953_4;
+        for state in [
+            rules.levels[0],
+            rules.levels[8],
+            rules.levels[15],
+            named("oak_sign", &[("rotation", "3"), ("waterlogged", "true")]),
+        ] {
+            assert!(rules
+                .eye_in_water(state, None, source_height - f64::EPSILON)
+                .unwrap());
+            assert!(!rules.eye_in_water(state, None, source_height).unwrap());
+            assert!(rules
+                .eye_in_water(state, Some(rules.levels[1]), 0.999)
+                .unwrap());
+        }
+        assert!(rules
+            .eye_in_water(rules.levels[7], None, shallow_height - f64::EPSILON)
+            .unwrap());
+        assert!(!rules
+            .eye_in_water(rules.levels[7], None, shallow_height)
+            .unwrap());
+        assert!(!rules
+            .eye_in_water(BlockStateId::AIR, Some(rules.levels[0]), 0.0)
+            .unwrap());
+        for value in [f64::NAN, f64::INFINITY, -0.01, 1.0] {
+            assert_eq!(
+                rules.eye_in_water(rules.levels[0], None, value),
+                Err(WaterError::UnknownState)
+            );
+        }
     }
 }

@@ -197,10 +197,18 @@ pub enum GameInput {
     },
     /// Invalidates active mining after any exact held-slot or selection mutation.
     MiningToolChanged {
-        /// Actor whose tool or environment changed.
+        /// Actor whose held stack or selection changed.
         player: PlayerId,
         /// Authoritative current context.
         tool: crate::MiningTool,
+    },
+    /// Refreshes the accepted ground flag without cancelling accumulated mining.
+    /// Eye-water state is read from the simulation's current resident world.
+    MiningEnvironmentChanged {
+        /// Actor whose accepted movement supplied the new ground flag.
+        player: PlayerId,
+        /// Current accepted serverbound ground flag.
+        on_ground: bool,
     },
     /// A player placed a block at `position`.
     ///
@@ -478,6 +486,15 @@ pub enum GameOutput {
         /// Actor whose vitals changed.
         player: PlayerId,
         /// Complete owner state; packet consumers use its visible fields.
+        snapshot: crate::VitalsSnapshot,
+    },
+    /// Complete final owner state before an actual legacy actor is removed.
+    /// This save observation has no client health-packet interpretation: silent
+    /// exhaustion/timer changes must survive same-boundary departure too.
+    PlayerDepartureVitals {
+        /// The departing actual player.
+        player: PlayerId,
+        /// All nine health, hunger and timer fields at removal.
         snapshot: crate::VitalsSnapshot,
     },
     /// Single living-to-dead edge; App owns death-screen and inventory policy.

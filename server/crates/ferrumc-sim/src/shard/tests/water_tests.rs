@@ -336,3 +336,244 @@ async fn water_owner_bucket_static_waterlogging_and_full_queue_preserve_world() 
     );
     assert_eq!(state_id_to_block_name(wet.as_u32()), Some("oak_sign"));
 }
+
+#[tokio::test]
+async fn water_owner_initial_resident_source_flows_without_explicit_schedule() {
+    let mut s = shard();
+    water_floor(&mut s, 0, 15).await;
+    let source = BlockPos::new(8, 65, 8);
+    let _ = s.apply_block_edit(MutationCause::Test, source, water_state());
+    s.enable_water(4096, true).expect("water owner");
+    let outputs: Vec<_> = (0..200).flat_map(|_| s.run_tick()).collect();
+    assert_eq!(
+        state_id_to_block_name(s.authoritative_state(BlockPos::new(15, 65, 8)).as_u32()),
+        Some("water")
+    );
+    assert!(outputs.iter().any(|output| matches!(
+        output,
+        GameOutput::BlockChanged {
+            cause: MutationCause::Fluid,
+            ..
+        }
+    )));
+    assert!(s
+        .take_mutations()
+        .iter()
+        .any(|edit| matches!(edit.cause(), MutationCause::Fluid)));
+    assert!(s.loaded_chunks().has_persist_dirty());
+    assert_eq!(s.loaded_chunks().loaded_count(), 1, "no flow force-load");
+}
+
+#[tokio::test]
+async fn water_owner_arriving_column_wakes_previously_enclosed_border_source() {
+    let mut s = shard();
+    water_floor(&mut s, -16, -1).await;
+    let source = BlockPos::new(-1, 65, 8);
+    let _ = s.apply_block_edit(MutationCause::Test, source, water_state());
+    for wall in [
+        BlockPos::new(-2, 65, 8),
+        BlockPos::new(-1, 65, 7),
+        BlockPos::new(-1, 65, 9),
+    ] {
+        let _ = s.apply_block_edit(MutationCause::Test, wall, BlockStateId::new(1));
+    }
+    s.enable_water(4096, true).expect("water owner");
+    for _ in 0..200 {
+        assert!(!s.run_tick().iter().any(|output| matches!(
+            output,
+            GameOutput::BlockChanged {
+                cause: MutationCause::Fluid,
+                ..
+            }
+        )));
+    }
+    assert_eq!(s.water_queue_len(), Some(0), "closed source stayed asleep");
+    assert_eq!(s.loaded_chunks().loaded_count(), 1);
+    water_floor(&mut s, 0, 15).await;
+    s.wake_water_chunk(ChunkPos::new(0, 0))
+        .expect("actual arrival");
+    let outputs: Vec<_> = (0..200).flat_map(|_| s.run_tick()).collect();
+    assert_eq!(
+        state_id_to_block_name(s.authoritative_state(BlockPos::new(0, 65, 8)).as_u32()),
+        Some("water")
+    );
+    assert!(outputs.iter().any(|output| matches!(output,
+        GameOutput::BlockChanged { position, cause: MutationCause::Fluid, .. }
+        if *position == BlockPos::new(0,65,8)
+    )));
+    assert_eq!(s.loaded_chunks().loaded_count(), 2);
+}
+
+#[tokio::test]
+async fn water_owner_stored_orphan_flow_decays_after_restart_without_saved_tick_queue() {
+    use ferrumc_storage::WorldStore;
+    let store = InMemoryStore::new();
+    let mut s = shard();
+    water_floor(&mut s, 0, 15).await;
+    let source = BlockPos::new(8, 65, 8);
+    let _ = s.apply_block_edit(MutationCause::Test, source, water_state());
+    s.enable_water(4096, true).expect("water owner");
+    for _ in 0..200 {
+        let _ = s.run_tick();
+    }
+    assert_eq!(
+        state_id_to_block_name(s.authoritative_state(BlockPos::new(9, 65, 8)).as_u32()),
+        Some("water")
+    );
+    store
+        .save_chunks(s.loaded_chunks_mut().take_dirty())
+        .await
+        .expect("actual serialized full record");
+    drop(s);
+    let mut restored = shard();
+    restored
+        .loaded_chunks_mut()
+        .acquire(
+            &store,
+            &FlatWorldGenerator::new(),
+            ChunkPos::new(0, 0),
+            ChunkTicket::of(TicketReason::Player),
+        )
+        .await
+        .expect("actual stored admission");
+    assert_eq!(restored.authoritative_state(source), water_state());
+    let _ = restored.apply_block_edit(MutationCause::Test, source, BlockStateId::AIR);
+    restored
+        .enable_water(4096, true)
+        .expect("fresh owner resumes final states");
+    for _ in 0..240 {
+        let _ = restored.run_tick();
+    }
+    for x in 0..16 {
+        for z in 0..16 {
+            assert!(
+                restored
+                    .authoritative_state(BlockPos::new(x, 65, z))
+                    .is_air(),
+                "remaining {x}/{z}"
+            );
+        }
+    }
+    assert!(restored
+        .take_mutations()
+        .iter()
+        .any(|edit| matches!(edit.cause(), MutationCause::Fluid)));
+    assert!(restored.loaded_chunks().has_persist_dirty());
+    assert_eq!(restored.loaded_chunks().loaded_count(), 1);
+}
+
+#[tokio::test]
+async fn water_owner_enclosed_resident_lake_does_not_exhaust_small_tick_queue() {
+    let mut s = shard();
+    water_floor(&mut s, 0, 15).await;
+    for x in 0..16 {
+        for z in 0..16 {
+            let _ = s.apply_block_edit(MutationCause::Test, BlockPos::new(x, 65, z), water_state());
+        }
+    }
+    s.enable_water(1, true).expect("one queued-cell budget");
+    for _ in 0..100 {
+        assert!(!s.run_tick().iter().any(|output| matches!(
+            output,
+            GameOutput::WaterTickDeferred { .. }
+                | GameOutput::BlockChanged {
+                    cause: MutationCause::Fluid,
+                    ..
+                }
+        )));
+        assert_eq!(s.water_queue_len(), Some(0));
+    }
+    assert!(s.water.as_ref().expect("owner").discovery.is_empty());
+    assert_eq!(s.loaded_chunks().loaded_count(), 1);
+}
+
+#[tokio::test]
+async fn water_owner_frontier_pressure_keeps_exact_discovery_cursor_and_progresses_within_cap() {
+    let mut s = shard_with_loaded_chunk(ChunkPos::new(0, 0)).await;
+    for x in 0..16 {
+        for z in 0..16 {
+            let _ =
+                s.apply_block_edit(MutationCause::Test, BlockPos::new(x, 319, z), water_state());
+        }
+    }
+    // A one-cell drop terminates the cascade within this finite fixture. An
+    // open255-block waterfall legitimately owns its credits far longer.
+    for x in 0..16 {
+        for z in 0..16 {
+            let _ = s.apply_block_edit(
+                MutationCause::Test,
+                BlockPos::new(x, 317, z),
+                BlockStateId::new(1),
+            );
+        }
+    }
+    s.enable_water(64, true).expect("finite flow credits");
+    let first = s.run_tick();
+    assert!(!first.iter().any(|output| matches!(
+        output,
+        GameOutput::BlockChanged {
+            cause: MutationCause::Fluid,
+            ..
+        }
+    )));
+    let initial_cursor = s
+        .water
+        .as_ref()
+        .expect("water")
+        .discovery
+        .get(&ChunkPos::new(0, 0))
+        .expect("unfinished column")
+        .cell;
+    assert_eq!(
+        initial_cursor, 32,
+        "discovery reserves complete flow headroom"
+    );
+    assert_eq!(s.water_queue_len(), Some(32));
+    let _ = s.run_tick();
+    assert_eq!(
+        s.water
+            .as_ref()
+            .expect("water")
+            .discovery
+            .get(&ChunkPos::new(0, 0))
+            .expect("retained column")
+            .cell,
+        initial_cursor,
+        "refusal must retain exactly the unadmitted source cell"
+    );
+    let mut changed = false;
+    for _ in 0..200 {
+        changed |= s.run_tick().iter().any(|output| {
+            matches!(
+                output,
+                GameOutput::BlockChanged {
+                    cause: MutationCause::Fluid,
+                    ..
+                }
+            )
+        });
+        assert!(s.water_queue_len().expect("queue") <= 64);
+        assert!(s.water.as_ref().expect("water").discovery.len() <= 4096);
+    }
+    assert!(
+        changed,
+        "genuine due water must progress despite discovery pressure"
+    );
+    assert!(s
+        .water
+        .as_ref()
+        .expect("water")
+        .discovery
+        .get(&ChunkPos::new(0, 0))
+        .is_none_or(|cursor| cursor.cell > initial_cursor));
+    assert_eq!(
+        s.authoritative_state(BlockPos::new(0, 319, 2)),
+        water_state(),
+        "source retained"
+    );
+    assert_eq!(
+        s.loaded_chunks().loaded_count(),
+        1,
+        "no forced column acquisition"
+    );
+}

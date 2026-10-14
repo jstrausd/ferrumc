@@ -1079,6 +1079,9 @@ impl SimShard {
                     // session (it is keyed by player and bounded only per-player).
                     self.undo_history.remove(&player);
                     self.cancel_mining(&mut outputs, player);
+                    if let Some(snapshot) = self.player_vitals(player) {
+                        outputs.push(GameOutput::PlayerDepartureVitals { player, snapshot });
+                    }
                     if self.players.remove(&player).is_some() {
                         outputs.push(GameOutput::PlayerDespawned { player });
                     }
@@ -1128,6 +1131,9 @@ impl SimShard {
                 GameInput::MiningToolChanged { player, tool } => {
                     self.update_attack_item(player, tool.held_item());
                     self.update_mining_tool(&mut outputs, player, tool);
+                }
+                GameInput::MiningEnvironmentChanged { player, on_ground } => {
+                    self.update_mining_environment(player, on_ground);
                 }
                 GameInput::BlockPlace {
                     player,

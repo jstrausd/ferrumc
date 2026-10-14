@@ -4,7 +4,7 @@ use super::{
     block_change_output, try_encode_block_entity, within_reach, BlockEntity, BlockPos,
     BlockStateId, GameMode, GameOutput, MutationCause, MutationResult, PlayerId, SimShard, Vec3,
 };
-use crate::mining::{ordinary_drop, ore_experience};
+use crate::mining::{mined_drop, ore_experience, property_value};
 use crate::MiningTool;
 
 const MAX_MINING_ACTIONS: usize = 128;
@@ -20,6 +20,9 @@ pub(super) struct MiningWork {
     fresh: bool,
     stage: i8,
 }
+
+#[cfg(test)]
+mod tests;
 
 impl SimShard {
     pub(super) fn start_mining(
@@ -75,6 +78,10 @@ impl SimShard {
             outputs.push(GameOutput::BlockActionAcknowledged { player, sequence });
             return;
         }
+        let Some(tool) = self.refresh_mining_environment(player, tool) else {
+            self.reject_mining(outputs, player, position, sequence);
+            return;
+        };
         let Some(profile) = tool.profile(previous_state) else {
             self.reject_mining(outputs, player, position, sequence);
             return;
@@ -144,6 +151,16 @@ impl SimShard {
             self.release_unused_tool(outputs, player, work.tool.token());
             return;
         }
+        let Some(tool) = self.refresh_mining_environment(player, tool) else {
+            outputs.push(GameOutput::MiningProgress {
+                player,
+                position: work.position,
+                stage: -1,
+            });
+            self.reject_mining(outputs, player, position, sequence);
+            self.release_unused_tool(outputs, player, work.tool.token());
+            return;
+        };
         work.sequence = sequence;
         work.tool = tool;
         let progress = tool
@@ -179,6 +196,75 @@ impl SimShard {
         self.cancel_mining(outputs, player);
     }
 
+    /// Updates genuine client movement grounding without replacing the tool witness.
+    /// Water is refreshed from the resident standing-eye fluid state during progress.
+    pub(super) fn update_mining_environment(&mut self, player: PlayerId, on_ground: bool) {
+        if let Some(work) = self.mining_work.get_mut(&player) {
+            work.tool = work.tool.with_environment(on_ground, false);
+        }
+    }
+
+    fn refresh_mining_environment(&self, player: PlayerId, tool: MiningTool) -> Option<MiningTool> {
+        let Some(water) = self.water.as_ref() else {
+            // Metadata-free legacy callers retain their explicit supplied context.
+            return Some(tool);
+        };
+        let position = self.players.get(&player)?.position;
+        // This consumer supports the existing standing body. Crouching/swimming
+        // eye heights and boats require the corresponding authoritative pose owner.
+        let eye_y = position.y + f64::from(1.62_f32);
+        let cell = BlockPos::new(
+            position.x.floor() as i32,
+            eye_y.floor() as i32,
+            position.z.floor() as i32,
+        );
+        let submerged = if let Some(state) = self
+            .chunks
+            .get(cell.to_chunk_pos())
+            .and_then(|chunk| chunk.get_block(cell))
+        {
+            let above = BlockPos::new(cell.x(), cell.y().checked_add(1)?, cell.z());
+            let above = self
+                .chunks
+                .get(above.to_chunk_pos())
+                .and_then(|chunk| chunk.get_block(above));
+            water
+                .rules
+                .eye_in_water(state, above, eye_y - f64::from(cell.y()))
+                .ok()?
+        } else {
+            // Missing columns are never force-loaded for a fluid eye query.
+            false
+        };
+        Some(tool.with_environment(tool.on_ground(), submerged))
+    }
+
+    fn intact_mining_plant_half(
+        &self,
+        position: BlockPos,
+        state: BlockStateId,
+    ) -> Option<BlockPos> {
+        let name = ferrumc_registry::block_state::state_id_to_block_name(state.as_u32())?;
+        if !matches!(name, "tall_grass" | "large_fern") {
+            return None;
+        }
+        let metadata = ferrumc_registry::block_state::block_metadata(name)?;
+        let half = property_value(metadata, state.as_u32(), "half")?;
+        let (other_y, other_half) = match half {
+            "lower" => (position.y().checked_add(1)?, "upper"),
+            "upper" => (position.y().checked_sub(1)?, "lower"),
+            _ => return None,
+        };
+        let other = BlockPos::new(position.x(), other_y, position.z());
+        let other_state = self.chunks.get(other.to_chunk_pos())?.get_block(other)?;
+        if ferrumc_registry::block_state::state_id_to_block_name(other_state.as_u32()) != Some(name)
+            || property_value(metadata, other_state.as_u32(), "half") != Some(other_half)
+        {
+            return None;
+        }
+        Some(other)
+    }
+
     fn mining_is_valid(&self, player: PlayerId, work: MiningWork) -> bool {
         self.players.get(&player).is_some_and(|actor| {
             actor.is_alive()
@@ -210,6 +296,17 @@ impl SimShard {
                 self.mining_work.insert(player, work);
                 continue;
             }
+            let Some(tool) = self.refresh_mining_environment(player, work.tool) else {
+                outputs.push(GameOutput::MiningProgress {
+                    player,
+                    position: work.position,
+                    stage: -1,
+                });
+                self.reject_mining(outputs, player, work.position, work.sequence);
+                self.release_unused_tool(outputs, player, work.tool.token());
+                continue;
+            };
+            work.tool = tool;
             work.elapsed = work.elapsed.saturating_add(1);
             let progress = work
                 .tool
@@ -299,6 +396,16 @@ impl SimShard {
             self.reject_mining(outputs, player, work.position, work.sequence);
             return;
         };
+        let other_half = self.intact_mining_plant_half(work.position, work.previous_state);
+        if other_half.is_some_and(|position| {
+            self.chunks
+                .get(position.to_chunk_pos())
+                .and_then(|chunk| chunk.block_entity(position))
+                .is_some()
+        }) {
+            self.reject_mining(outputs, player, work.position, work.sequence);
+            return;
+        }
         // Container contents must survive the block-entity cleanup. Complete
         // original codec admission precedes cloning and the ground reservation.
         let mut drops = Vec::new();
@@ -322,7 +429,12 @@ impl SimShard {
         }
         let mut random = self.mining_random;
         let experience = if profile.correct {
-            if let Some(drop) = ordinary_drop(work.previous_state, &mut random) {
+            if let Some(drop) = mined_drop(
+                work.previous_state,
+                work.tool,
+                other_half.is_some(),
+                &mut random,
+            ) {
                 drops.push(drop);
             }
             ore_experience(work.previous_state, &mut random)
@@ -345,8 +457,16 @@ impl SimShard {
                 return;
             }
         }
+        let mut changes = vec![(work.position, BlockStateId::AIR)];
+        if let Some(position) = other_half {
+            changes.push((position, BlockStateId::AIR));
+        }
+        if !self.mining_is_valid(player, work) || self.prepare_water_changes(&changes).is_err() {
+            self.reject_mining(outputs, player, work.position, work.sequence);
+            return;
+        }
         let cause = MutationCause::PlayerCreative { player };
-        let result = self.apply_block_edit(cause, work.position, BlockStateId::AIR);
+        let result = self.apply_block_edit_prepared(cause, work.position, BlockStateId::AIR, true);
         if let Some(output) = block_change_output(
             cause,
             work.sequence,
@@ -362,6 +482,23 @@ impl SimShard {
             stage: -1,
         });
         if matches!(result, MutationResult::Applied { .. }) {
+            if let Some(position) = other_half {
+                // The original pair was validated before either edit. Like a
+                // door's extra cell, its neighbor removal broadcasts without an
+                // additional action acknowledgement and uses the same edit funnel.
+                let cause = MutationCause::Command;
+                let result =
+                    self.apply_block_edit_prepared(cause, position, BlockStateId::AIR, true);
+                assert!(
+                    matches!(result, MutationResult::Applied { .. }),
+                    "prevalidated plant half removal refused: {result:?}"
+                );
+                if let Some(output) =
+                    block_change_output(cause, 0, position, BlockStateId::AIR, result)
+                {
+                    outputs.push(output);
+                }
+            }
             self.mining_random = random;
             if let Some(ground) = self.ground_items.as_mut() {
                 let position = Vec3::new(
@@ -398,6 +535,9 @@ impl SimShard {
                 tool_damage: profile.tool_damage,
             });
             self.update_fence_neighbors(outputs, work.position);
+            if let Some(position) = other_half {
+                self.update_fence_neighbors(outputs, position);
+            }
         }
     }
 }

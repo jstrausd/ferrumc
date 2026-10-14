@@ -1,8 +1,10 @@
 //! Bounded ordinary water ticks committed by the actual shard edit owner.
 
+mod discovery;
+
 use super::{block_change_output, within_reach, MutationCause, MutationResult, SimShard};
 use crate::ground_items::MAX_GROUND_REGIONS;
-use crate::water_runtime::WaterRuntime;
+use crate::water_runtime::{WaterRuntime, WaterSweep};
 use crate::{
     BlockStateId, GameOutput, GroundItemDrop, WaterError, WaterRules, WaterTickQueue,
     WATER_TICK_DELAY,
@@ -10,12 +12,13 @@ use crate::{
 use ferrumc_core::{GameMode, PlayerId};
 use ferrumc_items::ItemStack;
 use ferrumc_math::{BlockPos, Vec3};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 impl SimShard {
     /// Selects bounded legacy water gameplay using pinned static collision facts.
-    /// Existing natural sources wake through edits or explicit `WaterSchedule`
-    /// inputs; no chunk is force-loaded. Native durable ownership is exclusive.
+    /// Existing resident water is discovered with bounded resumable work. Later
+    /// column arrivals use `wake_water_chunk`; no column is force-loaded. Native
+    /// durable ownership is exclusive.
     pub fn enable_water(
         &mut self,
         capacity: usize,
@@ -37,6 +40,13 @@ impl SimShard {
             conversion: source_conversion,
             rules,
             queue,
+            discovery: BTreeMap::new(),
+            discovery_cursor: None,
+            sweep: WaterSweep {
+                active: true,
+                restart: false,
+                after: None,
+            },
         });
         Ok(())
     }
@@ -201,6 +211,7 @@ impl SimShard {
         let Some(mut water) = self.water.take() else {
             return;
         };
+        self.discover_water(&mut water);
         for _ in 0..64 {
             let position = match water.queue.pop_due(water.now, 1) {
                 Ok(mut due) => match due.pop() {
