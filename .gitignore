@@ -5,6 +5,7 @@
 __pycache__/
 /.codex-tmp/
 /local-natural/
+/local-play/
 **/*.rs.bk
 
 # IDE

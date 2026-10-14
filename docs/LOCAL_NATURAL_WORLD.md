@@ -1,72 +1,74 @@
-# Local natural Overworld preview
+# Local natural Survival world
 
-The `ferrumc_natural_preview` preset connects the accepted Minecraft Java
-1.21.8 / Paper build 60 numerical producers to the running Rust server:
-noise materials, genuine biomes, surface rules and cold caves/ravines. It is
-an explicit algorithm-2, revision-1 terrain preview, with seed 0 in the local
-configuration. Ordinary new-server defaults remain `ferrumc_flat`.
+The normal launcher selects `ferrumc_natural_playable`: versioned natural
+terrain, biomes, surfaces, caves, vegetation, trees, ores and the implemented
+surface structures. It uses seed 0 for a new local save. The underlying
+server default remains `ferrumc_flat` when no world profile is configured.
 
 ## Run locally
 
-The launcher selects the newer executable from `local-natural/ferrumc` and
-`server/target/release/ferrumc`, or the only available one. An explicit
-`FERRUMC_SERVER_BIN` overrides this selection. It prints the selected path
-before starting. From the repository root:
-
-New configurations select revision4 Survival terrain with grass, trees and ores.
-Existing configurations and stored generation identities are retained.
+From the repository root, the normal startup needs no arguments:
 
 ```sh
-./scripts/run-natural-preview.sh
+./start.sh
 ```
+
+Fresh runs create `local-play/config.toml` and save in `local-play/world/`.
+They select `ferrumc_natural_playable`, the latest revision with grass, trees,
+ores and the implemented structure subset. `RUST_LOG=debug` is the default;
+set `RUST_LOG=info` if you want less output. The old `local-natural/` previews
+are left intact, so a previously terrain-only config is not accidentally
+selected as the normal play world.
 
 Connect a **Minecraft Java 1.21.8** client to **localhost:25566**, or this host's
-address from another machine. Minecraft and the enabled web dashboard bind to
+address from another machine. Minecraft and an enabled web dashboard bind to
 `0.0.0.0`; the launcher enforces this for existing configs too. Stop with
- Ctrl-C to flush world/player changes before restarting. A second process cannot
-open the same world database. The launcher runs in the foreground; its output
-appears in your terminal.
+Ctrl-C and wait for the process to exit so world/player changes are saved.
+A second process cannot open the same database.
 
-The launcher creates `local-natural/config.toml` only if absent and keeps
-the save in `local-natural/world/`. It does not replace an existing server
-world. Edit the local config while stopped. Natural spawn Y is selected on
-a dry surface in the configured spawn ring; configured X/Z guide the search.
-An all-water ring fails startup with an actionable error.
-
-For another accepted release executable or a separate test directory:
-
-```sh
-FERRUMC_SERVER_BIN=/absolute/path/to/ferrumc \
-FERRUMC_NATURAL_DIR=/absolute/path/to/fresh-preview \
-FERRUMC_NATURAL_PORT=25568 ./scripts/run-natural-preview.sh
-```
-
-On another clean accepted checkout:
+After updating a checkout, build once and then use the same short startup:
 
 ```sh
 git pull --ff-only
 cargo build --manifest-path server/Cargo.toml --release --locked -p ferrumc-app
-FERRUMC_SERVER_BIN="$PWD/server/target/release/ferrumc" ./scripts/run-natural-preview.sh
+./start.sh
 ```
 
-Building updates `server/target/release/ferrumc`; it does not replace a previously
-installed `local-natural/ferrumc`. The explicit path above also works with older
-launchers. For a custom Cargo target directory, set `FERRUMC_SERVER_BIN` to its
-actual executable. The launcher uses existing binaries and never builds source.
-Do not append `--bind`: both listeners already bind to `0.0.0.0`. Select a
-different Minecraft port with `FERRUMC_NATURAL_PORT`.
+The launcher prefers `server/target/release/ferrumc` and falls back to
+`local-natural/ferrumc` when no ordinary release build is available. It prints the executable,
+configuration, generator and logging filter before starting. Building refreshes
+`server/target/release/ferrumc`; no binary environment variable is needed for
+that ordinary build. The launcher never builds source automatically.
+For a custom Cargo target directory, set `FERRUMC_SERVER_BIN` to its executable.
+
+Existing configurations and world generation identities are always kept.
+Renaming a terrain-only directory to `tree-preview` does not change its generator.
+If an explicitly selected legacy config uses an older preset, the launcher
+shows that preset and explains how to select a fresh directory. It does not
+rewrite old terrain, player edits or configs. Natural spawn Y is selected on
+a dry surface in the configured spawn ring; configured X/Z guide the search.
+An all-water ring fails startup with an actionable error.
+
+Optional overrides are available when needed:
+
+```sh
+FERRUMC_SERVER_BIN=/absolute/path/to/ferrumc \
+FERRUMC_NATURAL_DIR=/absolute/path/to/fresh-world \
+FERRUMC_NATURAL_PORT=25568 ./start.sh
+```
+
+Use `./start.sh --help` for all settings. Do not append
+`--bind`: both listeners already bind to `0.0.0.0`. Fresh configs leave the
+web dashboard disabled; enable `dashboard_enabled` while the server is stopped
+if you want it. Its configured default port is 9090.
 
 ## Survival terrain preview
 
-Use a fresh directory for revision4, which includes terrain, biomes, surfaces,
-caves, short grass, bounded oak/birch trees and placed ores:
+The no-arguments launcher creates the latest playable generator. To test it in
+an additional fresh world, only select a separate directory:
 
 ```sh
-cargo build --manifest-path server/Cargo.toml --release --locked -p ferrumc-app
-FERRUMC_SERVER_BIN="$PWD/server/target/release/ferrumc" \
-FERRUMC_NATURAL_DIR="$PWD/local-natural/survival-preview" \
-FERRUMC_NATURAL_PRESET=ferrumc_natural_survival_preview \
-./scripts/run-natural-preview.sh
+FERRUMC_NATURAL_DIR="$PWD/local-play-second" ./start.sh
 ```
 
 Fresh players start in Survival with an empty inventory. The native preview
@@ -76,7 +78,7 @@ sheep/cow/pig/chicken/zombie gameplay. Its separate `entity-runtime.redb`
 sidecar retains canonical item/mob identities and mob health on graceful stop.
 Use Ctrl-C and wait for the process to exit before reopening the same save.
 Entity, player and block writes are separate; this is not crash-atomic pickup
-or death persistence. Complete mob AI, all item actions, lava physics, structures,
+or death persistence. Complete mob AI, all item actions, lava physics, the full structure catalog,
 Redstone, complete Vanilla/Paper behavior and the full Java-plugin API remain unfinished.
 
 The same stored preset must be retained on restart. Setting the environment
@@ -94,7 +96,7 @@ chunk_stream_interval_ms = 50
 
 [world]
 seed = 0
-preset = "ferrumc_natural_survival_preview"
+preset = "ferrumc_natural_playable"
 ```
 
 A stored generation identity remains authoritative. Omitting seed/preset on
@@ -121,7 +123,7 @@ To test the optional grass revision, create a separate fresh directory and set
 ```sh
 FERRUMC_NATURAL_DIR="$PWD/local-natural/grass-preview" \
 FERRUMC_NATURAL_PRESET=ferrumc_natural_grass_preview \
-./scripts/run-natural-preview.sh
+./start.sh
 ```
 
 The preset variable selects newly created configuration only. Existing revision-1
@@ -137,7 +139,7 @@ Use a new directory if that name already contains a terrain-only world:
 ```sh
 FERRUMC_NATURAL_DIR="$PWD/local-natural/tree-preview-v3" \
 FERRUMC_NATURAL_PRESET=ferrumc_natural_tree_preview \
-./scripts/run-natural-preview.sh
+./start.sh
 ```
 
 This selects a separately versioned tree subset; existing revision-1/2 saves
@@ -158,11 +160,7 @@ message alone does not identify a process crash. For a reproducible log:
 
 ```sh
 set -o pipefail
-RUST_BACKTRACE=1 RUST_LOG=info \
-FERRUMC_SERVER_BIN="$PWD/server/target/release/ferrumc" \
-FERRUMC_NATURAL_DIR="$PWD/local-natural/tree-preview-v3" \
-FERRUMC_NATURAL_PRESET=ferrumc_natural_tree_preview \
-./scripts/run-natural-preview.sh 2>&1 | tee tree-preview.log
+RUST_BACKTRACE=1 ./start.sh 2>&1 | tee server.log
 ```
 
 This keeps existing saves and configs. A preset environment variable cannot
@@ -176,7 +174,9 @@ offset bamboo/dripstone/moving-piston shapes remain unsupported and fail closed.
 ## Preview limits
 
 - The Survival preset adds a bounded ordinary ore subset; complete feature
-  chronology and structures remain unfinished. Older revisions keep their
+  chronology and the full structure catalog remain unfinished. The playable
+  profile adds desert wells, swamp huts and native abandoned cabins with loot.
+  Older revisions keep their
   original ore population. Material-stage ore veins remain present. An optional `ferrumc_natural_grass_preview`
   preset adds original isolated plains/forest short-grass features (revision 2).
   This is a subset, not complete vegetation or full feature chronology.
