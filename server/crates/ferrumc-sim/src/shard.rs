@@ -2344,6 +2344,80 @@ impl SimShard {
         Some((chest_after, player_after))
     }
 
+    /// Atomically commits one checked ordinary chest drag's complete postimage.
+    ///
+    /// Native ownership, absent/dead/spectator actors, reach/residency and invalid
+    /// models refuse. A conflicting exact FCIS chest beforeimage returns fresh
+    /// chest contents with the unchanged player slots/cursor. Complete persisted
+    /// chest validation precedes the single replacement and dirty mark; no slot
+    /// can commit partially. The App must admit its full player save before call.
+    #[allow(clippy::too_many_arguments)] // one exact owner operation and its bounded beforeimages
+    pub fn container_drag_checked(
+        &mut self,
+        player: PlayerId,
+        position: BlockPos,
+        player_slots: &[ItemStack],
+        cursor: &ItemStack,
+        expected_slots: &[ItemStack],
+        selection: &[usize],
+        right: bool,
+    ) -> Option<ferrumc_items::ChestDragPlan> {
+        if self.player_ownership.is_some() {
+            return None;
+        }
+        let actor = self.players.get(&player)?;
+        if !actor.is_alive()
+            || actor.game_mode == GameMode::Spectator
+            || !within_reach(actor.position, position)
+        {
+            return None;
+        }
+        let chunk = self.chunks.get_mut(position.to_chunk_pos())?;
+        if !is_chest_state(chunk.get_block(position)?.as_u32()) {
+            return None;
+        }
+        let entity @ BlockEntity::Chest(chest) = chunk.block_entity(position)? else {
+            return None;
+        };
+        let mut before = Vec::new();
+        try_encode_block_entity(entity, &mut before).ok()?;
+        if expected_slots.len() != ferrumc_world::CHEST_SLOTS {
+            return None;
+        }
+        let mut matches = true;
+        for (actual, expected) in chest.slots().iter().zip(expected_slots) {
+            matches &=
+                encode_persisted_stack(actual).ok()? == encode_persisted_stack(expected).ok()?;
+        }
+        let unchanged =
+            || ferrumc_items::plan_chest_drag(chest.slots(), player_slots, cursor, &[], right).ok();
+        if !matches {
+            return unchanged();
+        }
+        let plan =
+            ferrumc_items::plan_chest_drag(chest.slots(), player_slots, cursor, selection, right)
+                .ok()?;
+        let (chest_after, player_after, cursor_after) = plan.into_parts();
+        let mut candidate_chest = ChestInventory::new();
+        for (index, stack) in chest_after.iter().enumerate() {
+            *candidate_chest.slot_mut(index)? = stack.clone();
+        }
+        let candidate = BlockEntity::Chest(candidate_chest);
+        let mut after = Vec::new();
+        if try_encode_block_entity(&candidate, &mut after).is_err() {
+            return unchanged();
+        }
+        // Produce the validated owned receipt before publishing any mutation.
+        let receipt =
+            ferrumc_items::plan_chest_drag(&chest_after, &player_after, &cursor_after, &[], right)
+                .ok()?;
+        if before != after {
+            *chunk.block_entity_mut(position)? = candidate;
+            chunk.mark_persist_dirty(position);
+        }
+        Some(receipt)
+    }
+
     /// Refines a player placement's held state into the final block-state using
     /// the resident chunks as the neighbour query, or `None` for an
     /// unsupported/unrecognised block.
@@ -5786,6 +5860,124 @@ mod tests {
             .loaded_chunks()
             .get(position.to_chunk_pos())
             .expect("resident")
+            .persist_dirty_sections()
+            .any());
+    }
+
+    #[tokio::test]
+    async fn chest_drag_commits_all_sections_once_and_conflict_retains_every_item() {
+        let p = player("drag_trader");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let expected = s.container_open(p, position).unwrap();
+        let inventory = vec![ItemStack::empty(); 36];
+        let cursor = stack("diamond", 5);
+        let (chest, after, carried) = s
+            .container_drag_checked(
+                p,
+                position,
+                &inventory,
+                &cursor,
+                &expected,
+                &[0, 1, 27],
+                true,
+            )
+            .unwrap()
+            .into_parts();
+        assert_eq!(chest[0], stack("diamond", 1));
+        assert_eq!(chest[1], stack("diamond", 1));
+        assert_eq!(after[0], stack("diamond", 1));
+        assert_eq!(carried, stack("diamond", 2));
+        assert_eq!(s.container_open(p, position).unwrap(), chest);
+        let _ = s.loaded_chunks_mut().take_persist_dirty(0);
+        // Another viewer's edit invalidates the entire three-part proposal.
+        let refusal = s
+            .container_drag_checked(
+                p,
+                position,
+                &inventory,
+                &cursor,
+                &expected,
+                &[2, 3, 28],
+                true,
+            )
+            .unwrap()
+            .into_parts();
+        assert_eq!(refusal, (chest.clone(), inventory.clone(), cursor.clone()));
+        assert!(s
+            .container_drag_checked(p, position, &inventory, &cursor, &chest, &[2, 2], true,)
+            .is_none());
+        assert!(s
+            .container_drag_checked(
+                player("absent"),
+                position,
+                &inventory,
+                &cursor,
+                &chest,
+                &[2],
+                true,
+            )
+            .is_none());
+        s.players.get_mut(&p).unwrap().game_mode = GameMode::Spectator;
+        assert!(s
+            .container_drag_checked(p, position, &inventory, &cursor, &chest, &[2], true,)
+            .is_none());
+        assert_eq!(s.container_open(p, position).unwrap(), chest);
+        assert!(!s
+            .loaded_chunks()
+            .get(position.to_chunk_pos())
+            .unwrap()
+            .persist_dirty_sections()
+            .any());
+    }
+
+    #[tokio::test]
+    async fn chest_drag_complete_persisted_budget_refuses_without_partial_slots_or_dirty() {
+        let p = player("bounded_drag");
+        let mut s = shard_with_player(p).await;
+        let position = BlockPos::new(8, 65, 8);
+        let _ = place_block(
+            &mut s,
+            p,
+            position,
+            chest_state(),
+            Direction::Up,
+            1.0,
+            0.0,
+            1,
+        );
+        let expected = s.container_open(p, position).unwrap();
+        let _ = s.loaded_chunks_mut().take_persist_dirty(0);
+        let inventory = vec![ItemStack::empty(); 36];
+        let cursor = component_heavy_stack();
+        let refused = s
+            .container_drag_checked(
+                p,
+                position,
+                &inventory,
+                &cursor,
+                &expected,
+                &[0, 1, 27],
+                true,
+            )
+            .unwrap()
+            .into_parts();
+        assert_eq!(refused, (expected.clone(), inventory, cursor));
+        assert_eq!(s.container_open(p, position).unwrap(), expected);
+        assert!(!s
+            .loaded_chunks()
+            .get(position.to_chunk_pos())
+            .unwrap()
             .persist_dirty_sections()
             .any());
     }

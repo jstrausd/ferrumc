@@ -802,3 +802,11 @@
   metadata or final entity removal, retaining the prior wire stack and viewer
   identity for the client pickup animation. Admission and reserved byte/slot
   settlement finish first; refused remainder restoration publishes no collect.
+
+- Legacy chest drag compares the entire exact FCIS beforeimage and stages the
+  whole chest/player/cursor result under the existing exclusive owner. Current
+  and candidate entities must fit the existing 16 KiB persistence cap before
+  one replacement/dirty mark. Conflict/budget refusal publishes fresh chest
+  with unchanged player slots/cursor and no partial slot or dirty mutation.
+  Absent/dead/spectator actors, reach/residency and native ownership refuse.
+  App must admit its complete hidden player/table save budget before calling.

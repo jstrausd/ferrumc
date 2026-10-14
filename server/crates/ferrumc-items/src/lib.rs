@@ -31,8 +31,8 @@ pub mod wire;
 
 pub use component::{ComponentPatch, ComponentTypeId, ComponentValue, OpaqueComponent};
 pub use container::{
-    exchange_slot, plan_chest_inventory_click, stack_capacity, transfer_into_slots,
-    ContainerTransferError,
+    exchange_slot, plan_chest_drag, plan_chest_inventory_click, stack_capacity,
+    transfer_into_slots, ChestDragPlan, ContainerTransferError,
 };
 pub use crafting::{CraftingError, CraftingGrid, NormalRecipe, NormalRecipes, SingleCraftPlan};
 pub use item_id::ItemId;

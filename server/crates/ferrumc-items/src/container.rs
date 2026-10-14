@@ -149,6 +149,134 @@ pub fn plan_chest_inventory_click(
     Ok((chest, player))
 }
 
+/// Complete bounded chest/player/cursor postimages for one drag operation.
+/// This pure snapshot grants no owner, revision, persistence or commit authority.
+pub struct ChestDragPlan {
+    chest: Vec<ItemStack>,
+    player: Vec<ItemStack>,
+    cursor: ItemStack,
+}
+
+impl ChestDragPlan {
+    /// Borrows the complete player-window postimage for consumer admission.
+    pub fn player(&self) -> &[ItemStack] {
+        &self.player
+    }
+
+    /// Borrows the carried-stack postimage for consumer admission.
+    pub fn cursor(&self) -> &ItemStack {
+        &self.cursor
+    }
+
+    /// Transfers all three postimages to the exclusive consumer together.
+    pub fn into_parts(self) -> (Vec<ItemStack>, Vec<ItemStack>, ItemStack) {
+        (self.chest, self.player, self.cursor)
+    }
+}
+
+/// Plans ordinary left/right drag distribution in a single 27+36 chest screen.
+///
+/// Selection contains at most 63 unique valid window indices. Right drag places
+/// one per selected compatible slot; left drag distributes the original cursor
+/// count evenly. Full or incompatible slots retain their contents and share.
+/// All models/caps and the one-MiB complete encoded input/output budgets pass before any
+/// clone. A complete staged postimage preserves exact components and quantities.
+pub fn plan_chest_drag(
+    chest: &[ItemStack],
+    player: &[ItemStack],
+    cursor: &ItemStack,
+    selection: &[usize],
+    right: bool,
+) -> Result<ChestDragPlan, ContainerTransferError> {
+    if chest.len() != 27 || player.len() != 36 || selection.len() > 63 {
+        return Err(ContainerTransferError::InvalidShape);
+    }
+    let mut selected = [false; 63];
+    for &index in selection {
+        let Some(previous) = selected.get_mut(index) else {
+            return Err(ContainerTransferError::InvalidShape);
+        };
+        if *previous {
+            return Err(ContainerTransferError::InvalidShape);
+        }
+        *previous = true;
+    }
+    let mut bytes = 0usize;
+    for stack in chest.iter().chain(player).chain(std::iter::once(cursor)) {
+        bytes = bytes
+            .checked_add(persisted_stack_size(stack)?)
+            .ok_or(ContainerTransferError::BudgetExceeded)?;
+        if bytes > 1024 * 1024 {
+            return Err(ContainerTransferError::BudgetExceeded);
+        }
+        stack_capacity(stack)?;
+    }
+    let per_slot = if right {
+        1
+    } else if selection.is_empty() {
+        0
+    } else {
+        cursor.count() / selection.len() as u8
+    };
+    // Splitting into empty slots repeats the entire component representation.
+    // Forecast the complete postimage without allocating those copies first.
+    let cursor_bytes = persisted_stack_size(cursor)?;
+    let mut remaining = cursor.count();
+    for &index in selection {
+        let destination = if index < 27 {
+            &chest[index]
+        } else {
+            &player[index - 27]
+        };
+        if remaining == 0
+            || (destination.item().is_some()
+                && !crate::same_stack_representation(cursor, destination)?)
+        {
+            continue;
+        }
+        let capacity = if destination.item().is_none() {
+            stack_capacity(cursor)?
+        } else {
+            stack_capacity(destination)?
+        };
+        let moved = per_slot.min(remaining).min(capacity - destination.count());
+        if moved != 0 && destination.item().is_none() {
+            bytes = bytes
+                .checked_add(cursor_bytes - persisted_stack_size(destination)?)
+                .ok_or(ContainerTransferError::BudgetExceeded)?;
+        }
+        remaining -= moved;
+    }
+    if cursor.item().is_some() && remaining == 0 {
+        bytes -= cursor_bytes - persisted_stack_size(&ItemStack::empty())?;
+    }
+    if bytes > 1024 * 1024 {
+        return Err(ContainerTransferError::BudgetExceeded);
+    }
+    let mut plan = ChestDragPlan {
+        chest: chest.to_vec(),
+        player: player.to_vec(),
+        cursor: cursor.clone(),
+    };
+    for &index in selection {
+        let destination = if index < 27 {
+            &mut plan.chest[index]
+        } else {
+            &mut plan.player[index - 27]
+        };
+        let capacity = if destination.item().is_none() {
+            stack_capacity(cursor)?
+        } else {
+            stack_capacity(destination)?
+        };
+        let transfer = plan_transfer(&plan.cursor, destination, per_slot, capacity)?;
+        let (remaining, after) = transfer.into_stacks();
+        plan.cursor = remaining;
+        *destination = after;
+    }
+    Ok(plan)
+}
+
 /// Plans an ordinary left/right slot exchange using exact components and caps.
 /// Both postimages publish together; refused or malformed models stay unchanged.
 pub fn exchange_slot(
@@ -211,6 +339,67 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn chest_drag_preserves_component_caps_and_every_postimage() {
+        let mut chest = vec![ItemStack::empty(); 27];
+        let player = vec![ItemStack::empty(); 36];
+        chest[0] = stack(15, 16);
+        chest[1] = stack(16, 16);
+        chest[2] = stack(1, 8); // incompatible exact max-stack component
+        let cursor = stack(10, 16);
+        let plan = plan_chest_drag(&chest, &player, &cursor, &[0, 1, 2, 3, 27], true).unwrap();
+        let (after, player_after, carried) = plan.into_parts();
+        assert_eq!(after[0], stack(16, 16));
+        assert_eq!(after[1], chest[1]);
+        assert_eq!(after[2], chest[2]);
+        assert_eq!(after[3], stack(1, 16));
+        assert_eq!(player_after[0], stack(1, 16));
+        assert_eq!(carried, stack(7, 16));
+        let (after, player_after, carried) =
+            plan_chest_drag(&chest, &player, &cursor, &[0, 3, 27], false)
+                .unwrap()
+                .into_parts();
+        assert_eq!(after[0], stack(16, 16)); // clipped share remains carried
+        assert_eq!(after[3], stack(3, 16));
+        assert_eq!(player_after[0], stack(3, 16));
+        assert_eq!(carried, stack(3, 16));
+        assert_eq!(chest[0], stack(15, 16));
+        for selection in [vec![0, 0], vec![63], vec![0; 64]] {
+            assert!(plan_chest_drag(&chest, &player, &cursor, &selection, true).is_err());
+        }
+        assert!(plan_chest_drag(&chest[..26], &player, &cursor, &[0], true).is_err());
+    }
+
+    #[test]
+    fn chest_drag_component_replication_exceeds_budget_before_any_output_clone() {
+        let components = [6, 7, 8, 9]
+            .into_iter()
+            .map(|id| {
+                crate::ComponentValue::Opaque(
+                    crate::OpaqueComponent::new(id, vec![0; 8192]).unwrap(),
+                )
+            })
+            .collect();
+        let cursor = ItemStack::try_new(
+            ItemId::from_name("stone").unwrap(),
+            63,
+            ComponentPatch::new(components, vec![]),
+        )
+        .unwrap();
+        let chest = vec![ItemStack::empty(); 27];
+        let player = vec![ItemStack::empty(); 36];
+        let indices: Vec<_> = (0..63).collect();
+        assert!(matches!(
+            plan_chest_drag(&chest, &player, &cursor, &indices, true),
+            Err(ContainerTransferError::BudgetExceeded)
+        ));
+        assert_eq!(cursor.count(), 63);
+        assert!(chest
+            .iter()
+            .chain(&player)
+            .all(|stack| stack.item().is_none()));
+    }
+
     #[test]
     fn shift_moves_both_directions_with_component_limits_and_reverse_order() {
         let mut chest = vec![ItemStack::empty(); 27];

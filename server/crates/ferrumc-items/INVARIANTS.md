@@ -137,3 +137,11 @@
 - The consumer owns input-identity progress resets, simultaneous postimage
   commit, exclusive loaded-chunk/tick/revision authority, lit block writes,
   durability, menus and persistence. No World dependency is added to Items.
+
+- Ordinary chest drag planning accepts exactly 27+36 slots, one cursor and at
+  most 63 unique valid selected indices. All input models/effective capacities
+  and one MiB aggregate persisted input/output bytes pass before any clone.
+  Component replication into empty slots is forecast without allocations. Left/right drag
+  shares exact representations through non-swapping transfer plans, retaining
+  clipped/incompatible shares on the cursor. The complete plan has no revision,
+  event or commit authority; Creative middle-fill is not implemented.
