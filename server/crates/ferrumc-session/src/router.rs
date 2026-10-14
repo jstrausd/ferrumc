@@ -57,6 +57,12 @@ pub const DEFAULT_SHARD_CONTROL_RESERVE: usize = 16;
 /// full queue is the caller's cue to disconnect a client that cannot keep up.
 pub const DEFAULT_OUTBOUND_CAPACITY: usize = 256;
 
+// Lossy state must not consume the whole bounded FIFO immediately before an
+// acknowledgement, health update or entity lifecycle packet needs admission.
+// Small custom channels retain their historic usable slots; production's
+// 256-entry FIFO keeps 64 slots for mandatory traffic without growing it.
+const MAX_OUTBOUND_MANDATORY_RESERVE: usize = 64;
+
 /// Default view distance, in chunks, scoping which viewers a player is broadcast
 /// to.
 ///
@@ -451,6 +457,19 @@ impl SessionRouter {
     /// The configured per-player outbound channel capacity.
     pub fn outbound_capacity(&self) -> usize {
         self.outbound_capacity
+    }
+
+    /// Returns the occupied outbound FIFO slots for an active legacy session.
+    ///
+    /// This is transport admission state, separate from the connection writer's
+    /// priority queues. `None` means that the router already removed the session.
+    pub fn player_outbound_queue_len(&self, player: PlayerId) -> Option<usize> {
+        self.players.get(&player).map(|entry| {
+            entry
+                .outbound
+                .max_capacity()
+                .saturating_sub(entry.outbound.capacity())
+        })
     }
 
     /// The view distance, in chunks, used to scope visibility broadcasts.
@@ -1365,9 +1384,27 @@ impl SessionRouter {
         player: PlayerId,
         to_disconnect: &mut Vec<PlayerId>,
     ) {
+        if Self::try_send_droppable(entry, player, packet).is_err() {
+            to_disconnect.push(player);
+        }
+    }
+
+    fn try_send_droppable(
+        entry: &SessionEntry,
+        player: PlayerId,
+        packet: ClientboundPlayPacket,
+    ) -> Result<bool, SessionError> {
+        if entry.outbound.is_closed() {
+            return Err(SessionError::OutboundClosed { player });
+        }
+        let reserve = (entry.outbound.max_capacity() / 4).min(MAX_OUTBOUND_MANDATORY_RESERVE);
+        if entry.outbound.capacity() <= reserve {
+            return Ok(false);
+        }
         match entry.outbound.try_send(OutboundMessage::droppable(packet)) {
-            Ok(()) | Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Closed(_)) => to_disconnect.push(player),
+            Ok(()) => Ok(true),
+            Err(TrySendError::Full(_)) => Ok(false),
+            Err(TrySendError::Closed(_)) => Err(SessionError::OutboundClosed { player }),
         }
     }
 
@@ -1471,10 +1508,10 @@ impl SessionRouter {
                     // carrier plus a head turn, all droppable.
                     let packet =
                         relative_or_teleport_with_rotation(mover_eid, last, position, yaw, pitch);
-                    match entry.outbound.try_send(OutboundMessage::droppable(packet)) {
+                    match Self::try_send_droppable(entry, viewer, packet) {
                         // Advance the delivered baseline only on success (the
                         // self-correcting invariant; see the method and field docs).
-                        Ok(()) => {
+                        Ok(true) => {
                             entry.delivered.insert(mover_eid, position);
                             Self::send_droppable(
                                 entry,
@@ -1483,8 +1520,8 @@ impl SessionRouter {
                                 to_disconnect,
                             );
                         }
-                        Err(TrySendError::Full(_)) => {}
-                        Err(TrySendError::Closed(_)) => to_disconnect.push(viewer),
+                        Ok(false) => {}
+                        Err(_) => to_disconnect.push(viewer),
                     }
                 } else {
                     // Rotation only: turn the body and head in place, baseline
@@ -1558,9 +1595,7 @@ impl SessionRouter {
                 continue;
             }
             if entry.delivered.contains_key(&subject_eid) {
-                let _ = entry
-                    .outbound
-                    .try_send(OutboundMessage::droppable(packet.clone()));
+                let _ = Self::try_send_droppable(entry, viewer, packet.clone());
             }
         }
     }
@@ -1835,10 +1870,8 @@ impl SessionRouter {
     /// fails.
     pub fn broadcast_system_chat(&self, component: &TextComponent, overlay: bool) {
         let packet = crate::system_chat(component, overlay);
-        for entry in self.players.values() {
-            let _ = entry
-                .outbound
-                .try_send(OutboundMessage::droppable(packet.clone()));
+        for (&player, entry) in &self.players {
+            let _ = Self::try_send_droppable(entry, player, packet.clone());
         }
     }
 
@@ -1860,7 +1893,7 @@ impl SessionRouter {
     pub fn send_system_chat_to(&self, player: PlayerId, component: &TextComponent, overlay: bool) {
         if let Some(entry) = self.players.get(&player) {
             let packet = crate::system_chat(component, overlay);
-            let _ = entry.outbound.try_send(OutboundMessage::droppable(packet));
+            let _ = Self::try_send_droppable(entry, player, packet);
         }
     }
 
@@ -1878,10 +1911,8 @@ impl SessionRouter {
     /// recipient whose outbound channel is *full* or *closed* simply misses the
     /// packet. This never blocks and never fails.
     pub fn broadcast_play_packet(&self, packet: &ClientboundPlayPacket) {
-        for entry in self.players.values() {
-            let _ = entry
-                .outbound
-                .try_send(OutboundMessage::droppable(packet.clone()));
+        for (&player, entry) in &self.players {
+            let _ = Self::try_send_droppable(entry, player, packet.clone());
         }
     }
 
@@ -1898,9 +1929,80 @@ impl SessionRouter {
     /// Best-effort and lossy: a recipient whose outbound channel is *full* or
     /// *closed* simply misses the packet. This never blocks and never fails.
     pub fn send_play_packet_to(&self, player: PlayerId, packet: ClientboundPlayPacket) {
-        if let Some(entry) = self.players.get(&player) {
-            let _ = entry.outbound.try_send(OutboundMessage::droppable(packet));
+        let _ = self.try_send_play_packet_to(player, packet);
+    }
+
+    /// Attempts a droppable targeted packet while preserving mandatory headroom.
+    ///
+    /// Returns `true` only after FIFO admission. `false` means bounded lossy
+    /// backpressure; a projection must retain its previous delivered baseline so
+    /// a later absolute update can heal it. Ordinary traffic reserves one quarter
+    /// of the existing channel, capped at 64 slots, for mandatory packets.
+    ///
+    /// # Errors
+    /// Returns an unknown-player or closed-channel error. This never starts a
+    /// leave cascade; the caller owns the corresponding teardown policy.
+    pub fn try_send_play_packet_to(
+        &self,
+        player: PlayerId,
+        packet: ClientboundPlayPacket,
+    ) -> Result<bool, SessionError> {
+        let entry = self
+            .players
+            .get(&player)
+            .ok_or(SessionError::UnknownPlayer { player })?;
+        Self::try_send_droppable(entry, player, packet)
+    }
+
+    /// Atomically admits a deferrable pair of ordered mandatory packets.
+    ///
+    /// A new entity's spawn and metadata use this boundary so a full queue cannot
+    /// expose a partially initialized entity. The pair leaves the same reserved
+    /// tail as droppable traffic for later mandatory updates, across every caller
+    /// sharing this FIFO. Failure admits neither packet; the caller may defer an
+    /// entity that the viewer has never seen. Already visible mandatory changes
+    /// retain their normal disconnect-on-refusal policy.
+    ///
+    /// # Errors
+    /// Returns an unknown-player, full-channel or closed-channel error. Full also
+    /// means the pair would consume the reserved mandatory headroom.
+    pub fn send_gameplay_pair_to(
+        &self,
+        player: PlayerId,
+        first: ClientboundPlayPacket,
+        second: ClientboundPlayPacket,
+    ) -> Result<(), SessionError> {
+        let entry = self
+            .players
+            .get(&player)
+            .ok_or(SessionError::UnknownPlayer { player })?;
+        if entry.outbound.is_closed() {
+            return Err(SessionError::OutboundClosed { player });
         }
+        let reserve = (entry.outbound.max_capacity() / 4).min(MAX_OUTBOUND_MANDATORY_RESERVE);
+        let mut permits = entry
+            .outbound
+            .try_reserve_many(2)
+            .map_err(|error| match error {
+                TrySendError::Full(()) => SessionError::OutboundFull { player },
+                TrySendError::Closed(()) => SessionError::OutboundClosed { player },
+            })?;
+        if entry.outbound.capacity() < reserve {
+            // Dropping both unconsumed permits returns all reserved slots. The
+            // viewer has seen neither packet and can safely retry the whole pair.
+            return Err(SessionError::OutboundFull { player });
+        }
+        // try_reserve_many(2) grants exactly two permits. The explicit branches
+        // keep the invariant checked without panicking in production.
+        let Some(first_permit) = permits.next() else {
+            return Err(SessionError::OutboundFull { player });
+        };
+        let Some(second_permit) = permits.next() else {
+            return Err(SessionError::OutboundFull { player });
+        };
+        first_permit.send(OutboundMessage::mandatory(first));
+        second_permit.send(OutboundMessage::mandatory(second));
+        Ok(())
     }
 
     /// Enqueues a mandatory targeted gameplay packet without mutating bindings.
@@ -2232,6 +2334,96 @@ mod tests {
     /// Spawn position inside shard (0, 0): chunk 0, well within blocks 0..128.
     fn spawn_pos() -> Vec3 {
         Vec3::new(8.0, 64.0, 8.0)
+    }
+
+    #[test]
+    fn lossy_entity_pressure_preserves_default_fifo_for_mandatory_outputs() {
+        let mut router = SessionRouter::new();
+        let _inbox = router.register_shard(ShardPos::new(0, 0));
+        let actor = player("lossy-pressure");
+        let mut handle = router
+            .join_player(actor, "lossy-pressure", spawn_pos())
+            .unwrap();
+        for _ in 0..1024 {
+            router.send_play_packet_to(actor, entity_teleport_shell(10, spawn_pos(), 0.0, 0.0));
+        }
+        assert_eq!(router.player_outbound_queue_len(actor), Some(192));
+        for sequence in 0..64 {
+            assert_eq!(
+                router.route_output(&GameOutput::BlockActionAcknowledged {
+                    player: actor,
+                    sequence,
+                }),
+                Vec::<PlayerId>::new()
+            );
+        }
+        assert_eq!(
+            router.player_outbound_queue_len(actor),
+            Some(DEFAULT_OUTBOUND_CAPACITY)
+        );
+        // A genuinely stalled mandatory consumer retains the original slow-peer
+        // policy, even after lossy traffic has stopped at its reserved boundary.
+        assert_eq!(
+            router.route_output(&GameOutput::BlockActionAcknowledged {
+                player: actor,
+                sequence: 64,
+            }),
+            vec![actor]
+        );
+        let mut lossy = 0;
+        let mut mandatory = 0;
+        while let Some(message) = handle.try_recv() {
+            match message.criticality() {
+                Criticality::Droppable => lossy += 1,
+                Criticality::Mandatory => mandatory += 1,
+            }
+        }
+        assert_eq!((lossy, mandatory), (192, 64));
+    }
+
+    #[test]
+    fn targeted_pair_refuses_before_any_partial_admission_then_keeps_fifo() {
+        let mut router = SessionRouter::with_capacities(1024, 2);
+        let _inbox = router.register_shard(ShardPos::new(0, 0));
+        let actor = player("pair-pressure");
+        let mut handle = router
+            .join_player(actor, "pair-pressure", spawn_pos())
+            .unwrap();
+        router.send_gameplay_packet_to(actor, ack_shell(1)).unwrap();
+        assert!(
+            matches!(router.send_gameplay_pair_to(actor, ack_shell(2), ack_shell(3)),
+            Err(SessionError::OutboundFull { player }) if player == actor)
+        );
+        assert_eq!(router.player_outbound_queue_len(actor), Some(1));
+        let ClientboundPlayPacket::AcknowledgeBlockChange(first) =
+            handle.try_recv().unwrap().into_packet()
+        else {
+            panic!("the preexisting packet must be the sole queued message");
+        };
+        assert_eq!(first.sequence(), 1);
+        assert!(handle.try_recv().is_none());
+        router
+            .send_gameplay_pair_to(actor, ack_shell(2), ack_shell(3))
+            .unwrap();
+        for expected in [2, 3] {
+            let message = handle.try_recv().unwrap();
+            assert_eq!(message.criticality(), Criticality::Mandatory);
+            assert_eq!(message.priority(), OutboundPriority::State);
+            let ClientboundPlayPacket::AcknowledgeBlockChange(ack) = message.into_packet() else {
+                panic!("expected ordered acknowledgements");
+            };
+            assert_eq!(ack.sequence(), expected);
+        }
+        assert!(handle.try_recv().is_none());
+        drop(handle);
+        assert!(
+            matches!(router.try_send_play_packet_to(actor, ack_shell(4)),
+            Err(SessionError::OutboundClosed { player }) if player == actor)
+        );
+        assert!(
+            matches!(router.send_gameplay_pair_to(actor, ack_shell(4), ack_shell(5)),
+            Err(SessionError::OutboundClosed { player }) if player == actor)
+        );
     }
 
     #[test]

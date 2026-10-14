@@ -115,6 +115,20 @@
   fixed reserved tail for join/leave/reject control traffic. A rejected input is
   returned with its typed delivery policy and classified `SessionError`, never
   silently dropped.
+- Legacy outbound droppable traffic stops with one quarter of the existing
+  FIFO, capped at 64 slots, still free for mandatory traffic. Capacity1..3 has
+  no fractional reserve. No queue grows and mandatory refusal still requires
+  teardown; this reserve cannot guarantee arbitrary mandatory burst admission.
+  `try_send_play_packet_to` reports actual FIFO admission, so viewer consumers
+  advance delivered movement baselines only on `true`. Full returns `false`;
+  closed and unknown sessions remain classified errors.
+- `send_gameplay_pair_to` reserves two FIFO slots before admitting either
+  ordered mandatory packet and leaves the same mandatory tail as droppable
+  traffic, shared across all consumers. Full also covers reserved headroom;
+  refusal admits neither, allowing a bounded consumer to defer an entity the
+  viewer has never seen. This is not permission
+  to lose metadata or removal for already visible entities. The connection
+  still escalates a refused admitted mandatory packet at the writer boundary.
 - A lifecycle leave rejected during a slow-client cascade remains represented in
   a player-bounded pending-disconnect set until an explicit retry accepts it;
   cascade errors are never reduced to a log line or discarded result.
